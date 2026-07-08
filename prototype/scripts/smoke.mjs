@@ -103,6 +103,12 @@ try {
   assertState(initial.clips >= 4, `expected at least 4 filled clips, got ${initial.clips}`);
   assertState(initial.drums, "drum clip missing");
 
+  await tap(page, ".tbtn.play");
+  await page.waitForFunction(() => document.querySelectorAll(".clip.playing").length >= 4);
+  const playOn = await page.$eval(".tbtn.play", (el) => el.classList.contains("on"));
+  assertState(playOn, "play button did not enter playing state");
+  await tap(page, ".tbtn.play");
+
   await longPress(page, '.clip.filled[data-track="drums"]');
   await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Clip Properties");
   await tap(page, '[data-action="mode-oneshot"]');

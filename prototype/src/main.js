@@ -136,7 +136,12 @@ function renderTransport() {
         if (audio.playing) audio.stop();
         else audio.playArrangement(arrPlayBar);
       } else {
-        audio.toggle();
+        if (audio.playing) audio.stop();
+        else {
+          const sceneIndex = playingScene >= 0 ? playingScene : 0;
+          audio.launchScene(sceneIndex);
+          setPlaying(sceneIndex);
+        }
       }
       updatePlayBtn(audio.playing);
     },
