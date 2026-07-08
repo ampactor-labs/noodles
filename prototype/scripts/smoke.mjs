@@ -122,6 +122,16 @@ try {
   const arrange = await page.$eval("#app", (app) => app.classList.contains("arrange"));
   assertState(arrange, "arrangement view did not open");
 
+  // The transport must actually advance — not merely flip the play button on.
+  // Regression guard for the dual-context bug: play() started a transport the
+  // clock loop wasn't scheduled on, so nothing sounded and the playhead froze.
+  await tap(page, ".tbtn.play");
+  const playhead = () => page.evaluate(() => document.querySelector(".arr-playhead")?.style.transform ?? "");
+  const phStart = await playhead();
+  await wait(800);
+  const phEnd = await playhead();
+  assertState(phStart !== phEnd, `transport stalled: playhead did not advance (${phStart} -> ${phEnd})`);
+
   await page.screenshot({ path: shotPath, fullPage: true });
   assertState(errors.length === 0, `runtime errors:\n${errors.join("\n")}`);
   console.log(`smoke ok: ${propsShotPath}`);

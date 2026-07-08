@@ -40,6 +40,12 @@ export function createAudio(song) {
   // Favor throughput over latency on weak mobile CPUs — a bigger buffer absorbs
   // CPU jitter and prevents xruns. Must be set before any node is created.
   Tone.setContext(new Tone.Context({ latencyHint: "playback" }));
+  // setContext swaps the active context, so the clock loop below binds to the
+  // NEW context's transport. The deprecated Tone.Transport / Tone.Draw globals
+  // still point at the original context — driving playback through them starts a
+  // transport the loop isn't on (silent, no playhead). Bind to the live context.
+  const transport = Tone.getTransport();
+  const draw = Tone.getDraw();
   const master = new Tone.Limiter(-1).toDestination();
   // Algorithmic (Freeverb) instead of convolution — far cheaper per sample on a
   // low-end mobile CPU, and fine for a send reverb.
@@ -158,9 +164,9 @@ export function createAudio(song) {
   let arrStep = 0;
   let visualCb = () => {};
 
-  Tone.Transport.bpm.value = song.tempo;
-  Tone.Transport.swingSubdivision = "16n";
-  Tone.Transport.swing = song.swing ?? 0;
+  transport.bpm.value = song.tempo;
+  transport.swingSubdivision = "16n";
+  transport.swing = song.swing ?? 0;
 
   function tickArrangement(time) {
     const len = arrangeLength(song);
@@ -172,7 +178,7 @@ export function createAudio(song) {
         const sc = song.scenes[h.scene];
         const ci = sc.harmony[(bar - h.start) % sc.harmony.length];
         playChord(ci, time);
-        Tone.Draw.schedule(() => visualCb({ type: "arrchord", bar, chord: ci }), time);
+        draw.schedule(() => visualCb({ type: "arrchord", bar, chord: ci }), time);
       }
     }
     const d = clipAt(song, "drums", bar);
@@ -187,7 +193,7 @@ export function createAudio(song) {
         if (n) (trk === "bass" ? playBass : playLead)(n, time);
       }
     }
-    Tone.Draw.schedule(() => visualCb({ type: "arr", bar, stepInBar, len }), time);
+    draw.schedule(() => visualCb({ type: "arr", bar, stepInBar, len }), time);
     arrStep += 1;
     const loop = song.loop;
     if (loop && loop.on) {
@@ -262,7 +268,7 @@ export function createAudio(song) {
       if (stepInBar === 0) {
         const ci = harmonyScene.harmony[bar];
         playChord(ci, time);
-        Tone.Draw.schedule(() => visualCb({ type: "chord", scene: harmonyState.scene, bar, chord: ci, activeScenes: activeBefore }), time);
+        draw.schedule(() => visualCb({ type: "chord", scene: harmonyState.scene, bar, chord: ci, activeScenes: activeBefore }), time);
       }
     }
 
@@ -273,7 +279,7 @@ export function createAudio(song) {
       for (const v of DRUM_VOICES) {
         if (drumScene.drums[v][stepInBar]) {
           hitDrum(v, time);
-          Tone.Draw.schedule(() => visualCb({ type: "hit", scene: drumState.scene, voice: v, step: stepInBar, activeScenes: activeBefore }), time);
+          draw.schedule(() => visualCb({ type: "hit", scene: drumState.scene, voice: v, step: stepInBar, activeScenes: activeBefore }), time);
         }
       }
     }
@@ -289,7 +295,7 @@ export function createAudio(song) {
 
     for (const track of TRACK_KEYS) advanceSceneTrack(track);
     const activeAfter = activeScenes();
-    Tone.Draw.schedule(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeAfter }), time);
+    draw.schedule(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeAfter }), time);
   }, "16n");
 
   let playing = false;
@@ -304,11 +310,11 @@ export function createAudio(song) {
       clock.start(0);
     },
     play() {
-      Tone.Transport.start();
+      transport.start();
       playing = true;
     },
     stop() {
-      Tone.Transport.pause();
+      transport.pause();
       playing = false;
     },
     toggle() {
@@ -324,7 +330,7 @@ export function createAudio(song) {
       focusIndex = index;
       curScene = index;
       for (const track of TRACK_KEYS) resetTrack(track, index);
-      Tone.Draw.schedule(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes() }), Tone.now());
+      draw.schedule(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes() }), Tone.now());
       if (!playing) this.play();
     },
     launchClip(index, track) {
@@ -333,7 +339,7 @@ export function createAudio(song) {
       curScene = index;
       if (!playing) for (const key of TRACK_KEYS) trackState[key].active = false;
       resetTrack(track, index);
-      Tone.Draw.schedule(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes() }), Tone.now());
+      draw.schedule(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes() }), Tone.now());
       if (!playing) this.play();
     },
     playArrangement(fromBar = 0) {
@@ -359,10 +365,10 @@ export function createAudio(song) {
       }
     },
     setTempo(bpm) {
-      Tone.Transport.bpm.rampTo(bpm, 0.1);
+      transport.bpm.rampTo(bpm, 0.1);
     },
     setSwing(v) {
-      Tone.Transport.swing = v;
+      transport.swing = v;
     },
     preview,
     previewHit(v) {
