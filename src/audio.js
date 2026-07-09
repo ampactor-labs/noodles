@@ -47,10 +47,10 @@ const HARMONY_PRESETS = {
 export const HARMONY_PRESET_NAMES = Object.keys(HARMONY_PRESETS);
 
 const BASS_PRESETS = {
-  deep:   { wave: "sine",     cutoff: 500,  attack: 0.01,  decay: 0.3,  sustain: 0.7,  release: 0.3, gain: 0 },
-  bright: { wave: "sawtooth", cutoff: 2500, attack: 0.02,  decay: 0.15, sustain: 0.4,  release: 0.2, gain: -6 },
-  pluck:  { wave: "square",   cutoff: 1500, attack: 0.005, decay: 0.1,  sustain: 0.0,  release: 0.1, gain: -5 },
-  sub:    { wave: "triangle", cutoff: 350,  attack: 0.05,  decay: 0.4,  sustain: 1.0,  release: 0.4, gain: 2 },
+  deep:   { wave: "sine",     cutoff: 500,  attack: 0.01,  decay: 0.3,  sustain: 0.7,  release: 0.3, gain: 0, drive: 0, detune: 0 },
+  bright: { wave: "sawtooth", cutoff: 2500, attack: 0.02,  decay: 0.15, sustain: 0.4,  release: 0.2, gain: 8, drive: 0.2, detune: -1200 },
+  pluck:  { wave: "fmsquare", cutoff: 1800, attack: 0.001, decay: 0.2,  sustain: 0.1,  release: 0.1, gain: -2, drive: 0.5, detune: 0 },
+  sub:    { wave: "triangle", cutoff: 350,  attack: 0.05,  decay: 0.4,  sustain: 1.0,  release: 0.4, gain: 4, drive: 0.35, detune: 0 },
 };
 export const BASS_PRESET_NAMES = Object.keys(BASS_PRESETS);
 
@@ -213,14 +213,16 @@ export function createAudio(song) {
   }).connect(rootHintFilter);
 
   // Bass + lead — device params live-adjustable.
-  const bassHighpass = new Tone.Filter({ type: "highpass", frequency: 34, Q: 0.7 }).connect(channels.bass);
+  const bassEQ = new Tone.EQ3({ low: 5, mid: -3, high: 0, lowFrequency: 70, highFrequency: 800 }).connect(channels.bass);
+  const bassHighpass = new Tone.Filter({ type: "highpass", frequency: 34, Q: 0.7 }).connect(bassEQ);
   const bassFilter = new Tone.Filter({ type: "lowpass", frequency: 750, Q: 0.9 }).connect(bassHighpass);
+  const bassDrive = new Tone.Distortion(0).connect(bassFilter);
   const bassTrk = new Tone.PolySynth(Tone.Synth, {
     maxPolyphony: 6,
     oscillator: { type: "sawtooth" },
     envelope: { attack: 0.02, decay: 0.2, sustain: 0.6, release: 0.25 },
     volume: SOURCE_LEVEL_DB.bass,
-  }).connect(bassFilter);
+  }).connect(bassDrive);
   const leadHighpass = new Tone.Filter({ type: "highpass", frequency: 180, Q: 0.7 }).connect(channels.melody);
   const leadFilter = new Tone.Filter({ type: "lowpass", frequency: 3200, Q: 0.6 }).connect(leadHighpass);
   const lead = new Tone.PolySynth(Tone.Synth, {
@@ -237,8 +239,10 @@ export function createAudio(song) {
   function applyBassPreset(name) {
     const p = BASS_PRESETS[name] || BASS_PRESETS.deep;
     devices.bass.preset = name; devices.bass.wave = p.wave; devices.bass.cutoff = p.cutoff;
-    bassTrk.set({ oscillator: { type: p.wave }, envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release } });
+    bassTrk.set({ oscillator: { type: p.wave, detune: p.detune || 0 }, envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release } });
+    if (p.wave === "fmsquare") bassTrk.set({ oscillator: { modulationType: "sawtooth", harmonicity: 0.5, modulationIndex: 2 } });
     bassFilter.frequency.rampTo(p.cutoff, 0.05);
+    bassDrive.distortion = p.drive || 0;
     bassTrk.volume.value = SOURCE_LEVEL_DB.bass + p.gain;
   }
   function applyMelodyPreset(name) {
@@ -730,9 +734,12 @@ export function createAudio(song) {
         const offSub = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.08, decay: 0.4, sustain: 0.85, release: 1.6 }, volume: SOURCE_LEVEL_DB.harmonyRoot }).connect(offRootHp);
 
         const bp = BASS_PRESETS[devices.bass.preset] || BASS_PRESETS.deep;
-        const offBHp = new Tone.Filter({ type: "highpass", frequency: 34, Q: 0.7 }).connect(offCh.bass);
+        const offBEq = new Tone.EQ3({ low: 5, mid: -3, high: 0, lowFrequency: 70, highFrequency: 800 }).connect(offCh.bass);
+        const offBHp = new Tone.Filter({ type: "highpass", frequency: 34, Q: 0.7 }).connect(offBEq);
         const offBF = new Tone.Filter({ type: "lowpass", frequency: bp.cutoff, Q: 0.9 }).connect(offBHp);
-        const offBass = new Tone.PolySynth(Tone.Synth, { maxPolyphony: 6, oscillator: { type: bp.wave }, envelope: { attack: bp.attack, decay: bp.decay, sustain: bp.sustain, release: bp.release }, volume: SOURCE_LEVEL_DB.bass }).connect(offBF);
+        const offBDrive = new Tone.Distortion(bp.drive || 0).connect(offBF);
+        const offBass = new Tone.PolySynth(Tone.Synth, { maxPolyphony: 6, oscillator: { type: bp.wave, detune: bp.detune || 0 }, envelope: { attack: bp.attack, decay: bp.decay, sustain: bp.sustain, release: bp.release }, volume: SOURCE_LEVEL_DB.bass + (bp.gain || 0) }).connect(offBDrive);
+        if (bp.wave === "fmsquare") offBass.set({ oscillator: { modulationType: "sawtooth", harmonicity: 0.5, modulationIndex: 2 } });
 
         const mp = MELODY_PRESETS[devices.melody.preset] || MELODY_PRESETS.lead;
         const offLHp = new Tone.Filter({ type: "highpass", frequency: 180, Q: 0.7 }).connect(offCh.melody);
