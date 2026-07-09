@@ -15,11 +15,11 @@ const SEND_OFF_DB = -60;
 const FIRST_PLAY_WARMUP_MS = 400;
 const PLAY_START_LEAD_TIME = "+0.18";
 const SOURCE_LEVEL_DB = {
-  harmonyPad: -10,
-  harmonyHalo: -24,
-  harmonyRoot: -30,
-  bass: -2,
-  melody: 6,
+  harmonyPad: -16,
+  harmonyHalo: -30,
+  harmonyRoot: -36,
+  bass: -6,
+  melody: -4,
   kick: 5,
   snare: 14,
   hat: 5,
@@ -99,12 +99,13 @@ export function createAudio(song) {
   const transport = Tone.getTransport();
   const draw = Tone.getDraw();
   const masterMeter = new Tone.Meter();
-  const masterLimiter = new Tone.Limiter(-1).toDestination();
-  const softClip = new Tone.WaveShaper((x) => Math.tanh(x * 1.35) / Math.tanh(1.35), 2048).connect(masterLimiter);
-  const glue = new Tone.Compressor({ threshold: -20, ratio: 6, attack: 0.025, release: 0.18, knee: 18 }).connect(softClip);
-  const saturation = new Tone.Distortion(0.16).connect(glue);
-  saturation.wet.value = 0.60;
-  const master = new Tone.Gain(Tone.dbToGain(-3)).connect(saturation);
+  const masterLimiter = new Tone.Limiter(-6).toDestination();
+  const makeupGain = new Tone.Gain(Tone.dbToGain(12)).connect(masterLimiter);
+  const softClip = new Tone.WaveShaper((x) => Math.tanh(x * 1.5) / Math.tanh(1.5), 2048).connect(makeupGain);
+  const glue = new Tone.Compressor({ threshold: -24, ratio: 8, attack: 0.015, release: 0.15, knee: 12 }).connect(softClip);
+  const saturation = new Tone.Distortion(0.2).connect(glue);
+  saturation.wet.value = 0.50;
+  const master = new Tone.Gain(Tone.dbToGain(2)).connect(saturation);
   masterLimiter.connect(masterMeter);
   // Algorithmic (Freeverb) instead of convolution — far cheaper per sample on a
   // low-end mobile CPU, and fine for a send reverb.
