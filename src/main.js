@@ -168,8 +168,9 @@ function renderTransport() {
     onclick: () => setView(view === "session" ? "arrangement" : "session"),
   });
   const fileBtn = el("div", { class: "tbtn", text: "File", id: "file-btn", onclick: openExport });
-  const mixBtn = el("div", { class: "view-mix", text: "Mix", id: "mix-btn", onclick: openMixer });
-  transport.append(left, tempo, mixBtn, viewBtn, fileBtn);
+  const mixBtn = el("div", { class: "tbtn", text: "Mix", id: "mix-btn", onclick: openMixer });
+  const tright = el("div", { class: "tright" }, [mixBtn, viewBtn, fileBtn]);
+  transport.append(left, tempo, tright);
   updateUndoButtons();
   renderFooter();
 }
@@ -193,7 +194,7 @@ function renderFooter() {
     grooveVal.textContent = Math.round(song.swing * 100) + "%";
   });
   const groove = el("div", { class: "swingctl" }, [
-    el("span", { class: "swlabel", text: "Groove" }),
+    el("span", { class: "swlabel", text: "GROOV" }),
     grooveSlider,
     grooveVal,
   ]);
@@ -211,11 +212,11 @@ function renderFooter() {
     scaleSel.appendChild(o);
   });
   scaleSel.addEventListener("change", () => setKeyScale(song.key, scaleSel.value));
-  const keyctl = el("div", { class: "keyctl" }, [el("span", { class: "swlabel", text: "Key" }), keySel, scaleSel]);
+  const keyctl = el("div", { class: "keyctl" }, [keySel, scaleSel]);
   // Magic button: Generate a new inspiring scene
   const magicBtn = el("div", {
     class: "tbtn accent",
-    text: "✨ Magic",
+    text: "Magic",
     id: "magic-btn",
     title: "Generate a new random scene",
     onclick: () => {
@@ -225,19 +226,23 @@ function renderFooter() {
     },
   });
   footer.append(
-    el("div", { class: "frow" }, [keyctl, el("div", { class: "fspacer" }), groove]),
-    el("div", { class: "frow" }, [magicBtn])
+    el("div", { class: "frow" }, [keyctl, el("div", { class: "fspacer" }), groove, el("div", { class: "fspacer" }), magicBtn])
   );
 }
 
 function generateMagicScene() {
-  const dens = { kick: 0.2, snare: 0.1, hat: 0.4, clap: 0.05 };
+  const dens = { kick: 0.32, snare: 0.14, hat: 0.5, clap: 0.12 };
   const drums = {};
   for (const v of ["kick", "snare", "hat", "clap"]) {
     drums[v] = new Array(16).fill(false);
-    for (let s = 0; s < 16; s++) drums[v][s] = Math.random() < dens[v];
+    for (let s = 0; s < 16; s++) {
+      if (v === "kick" && s % 2 !== 0 && Math.random() > 0.1) continue;
+      if (v === "snare" && s % 4 !== 0) continue;
+      drums[v][s] = Math.random() < dens[v];
+    }
   }
   drums.kick[0] = true;
+  drums.kick[8] = true;
   drums.snare[4] = true;
   drums.snare[12] = true;
   
@@ -912,10 +917,10 @@ function openClipProps(sceneIndex, track) {
 // ---------------------------------------------------------------------------
 let mixerRAF = 0;
 const MIX_DEFAULTS = {
-  harmony: { vol: -6, pan: 0, verb: -9, echo: -36, mute: false, solo: false },
-  drums: { vol: 0, pan: 0, verb: -22, echo: -42, mute: false, solo: false },
-  bass: { vol: 0, pan: 0, verb: -48, echo: -60, mute: false, solo: false },
-  melody: { vol: 0, pan: 0, verb: -11, echo: -28, mute: false, solo: false },
+  harmony: { vol: -6, pan: 0, verb: -60, echo: -60, mute: false, solo: false },
+  drums: { vol: -6, pan: 0, verb: -60, echo: -60, mute: false, solo: false },
+  bass: { vol: -6, pan: 0, verb: -60, echo: -60, mute: false, solo: false },
+  melody: { vol: -6, pan: 0, verb: -60, echo: -60, mute: false, solo: false },
 };
 const mixState = structuredClone(MIX_DEFAULTS);
 
@@ -1223,7 +1228,17 @@ function buildDrumEditor(scene) {
       onclick: () => {
         pushUndo();
         const dens = { kick: 0.32, snare: 0.14, hat: 0.5, clap: 0.12 };
-        for (const v of DRUM_VOICES) for (let s = 0; s < 16; s++) scene.drums[v][s] = Math.random() < dens[v];
+        for (const v of DRUM_VOICES) {
+          for (let s = 0; s < 16; s++) {
+            if (v === "kick" && s % 2 !== 0 && Math.random() > 0.1) { scene.drums[v][s] = false; continue; }
+            if (v === "snare" && s % 4 !== 0) { scene.drums[v][s] = false; continue; }
+            scene.drums[v][s] = Math.random() < dens[v];
+          }
+        }
+        scene.drums.kick[0] = true;
+        scene.drums.kick[8] = true;
+        scene.drums.snare[4] = true;
+        scene.drums.snare[12] = true;
         openEditor(editor.scene, "drums");
         refreshClip(editor.scene, "drums");
       },

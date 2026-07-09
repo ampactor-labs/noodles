@@ -94,15 +94,15 @@ export function createAudio(song) {
   const muteState = Object.fromEntries(TRACK_KEYS.map((track) => [track, false]));
   const soloState = Object.fromEntries(TRACK_KEYS.map((track) => [track, false]));
   for (const k of TRACK_KEYS) {
-    const chVol = k === "harmony" ? -6 : 0;
+    const chVol = -6;
     channels[k] = new Tone.Channel({ volume: chVol, pan: 0 }).connect(master);
     meters[k] = new Tone.Meter();
     channels[k].connect(meters[k]);
     verbSends[k] = channels[k].send("verb", -60);
     echoSends[k] = channels[k].send("echo", -60);
   }
-  const verbDefault = { harmony: -9, melody: -11, drums: -22, bass: -48 };
-  const echoDefault = { harmony: -36, melody: -28, drums: -42, bass: -60 };
+  const verbDefault = { harmony: -60, melody: -60, drums: -60, bass: -60 };
+  const echoDefault = { harmony: -60, melody: -60, drums: -60, bass: -60 };
   for (const k of TRACK_KEYS) {
     verbSends[k].gain.value = Tone.dbToGain(verbDefault[k]);
     echoSends[k].gain.value = Tone.dbToGain(echoDefault[k]);
@@ -127,14 +127,15 @@ export function createAudio(song) {
     volume: -16,
   }).connect(padFilter);
 
-  let harmonyPreset = "pad";
+  let harmonyPreset = "keys";
   function applyHarmonyPreset(name) {
-    const p = HARMONY_PRESETS[name] || HARMONY_PRESETS.pad;
+    const p = HARMONY_PRESETS[name] || HARMONY_PRESETS.keys;
     harmonyPreset = name;
     pad.set({ oscillator: { type: p.osc }, envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release } });
-    padFilter.frequency.rampTo(p.filter, 0.05);
+    padFilter.frequency.value = p.filter;
     chorus.set({ wet: p.chorusWet, depth: p.chorusDepth });
   }
+  applyHarmonyPreset("keys");
   // Mono shimmer on the top note (was a 6-voice PolySynth, inaudible at -28 dB).
   const halo = new Tone.Synth({
     oscillator: { type: "sine" },
@@ -231,7 +232,6 @@ export function createAudio(song) {
   let curScene = 0;
   const trackState = Object.fromEntries(TRACK_KEYS.map((track) => [track, { scene: 0, step: 0, active: true }]));
   let arrStep = 0;
-  let sessionStep = 0;
   const queuedTracks = Object.fromEntries(TRACK_KEYS.map((track) => [track, -1]));
   let visualCb = () => {};
 
@@ -332,16 +332,22 @@ export function createAudio(song) {
     if (mode === "arrangement") return tickArrangement(time);
 
     let maxLimitBars = 1;
+    let maxStep = 0;
+    let anyActive = false;
     for (const track of TRACK_KEYS) {
       const st = trackState[track];
       if (st.active && song.scenes[st.scene]) {
+        anyActive = true;
         const launch = clipLaunch(song.scenes[st.scene], track);
         const limitBars = launch.follow !== "none" ? launch.followBars : clipLengthBars(song.scenes[st.scene], track);
-        if (limitBars > maxLimitBars) maxLimitBars = limitBars;
+        if (limitBars >= maxLimitBars) {
+          maxLimitBars = limitBars;
+          maxStep = st.step;
+        }
       }
     }
 
-    if (sessionStep % (maxLimitBars * 16) === 0) {
+    if (!anyActive || maxStep === 0) {
       for (const track of TRACK_KEYS) {
         if (queuedTracks[track] >= 0) {
           resetTrack(track, queuedTracks[track]);
@@ -392,7 +398,6 @@ export function createAudio(song) {
     const activeAfter = activeScenes();
     const queuedAfter = getQueuedTracks();
     draw.schedule(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeAfter, queuedTracks: queuedAfter }), time);
-    sessionStep++;
   }, "16n");
 
   let playing = false;
@@ -431,7 +436,6 @@ export function createAudio(song) {
         curScene = index;
         for (const track of TRACK_KEYS) resetTrack(track, index);
         for (const track of TRACK_KEYS) queuedTracks[track] = -1;
-        sessionStep = 0;
         draw.schedule(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }), Tone.now());
         this.play();
       } else {
@@ -448,7 +452,6 @@ export function createAudio(song) {
         for (const key of TRACK_KEYS) trackState[key].active = false;
         for (const key of TRACK_KEYS) queuedTracks[key] = -1;
         resetTrack(track, index);
-        sessionStep = 0;
         draw.schedule(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }), Tone.now());
         this.play();
       } else {
@@ -499,10 +502,10 @@ export function createAudio(song) {
       channels[track].pan.value = p;
     },
     setSend(track, db) {
-      verbSends[track].gain.value = Tone.dbToGain(db);
+      verbSends[track].gain.value = db <= -59 ? 0 : Tone.dbToGain(db);
     },
     setEcho(track, db) {
-      echoSends[track].gain.value = Tone.dbToGain(db);
+      echoSends[track].gain.value = db <= -59 ? 0 : Tone.dbToGain(db);
     },
     setMute(track, on) {
       if (!(track in channels)) return;
