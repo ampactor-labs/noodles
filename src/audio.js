@@ -15,15 +15,15 @@ const SEND_OFF_DB = -60;
 const FIRST_PLAY_WARMUP_MS = 400;
 const PLAY_START_LEAD_TIME = "+0.18";
 const SOURCE_LEVEL_DB = {
-  harmonyPad: -14,
-  harmonyHalo: -28,
-  harmonyRoot: -34,
-  bass: -6,
-  melody: -3,
-  kick: -8,
-  snare: -4,
-  hat: -10,
-  clap: -7,
+  harmonyPad: -8,
+  harmonyHalo: -22,
+  harmonyRoot: -28,
+  bass: -4,
+  melody: -2,
+  kick: -4,
+  snare: 0,
+  hat: -6,
+  clap: -2,
 };
 const KICK_DUCK_GAIN = Tone.dbToGain(-8);
 const DRUM_PARALLEL_GAIN = Tone.dbToGain(-10);
