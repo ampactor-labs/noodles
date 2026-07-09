@@ -1543,11 +1543,20 @@ function buildPianoEditor(sceneIndex, scene, track) {
     while (m < base) m += 12;
     return m;
   };
+  const scrollToNotes = () => {
+    // Find the first active row or just default to middle if empty
+    const activeRow = scrollContainer.querySelector(".pcell.on")?.closest(".prow");
+    if (activeRow) {
+      scrollContainer.scrollTop = activeRow.offsetTop - scrollContainer.clientHeight / 2 + activeRow.clientHeight / 2;
+    }
+  };
+
   const applyTf = (fn) => {
     pushUndo();
     fn();
     paint();
     refreshClip(sceneIndex, track);
+    scrollToNotes();
   };
   const tf = el("div", { class: "tfrow" }, [
     el("div", {
@@ -1596,7 +1605,33 @@ function buildPianoEditor(sceneIndex, scene, track) {
   ]);
   sheet.appendChild(tf);
 
+  const scrollContainer = el("div", { class: "proll-scroll" });
   const grid = el("div", { class: "proll" });
+  
+  // Custom scroll for desktop wheel
+  scrollContainer.addEventListener("wheel", (e) => {
+    scrollContainer.scrollTop += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
+
+  // Custom touch drag for left key column
+  let scrollDragY = null;
+  scrollContainer.addEventListener("pointerdown", (e) => {
+    const rect = scrollContainer.getBoundingClientRect();
+    if (e.clientX - rect.left < 50) { // Dragging on the key names area
+      scrollDragY = e.clientY;
+      scrollContainer.setPointerCapture(e.pointerId);
+    }
+  });
+  scrollContainer.addEventListener("pointermove", (e) => {
+    if (scrollDragY !== null) {
+      scrollContainer.scrollTop += scrollDragY - e.clientY;
+      scrollDragY = e.clientY;
+    }
+  });
+  scrollContainer.addEventListener("pointerup", () => scrollDragY = null);
+  scrollContainer.addEventListener("pointercancel", () => scrollDragY = null);
+
   const rowCells = []; // [rowIndex][step]
   const cursorCols = Array.from({ length: 16 }, () => []);
 
@@ -1631,7 +1666,8 @@ function buildPianoEditor(sceneIndex, scene, track) {
       ])
     );
   });
-  sheet.appendChild(grid);
+  scrollContainer.appendChild(grid);
+  sheet.appendChild(scrollContainer);
 
   // Velocity lane.
   const vlane = el("div", { class: "vlane" });
@@ -1725,6 +1761,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
   }
 
   paint();
+  setTimeout(scrollToNotes, 20); // wait for layout to settle
   editor.cursorCols = cursorCols;
 }
 
