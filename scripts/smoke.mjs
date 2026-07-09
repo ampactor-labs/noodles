@@ -175,6 +175,10 @@ try {
   await page.waitForFunction(() => document.querySelectorAll(".clip.playing").length >= 4);
   const playOn = await page.$eval(".tbtn.play", (el) => el.classList.contains("on"));
   assertState(playOn, "play button did not enter playing state");
+  await tap(page, "#view-toggle-btn");
+  const stillPlayingAfterView = await page.$eval(".tbtn.play", (el) => el.classList.contains("on"));
+  assertState(stillPlayingAfterView, "view switch stopped playback");
+  await tap(page, "#view-toggle-btn");
   await tap(page, ".tbtn.play");
 
   await longPress(page, '.clip.filled[data-track="drums"]');
@@ -215,7 +219,9 @@ try {
   await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Mixer");
   const mixerText = await page.$eval("#sheet", (el) => el.textContent);
   assertState(mixerText.includes("echo"), "mixer missing echo send");
-  assertState(mixerText.includes("Master") && mixerText.includes("0 dB top") && mixerText.includes("-6 dB"), "mixer missing master scale/default level");
+  assertState(mixerText.includes("Master") && mixerText.includes("-6 dB"), "mixer missing master/default level");
+  const drumKit = await page.$eval('.mx-strip[data-track="drums"] .mx-preset', (el) => el.value);
+  assertState(drumKit === "clean", `default drum kit should be clean, got ${drumKit}`);
   await tap(page, ".tbtn.play");
   const mixerStillOpen = await page.$eval("#sheet", (el) => el.classList.contains("open"));
   assertState(mixerStillOpen, "play/pause dismissed an open sheet");

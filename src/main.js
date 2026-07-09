@@ -423,10 +423,9 @@ function openAddSceneSheet() {
 
 function setView(v) {
   view = v;
-  if (audioReady) audio.stop();
   document.getElementById("app").classList.toggle("arrange", v === "arrangement");
   if (v === "arrangement") {
-    audio.enterArrangement();
+    if (!audio.playing) audio.enterArrangement();
     renderArrangement();
   }
   renderTransport();
@@ -1246,7 +1245,6 @@ function viewMixButton() {
 function meterNode(fill) {
   return el("div", { class: "mx-meter" }, [
     el("div", { class: "mx-meter-scale" }, [
-      el("span", { class: "mx-zero", text: "0" }),
       el("span", { class: "mx-ref", text: "-6" }),
     ]),
     el("div", { class: "mx-meter-track" }, [fill]),
@@ -1404,7 +1402,6 @@ function openMixer(focusTrack = null) {
     el("div", { class: "mx-strip mx-master", style: "--tc:#d2d2d4", "data-track": "master" }, [
       el("div", { class: "mx-name" }, [el("span", { class: "mx-dot" }), el("span", { text: "Master" })]),
       meterNode(masterFill),
-      el("div", { class: "mx-master-chain", text: "0 dB top" }),
     ])
   );
   sheet.appendChild(container);

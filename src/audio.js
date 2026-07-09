@@ -12,7 +12,8 @@ export const TRACK_KEYS = ["harmony", "drums", "bass", "melody"];
 
 const DEFAULT_TRACK_VOLUME_DB = -6;
 const SEND_OFF_DB = -60;
-const FIRST_PLAY_WARMUP_MS = 90;
+const FIRST_PLAY_WARMUP_MS = 220;
+const PLAY_START_LEAD_TIME = "+0.10";
 const SOURCE_LEVEL_DB = {
   harmonyPad: -14,
   harmonyHalo: -28,
@@ -259,7 +260,7 @@ export function createAudio(song) {
     hatFilter.frequency.value = k.hat.resonance;
     clap.set({ envelope: { attack: 0.001, decay: k.clap, sustain: 0 } });
   }
-  applyKit("garage");
+  applyKit("clean");
 
   let prevVoiced = null;
   function playChord(ci, time) {
@@ -494,7 +495,7 @@ export function createAudio(song) {
       clock.start(0);
     },
     play() {
-      transport.start("+0.02");
+      transport.start(PLAY_START_LEAD_TIME);
       playing = true;
     },
     stop() {
