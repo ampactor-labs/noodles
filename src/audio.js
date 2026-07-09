@@ -351,6 +351,13 @@ export function createAudio(song) {
   // transport the loop isn't on (silent, no playhead). Bind to the live context.
   const transport = Tone.getTransport();
   const draw = Tone.getDraw();
+  // Beat-synced visuals fire on the transport clock, but the sound reaches
+  // the ear an output-latency later (large under latencyHint:"playback",
+  // larger again on Bluetooth). Shift them so the eye and the ear agree.
+  const scheduleDraw = (cb, time) => {
+    const raw = Tone.getContext().rawContext;
+    draw.schedule(cb, time + (raw.outputLatency || raw.baseLatency || 0));
+  };
 
   const live = buildGraph({ meters: true });
   const presets = { kit: "clean", harmony: "keys", bass: "deep", melody: "lead" };
@@ -402,8 +409,8 @@ export function createAudio(song) {
     const bar = Math.floor(arrStep / 16);
     const stepInBar = arrStep % 16;
     const chord = playArrangementStepOn(live, presets, liveVoice, song, bar, stepInBar, time);
-    if (chord !== null) draw.schedule(() => visualCb({ type: "arrchord", bar, chord }), time);
-    draw.schedule(() => visualCb({ type: "arr", bar, stepInBar, len }), time);
+    if (chord !== null) scheduleDraw(() => visualCb({ type: "arrchord", bar, chord }), time);
+    scheduleDraw(() => visualCb({ type: "arr", bar, stepInBar, len }), time);
     arrStep += 1;
     const loop = song.loop;
     if (loop && loop.on) {
@@ -432,7 +439,10 @@ export function createAudio(song) {
         const launch = clipLaunch(scene, track);
         const naturalBars = clipLengthBars(scene, track);
         const limitBars = launch.follow !== "none" ? launch.followBars : naturalBars;
-        res[track] = st.step / (limitBars * 16);
+        // Completion of the sounding step, not elapsed-at-its-start: the UI
+        // sweeps toward this value, so the pie reaches 100% exactly when the
+        // loop wraps instead of resetting from 15/16ths full.
+        res[track] = (st.step + 1) / (limitBars * 16);
       }
     }
     return res;
@@ -523,7 +533,7 @@ export function createAudio(song) {
       if (stepInBar === 0) {
         const ci = harmonyScene.harmony[bar];
         playChord(ci, time);
-        draw.schedule(() => visualCb({ type: "chord", scene: harmonyState.scene, bar, chord: ci, activeScenes: activeBefore }), time);
+        scheduleDraw(() => visualCb({ type: "chord", scene: harmonyState.scene, bar, chord: ci, activeScenes: activeBefore }), time);
       }
     }
 
@@ -534,7 +544,7 @@ export function createAudio(song) {
       for (const v of DRUM_VOICES) {
         if (drumScene.drums[v][stepInBar] > 0) {
           hitDrum(v, time, drumScene.drums[v][stepInBar]);
-          draw.schedule(() => visualCb({ type: "hit", scene: drumState.scene, voice: v, step: stepInBar, activeScenes: activeBefore }), time);
+          scheduleDraw(() => visualCb({ type: "hit", scene: drumState.scene, voice: v, step: stepInBar, activeScenes: activeBefore }), time);
         }
       }
     }
@@ -549,7 +559,7 @@ export function createAudio(song) {
 
     const progressCurrent = getTrackProgress();
     const queuedCurrent = getQueuedTracks();
-    draw.schedule(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeBefore, queuedTracks: queuedCurrent, progress: progressCurrent }), time);
+    scheduleDraw(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeBefore, queuedTracks: queuedCurrent, progress: progressCurrent }), time);
     for (const track of TRACK_KEYS) advanceSceneTrack(track);
   }, "16n");
 

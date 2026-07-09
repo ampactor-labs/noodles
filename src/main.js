@@ -176,6 +176,7 @@ function refreshAll() {
   setScaleContext(song.key, song.scale);
   audio.setTempo(song.tempo);
   audio.setSwing(song.swing);
+  applyStepDur();
   closeEditor();
   renderTransport();
   renderSession();
@@ -405,12 +406,17 @@ function updateTempoUI() {
   if (!bpmEl) return;
   bpmEl.innerHTML = `${song.tempo}<small>BPM</small>`;
 }
+// One 16th note in seconds — the sweep duration for the clip pie timers.
+function applyStepDur() {
+  document.documentElement.style.setProperty("--stepdur", (15 / song.tempo).toFixed(4) + "s");
+}
 function applyTempo(v) {
   const next = clampTempo(v);
   if (!Number.isFinite(next) || next === song.tempo) return false;
   song.tempo = next;
   updateTempoUI();
   audio.setTempo(song.tempo);
+  applyStepDur();
   return true;
 }
 function bindTempoControl(node) {
@@ -2443,7 +2449,13 @@ audio.onVisual((e) => {
           const row = sceneEls[sceneIdx];
           if (row) {
             const clipEl = row.clips[t.key];
-            if (clipEl) clipEl.style.setProperty("--pct", p * 100);
+            if (clipEl) {
+              const pct = p * 100;
+              // Wrap = new value below the old one: jump, don't sweep back.
+              clipEl.classList.toggle("pie-snap", pct < (clipEl._pct ?? 0));
+              clipEl._pct = pct;
+              clipEl.style.setProperty("--pct", pct);
+            }
           }
         }
       }
@@ -2458,6 +2470,7 @@ audio.onVisual((e) => {
 });
 
 applyMixState();
+applyStepDur();
 renderTransport();
 renderSession();
 

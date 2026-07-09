@@ -9,6 +9,13 @@
     <title>noodles</title>
     <link rel="icon" href="data:," />
     <style>
+      /* Registered so the clip pie timers can transition it (smooth sweep
+         instead of 16th-note jumps). Unsupported browsers just jump. */
+      @property --pct {
+        syntax: "<number>";
+        inherits: false;
+        initial-value: 0;
+      }
       :root {
         --bg: #0e0e0f;
         --bar: #1b1b1d;
@@ -405,6 +412,11 @@
         background: conic-gradient(color-mix(in srgb, var(--tc) 85%, #fff) calc(var(--pct, 0) * 1%), rgba(0,0,0,0.3) 0);
         opacity: 0;
         pointer-events: none;
+        /* one 16th per update; --stepdur tracks the tempo */
+        transition: --pct var(--stepdur, 0.12s) linear;
+      }
+      .clip.pie-snap::after {
+        transition: none; /* loop wrap: jump back, don't sweep backwards */
       }
       .clip.playing::after {
         opacity: 1;
