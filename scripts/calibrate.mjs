@@ -53,6 +53,9 @@ try {
     executablePath: chrome,
     headless: true,
     args: ["--no-sandbox", "--mute-audio"],
+    // The whole sweep runs as one page.evaluate — ~75 offline renders —
+    // which blows past the 180 s default protocol timeout.
+    protocolTimeout: 1_800_000,
   });
   const page = await browser.newPage();
   const errors = [];
@@ -97,26 +100,39 @@ try {
       loop: { on: false, start: 0, len: 4 },
     });
 
-    const bodySec = (240 / song.tempo) * 4; // stats over the musical body, not the tail
-    const stats = (buf) => {
+    // Stats over the musical body, not the reverb tail. `hi` is RMS through a
+    // double one-pole 80 Hz highpass — a crude speaker-band meter. Flat RMS
+    // counts sub energy a phone or bookshelf speaker can't reproduce, which is
+    // how "deep at C1 is inaudible" once hid behind a healthy-looking number.
+    const stats = (buf, bodySec) => {
       const sr = buf.sampleRate;
       const n = Math.min(buf.length, Math.floor(bodySec * sr));
+      const a = Math.exp((-2 * Math.PI * 80) / sr);
       let peak = 0;
       let sum = 0;
+      let hiSum = 0;
       let count = 0;
       for (let c = 0; c < buf.numberOfChannels; c++) {
         const d = buf.getChannelData(c);
+        let y1 = 0, x1 = 0, y2 = 0, x2 = 0;
         for (let i = 0; i < n; i++) {
-          const a = Math.abs(d[i]);
-          if (a > peak) peak = a;
-          sum += d[i] * d[i];
+          const x = d[i];
+          const ab = Math.abs(x);
+          if (ab > peak) peak = ab;
+          sum += x * x;
+          y1 = a * (y1 + x - x1);
+          x1 = x;
+          y2 = a * (y2 + y1 - x2);
+          x2 = y1;
+          hiSum += y2 * y2;
         }
         count += n;
       }
       const db = (x) => Math.round(20 * Math.log10(Math.max(x, 1e-9)) * 10) / 10;
-      return { peak: db(peak), rms: db(Math.sqrt(sum / count)) };
+      return { peak: db(peak), rms: db(Math.sqrt(sum / count)), hi: db(Math.sqrt(hiSum / count)) };
     };
-    const render = async (soloTrack) => stats(await audio.renderOffline(soloTrack));
+    const bodySec = () => (240 / song.tempo) * 4;
+    const render = async (soloTrack) => stats(await audio.renderOffline(soloTrack), bodySec());
 
     const out = { harmony: {}, bass: {}, melody: {}, kits: {}, bassOct: {}, melodyOct: {}, master: {} };
     const PRESETS = {
@@ -183,20 +199,45 @@ try {
       audio.setMelodyPreset(m);
       out.master[`${kit}/${h}/${b}/${m}`] = await render(null);
     }
+
+    // The real thing: press the dice like a user would and render every roll
+    // end to end — random key, scale, tempo, presets, magic scene. This is
+    // the cohesion check across actual reloads, content variance included.
+    out.dice = {};
+    for (let i = 0; i < 8; i++) {
+      document.querySelector("#dice-btn").click();
+      const roll = {
+        what: `${song.tempo}bpm ${audio.kit()}/${audio.harmonyPreset()}/${audio.bassPreset()}/${audio.melodyPreset()}`,
+        master: await render(null),
+      };
+      for (const t of ["harmony", "drums", "bass", "melody"]) roll[t] = await render(t);
+      out.dice[`roll ${i + 1}: ${roll.what}`] = roll;
+    }
     return out;
   });
 
   if (errors.length) throw new Error(`page errors:\n${errors.join("\n")}`);
 
-  const spread = (group) => {
-    const vals = Object.values(group).map((s) => s.rms);
-    return Math.round((Math.max(...vals) - Math.min(...vals)) * 10) / 10;
-  };
+  const spreadOf = (vals) => Math.round((Math.max(...vals) - Math.min(...vals)) * 10) / 10;
+  const spread = (group) => spreadOf(Object.values(group).map((s) => s.rms));
   for (const [name, group] of Object.entries(report)) {
     if (name === "bassOct") {
-      console.log(`\n== bass octave 1 vs 2 (rms dB) ==`);
+      console.log(`\n== bass octave 1 vs 2 (rms dB, hi = above 80 Hz) ==`);
       for (const [p, both] of Object.entries(group)) {
-        console.log(`  ${p.padEnd(8)} oct1 ${both[24].rms}  oct2 ${both[36].rms}  delta ${Math.round((both[36].rms - both[24].rms) * 10) / 10}`);
+        console.log(`  ${p.padEnd(8)} oct1 ${both[24].rms} (hi ${both[24].hi})  oct2 ${both[36].rms} (hi ${both[36].hi})`);
+      }
+      continue;
+    }
+    if (name === "dice") {
+      const rolls = Object.entries(group);
+      console.log(`\n== dice rolls, end to end (master rms/hi · stems rms) ==`);
+      for (const [label, r] of rolls) {
+        const stems = ["harmony", "drums", "bass", "melody"].map((t) => `${t[0]}${r[t].rms}`).join(" ");
+        console.log(`  ${label.padEnd(44)} ${String(r.master.rms).padStart(6)} / ${String(r.master.hi).padStart(6)}   ${stems}`);
+      }
+      console.log(`  master spread ${spreadOf(rolls.map(([, r]) => r.master.rms))} dB (hi ${spreadOf(rolls.map(([, r]) => r.master.hi))} dB)`);
+      for (const t of ["harmony", "drums", "bass", "melody"]) {
+        console.log(`  ${t} stem spread ${spreadOf(rolls.map(([, r]) => r[t].rms))} dB`);
       }
       continue;
     }
