@@ -153,12 +153,6 @@ export function normalizeScene(scene) {
   return scene;
 }
 
-const steps16 = (idx) => {
-  const a = new Array(16).fill(false);
-  for (const i of idx) a[i] = true;
-  return a;
-};
-
 let sceneSeq = 0;
 const SCENE_TAGS = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
@@ -181,25 +175,52 @@ export function makeScene(harmony, drums, melody = null, bass = null) {
 }
 
 export function defaultScene() {
+  return makeMagicScene();
+}
+
+export function makeMagicScene() {
+  const dens = { kick: 0.32, snare: 0.14, hat: 0.5, clap: 0.12 };
+  const drums = {};
+  for (const v of DRUM_VOICES) {
+    drums[v] = new Array(16).fill(false);
+    for (let s = 0; s < 16; s++) {
+      if (v === "kick" && s % 2 !== 0 && Math.random() > 0.1) continue;
+      if (v === "snare" && s % 4 !== 0) continue;
+      drums[v][s] = Math.random() < dens[v];
+    }
+  }
+  drums.kick[0] = true;
+  drums.kick[8] = true;
+  drums.snare[4] = true;
+  drums.snare[12] = true;
+
+  const harmony = Array.from({ length: 4 }, () => Math.floor(Math.random() * 7));
+
+  const melodyNotes = scaleNotes(60, 15);
   const melody = new Array(16).fill(null);
-  melody[0] = { midi: 64, len: 2, vel: 0.9 }; // E4
-  melody[4] = { midi: 67, len: 2, vel: 0.85 }; // G4
-  melody[8] = { midi: 62, len: 2, vel: 0.9 }; // D4
-  melody[12] = { midi: 60, len: 4, vel: 0.8 }; // C4
+  for (let s = 0; s < 16; s++) {
+    if (Math.random() < 0.3) {
+      melody[s] = [{ midi: melodyNotes[Math.floor(Math.random() * melodyNotes.length)], len: 1, vel: 0.7 + Math.random() * 0.3 }];
+    }
+  }
+  if (!melody.some(Boolean)) {
+    melody[0] = [{ midi: melodyNotes[Math.floor(Math.random() * melodyNotes.length)], len: 2, vel: 0.85 }];
+  }
+
+  const bassNotes = scaleNotes(36, 12);
   const bass = new Array(16).fill(null);
-  bass[0] = { midi: 36, len: 4, vel: 0.95 }; // C2
-  bass[8] = { midi: 43, len: 4, vel: 0.95 }; // G2
-  return makeScene(
-    [0, 4, 5, 3],
-    {
-      kick: steps16([0, 4, 8, 12]),
-      snare: steps16([4, 12]),
-      hat: steps16([0, 2, 4, 6, 8, 10, 12, 14]),
-      clap: steps16([]),
-    },
-    melody,
-    bass
-  );
+  for (let s = 0; s < 16; s += 4) {
+    if (Math.random() < 0.8) {
+      bass[s] = [{ midi: bassNotes[Math.floor(Math.random() * Math.min(bassNotes.length, 5))], len: 4, vel: 0.9 }];
+    }
+  }
+  if (!bass.some(Boolean)) {
+    bass[0] = [{ midi: bassNotes[Math.floor(Math.random() * Math.min(bassNotes.length, 5))], len: 4, vel: 0.9 }];
+  }
+
+  const scene = makeScene(harmony, drums, melody, bass);
+  scene.tag = "✨";
+  return scene;
 }
 
 export function cloneScene(scene) {

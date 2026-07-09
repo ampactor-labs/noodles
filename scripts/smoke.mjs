@@ -144,10 +144,12 @@ try {
     transport: !!document.querySelector("#transport"),
     clips: document.querySelectorAll(".clip.filled").length,
     drums: !!document.querySelector('.clip.filled[data-track="drums"]'),
+    sceneTag: document.querySelector(".scenecell[data-scene='0']")?.textContent ?? "",
   }));
   assertState(initial.transport, "transport missing");
   assertState(initial.clips >= 4, `expected at least 4 filled clips, got ${initial.clips}`);
   assertState(initial.drums, "drum clip missing");
+  assertState(initial.sceneTag.includes("✨"), `default scene was not magic-generated: ${initial.sceneTag}`);
 
   await tap(page, "#bpm");
   await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Tempo");

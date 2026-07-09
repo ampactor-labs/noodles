@@ -23,6 +23,7 @@ import {
   pcName,
   setScaleContext,
   snapToScale,
+  makeMagicScene,
 } from "./model.js";
 import { createAudio, KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES } from "./audio.js";
 
@@ -286,50 +287,6 @@ function renderFooter() {
   );
 }
 
-function generateMagicScene() {
-  const dens = { kick: 0.32, snare: 0.14, hat: 0.5, clap: 0.12 };
-  const drums = {};
-  for (const v of ["kick", "snare", "hat", "clap"]) {
-    drums[v] = new Array(16).fill(false);
-    for (let s = 0; s < 16; s++) {
-      if (v === "kick" && s % 2 !== 0 && Math.random() > 0.1) continue;
-      if (v === "snare" && s % 4 !== 0) continue;
-      drums[v][s] = Math.random() < dens[v];
-    }
-  }
-  drums.kick[0] = true;
-  drums.kick[8] = true;
-  drums.snare[4] = true;
-  drums.snare[12] = true;
-  
-  const harmony = [
-    Math.floor(Math.random() * 7),
-    Math.floor(Math.random() * 7),
-    Math.floor(Math.random() * 7),
-    Math.floor(Math.random() * 7)
-  ];
-  
-  const ns = scaleNotes(PIANO.melody.base, PIANO.melody.rows);
-  const melody = new Array(16).fill(null);
-  for (let s = 0; s < 16; s++) {
-    if (Math.random() < 0.3) {
-      melody[s] = [{ midi: ns[Math.floor(Math.random() * ns.length)], len: 1, vel: 0.7 + Math.random() * 0.3 }];
-    }
-  }
-
-  const bs = scaleNotes(PIANO.bass.base, PIANO.bass.rows);
-  const bass = new Array(16).fill(null);
-  for (let s = 0; s < 16; s += 4) {
-    if (Math.random() < 0.8) {
-      bass[s] = [{ midi: bs[Math.floor(Math.random() * Math.min(bs.length, 5))], len: 4, vel: 0.9 }];
-    }
-  }
-
-  const newScene = makeScene(harmony, drums, melody, bass);
-  newScene.tag = "✨";
-  song.scenes.push(newScene);
-}
-
 function emptyScene() {
   return makeScene(
     [0, 0, 0, 0],
@@ -410,7 +367,7 @@ function openAddSceneSheet() {
       el("div", { class: "tfbtn", text: "Duplicate Current", onclick: () => addScene(cloneScene(song.scenes[baseIndex])) }),
       el("div", { class: "tfbtn accent", text: "Magic", onclick: () => {
         pushUndo();
-        generateMagicScene();
+        song.scenes.push(makeMagicScene());
         closeEditor();
         renderSession();
       } }),
