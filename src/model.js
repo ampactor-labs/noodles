@@ -293,12 +293,16 @@ export function clipLengthBars(scene, track) {
 }
 
 export function makeSong() {
+  // Randomize key and scale on each fresh load — pairs well with Magic scenes
+  const key = Math.floor(Math.random() * 12);
+  const scale = SCALE_NAMES[Math.floor(Math.random() * SCALE_NAMES.length)];
+  setScaleContext(key, scale);
   const s = defaultScene();
   const len = s.harmony.length;
   return {
     tempo: 92,
-    key: 0, // 0 = C
-    scale: "major",
+    key,
+    scale,
     scenes: [s],
     // Arrangement: per track, clips placed on the bar timeline. Each references
     // a scene's clip for that track (start + length in bars) — Ableton's model

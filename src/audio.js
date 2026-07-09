@@ -12,8 +12,8 @@ export const TRACK_KEYS = ["harmony", "drums", "bass", "melody"];
 
 const DEFAULT_TRACK_VOLUME_DB = -6;
 const SEND_OFF_DB = -60;
-const FIRST_PLAY_WARMUP_MS = 220;
-const PLAY_START_LEAD_TIME = "+0.10";
+const FIRST_PLAY_WARMUP_MS = 400;
+const PLAY_START_LEAD_TIME = "+0.18";
 const SOURCE_LEVEL_DB = {
   harmonyPad: -14,
   harmonyHalo: -28,
@@ -490,6 +490,19 @@ export function createAudio(song) {
       inited = true;
       await Tone.start();
       if (Tone.getContext().state !== "running") await Tone.getContext().resume();
+      // Prime the hardware audio pipeline with a near-silent impulse so the
+      // first real notes aren't swallowed by the OS/browser ramp-up.
+      const ctx = Tone.getContext().rawContext;
+      const primer = ctx.createOscillator();
+      const primerGain = ctx.createGain();
+      primerGain.gain.value = 0.001;
+      primer.connect(primerGain);
+      primerGain.connect(ctx.destination);
+      primer.start();
+      await wait(150);
+      primer.stop();
+      primer.disconnect();
+      primerGain.disconnect();
       await wait(FIRST_PLAY_WARMUP_MS);
       if (reverb.ready) await reverb.ready;
       clock.start(0);

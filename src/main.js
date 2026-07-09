@@ -1199,12 +1199,15 @@ function viewMixButton() {
     },
   });
 }
-function meterNode(fill) {
+function meterNode(state) {
+  const peakLine = el("div", { class: "mx-peak-line" });
+  const peakLabel = el("span", { class: "mx-peak-label" });
+  state.peakLine = peakLine;
+  state.peakLabel = peakLabel;
+  state.peakDb = -Infinity;
   return el("div", { class: "mx-meter" }, [
-    el("div", { class: "mx-meter-scale" }, [
-      el("span", { class: "mx-ref", text: "-6" }),
-    ]),
-    el("div", { class: "mx-meter-track" }, [fill]),
+    el("div", { class: "mx-meter-scale" }, [peakLine, peakLabel]),
+    el("div", { class: "mx-meter-track" }, [state.fill]),
   ]);
 }
 function bindTrackHeader(node, track) {
@@ -1305,8 +1308,9 @@ function openMixer(focusTrack = null) {
     const ms = mixState[k];
     ms.vol = clampTrackDb(ms.vol);
     const meterFill = el("i");
-    meterBars[k] = meterFill;
-    const meter = meterNode(meterFill);
+    const mState = { fill: meterFill };
+    meterBars[k] = mState;
+    const meter = meterNode(mState);
 
     const volSlider = el("input", { type: "range", min: String(TRACK_VOLUME_MIN_DB), max: String(TRACK_VOLUME_MAX_DB), step: "1", value: String(ms.vol), class: "mx-vfader" });
     const volLabel = el("div", { class: "mx-val", text: formatDb(ms.vol) });
@@ -1354,11 +1358,12 @@ function openMixer(focusTrack = null) {
     container.appendChild(strip);
   }
   const masterFill = el("i");
-  meterBars.master = masterFill;
+  const masterState = { fill: masterFill };
+  meterBars.master = masterState;
   container.appendChild(
     el("div", { class: "mx-strip mx-master", style: "--tc:#d2d2d4", "data-track": "master" }, [
       el("div", { class: "mx-name" }, [el("span", { class: "mx-dot" }), el("span", { text: "Master" })]),
-      meterNode(masterFill),
+      meterNode(masterState),
     ])
   );
   sheet.appendChild(container);
@@ -1369,19 +1374,42 @@ function openMixer(focusTrack = null) {
     setTimeout(() => sheet.querySelector(`.mx-strip[data-track="${focusTrack}"]`)?.scrollIntoView({ inline: "center", block: "nearest" }), 30);
   }
   updateTrackMixUI();
+  function updatePeak(state, db) {
+    if (!state || !Number.isFinite(db) || db <= METER_MIN_DB) return;
+    if (db > state.peakDb) {
+      state.peakDb = db;
+      const pct = (1 - meterLevel(db)) * 100;
+      state.peakLine.style.top = `${pct}%`;
+      state.peakLine.style.display = "block";
+      state.peakLabel.style.top = `${pct}%`;
+      state.peakLabel.style.display = "block";
+      state.peakLabel.textContent = Math.round(db);
+    }
+  }
   const tick = () => {
     for (const t of TRACKS) {
-      const lvl = meterLevel(audio.meter(t.key));
-      const bar = meterBars[t.key];
-      if (bar && Math.abs((bar._lvl || 0) - lvl) > 0.01) {
-        bar.style.transform = `scaleY(${lvl})`;
-        bar._lvl = lvl;
+      const db = audio.meter(t.key);
+      const lvl = meterLevel(db);
+      const state = meterBars[t.key];
+      if (state) {
+        const bar = state.fill;
+        if (bar && Math.abs((bar._lvl || 0) - lvl) > 0.01) {
+          bar.style.transform = `scaleY(${lvl})`;
+          bar._lvl = lvl;
+        }
+        updatePeak(state, db);
       }
     }
-    const mlvl = meterLevel(audio.meter("master"));
-    if (meterBars.master && Math.abs((meterBars.master._lvl || 0) - mlvl) > 0.01) {
-      meterBars.master.style.transform = `scaleY(${mlvl})`;
-      meterBars.master._lvl = mlvl;
+    const mdb = audio.meter("master");
+    const mlvl = meterLevel(mdb);
+    const ms = meterBars.master;
+    if (ms) {
+      const bar = ms.fill;
+      if (bar && Math.abs((bar._lvl || 0) - mlvl) > 0.01) {
+        bar.style.transform = `scaleY(${mlvl})`;
+        bar._lvl = mlvl;
+      }
+      updatePeak(ms, mdb);
     }
     mixerRAF = requestAnimationFrame(tick);
   };
