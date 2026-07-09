@@ -27,10 +27,10 @@ const SOURCE_LEVEL_DB = {
   melody: -7,
   kick: 0,
   snare: 5,
-  hat: -3,
+  hat: -5,
   clap: 3,
 };
-const KICK_DUCK_GAIN = Tone.dbToGain(-8);
+const KICK_DUCK_GAIN = Tone.dbToGain(-12);
 const DRUM_PARALLEL_GAIN = Tone.dbToGain(-10);
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // The send knobs sweep -30..0 dB; the bottom of the range is "off".
@@ -40,7 +40,7 @@ function scheduleKickDuck(param, time) {
   param.cancelScheduledValues(time);
   param.setValueAtTime(1, time);
   param.linearRampToValueAtTime(KICK_DUCK_GAIN, time + 0.008);
-  param.exponentialRampToValueAtTime(1, time + 0.22);
+  param.exponentialRampToValueAtTime(1, time + 0.25);
 }
 
 // --- Device presets (like drum kits, one set per track) ---
