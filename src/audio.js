@@ -231,6 +231,8 @@ export function createAudio(song) {
   let curScene = 0;
   const trackState = Object.fromEntries(TRACK_KEYS.map((track) => [track, { scene: 0, step: 0, active: true }]));
   let arrStep = 0;
+  let sessionStep = 0;
+  const queuedTracks = Object.fromEntries(TRACK_KEYS.map((track) => [track, -1]));
   let visualCb = () => {};
 
   transport.bpm.value = song.tempo;
@@ -276,6 +278,10 @@ export function createAudio(song) {
 
   function activeScenes() {
     return Object.fromEntries(TRACK_KEYS.map((track) => [track, trackState[track].active ? trackState[track].scene : -1]));
+  }
+
+  function getQueuedTracks() {
+    return Object.fromEntries(TRACK_KEYS.map((track) => [track, queuedTracks[track]]));
   }
 
   function resetTrack(track, sceneIndex) {
@@ -324,6 +330,26 @@ export function createAudio(song) {
 
   const clock = new Tone.Loop((time) => {
     if (mode === "arrangement") return tickArrangement(time);
+
+    let maxLimitBars = 1;
+    for (const track of TRACK_KEYS) {
+      const st = trackState[track];
+      if (st.active && song.scenes[st.scene]) {
+        const launch = clipLaunch(song.scenes[st.scene], track);
+        const limitBars = launch.follow !== "none" ? launch.followBars : clipLengthBars(song.scenes[st.scene], track);
+        if (limitBars > maxLimitBars) maxLimitBars = limitBars;
+      }
+    }
+
+    if (sessionStep % (maxLimitBars * 16) === 0) {
+      for (const track of TRACK_KEYS) {
+        if (queuedTracks[track] >= 0) {
+          resetTrack(track, queuedTracks[track]);
+          queuedTracks[track] = -1;
+        }
+      }
+    }
+
     const activeBefore = activeScenes();
     const harmonyState = trackState.harmony;
     const harmonyScene = harmonyState.active ? song.scenes[harmonyState.scene] : null;
@@ -364,7 +390,9 @@ export function createAudio(song) {
 
     for (const track of TRACK_KEYS) advanceSceneTrack(track);
     const activeAfter = activeScenes();
-    draw.schedule(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeAfter }), time);
+    const queuedAfter = getQueuedTracks();
+    draw.schedule(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeAfter, queuedTracks: queuedAfter }), time);
+    sessionStep++;
   }, "16n");
 
   let playing = false;
@@ -385,6 +413,8 @@ export function createAudio(song) {
     stop() {
       transport.pause();
       playing = false;
+      for (const track of TRACK_KEYS) queuedTracks[track] = -1; // clear queues on stop
+      draw.schedule(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }), Tone.now());
     },
     toggle() {
       if (playing) this.stop();
@@ -397,19 +427,34 @@ export function createAudio(song) {
     launchScene(index) {
       mode = "scene";
       focusIndex = index;
-      curScene = index;
-      for (const track of TRACK_KEYS) resetTrack(track, index);
-      draw.schedule(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes() }), Tone.now());
-      if (!playing) this.play();
+      if (!playing) {
+        curScene = index;
+        for (const track of TRACK_KEYS) resetTrack(track, index);
+        for (const track of TRACK_KEYS) queuedTracks[track] = -1;
+        sessionStep = 0;
+        draw.schedule(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }), Tone.now());
+        this.play();
+      } else {
+        curScene = index;
+        for (const track of TRACK_KEYS) queuedTracks[track] = index;
+        draw.schedule(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }), Tone.now());
+      }
     },
     launchClip(index, track) {
       mode = "scene";
       focusIndex = index;
-      curScene = index;
-      if (!playing) for (const key of TRACK_KEYS) trackState[key].active = false;
-      resetTrack(track, index);
-      draw.schedule(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes() }), Tone.now());
-      if (!playing) this.play();
+      if (!playing) {
+        curScene = index;
+        for (const key of TRACK_KEYS) trackState[key].active = false;
+        for (const key of TRACK_KEYS) queuedTracks[key] = -1;
+        resetTrack(track, index);
+        sessionStep = 0;
+        draw.schedule(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }), Tone.now());
+        this.play();
+      } else {
+        queuedTracks[track] = index;
+        draw.schedule(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }), Tone.now());
+      }
     },
     playArrangement(fromBar = 0) {
       mode = "arrangement";

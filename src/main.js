@@ -13,6 +13,7 @@ import {
   clipLaunch,
   hslInt,
   makeSong,
+  makeScene,
   cloneScene,
   arrangeLength,
   scaleNotes,
@@ -69,10 +70,11 @@ async function ensureStarted() {
 
 let playingScene = -1;
 const playingTracks = Object.fromEntries(TRACKS.map((t) => [t.key, -1]));
+const queuedSceneTracks = Object.fromEntries(TRACKS.map((t) => [t.key, -1]));
 const sceneEls = []; // per scene: { row, clips: {track: el} }
 
 let view = "session"; // 'session' | 'arrangement'
-let ppb = 74; // arrangement pixels-per-bar (pinch zooms this)
+let ppb = 37; // arrangement pixels-per-bar; default zoomed out so bar 8 fills screen
 let arrPlayBar = 0; // arrangement playhead position in bars
 let selClip = null; // { track, idx }
 
@@ -154,12 +156,20 @@ function renderTransport() {
   });
   bpmEl = el("div", { id: "bpm", role: "button", tabindex: "0", html: `${song.tempo}<small>BPM</small>` });
   bindTempoControl(bpmEl);
-  // Play/pause + undo/redo are pinned left and never scroll.
   undoBtn = el("div", { class: "tbtn undo", text: "↶", onclick: undo });
   redoBtn = el("div", { class: "tbtn redo", text: "↷", onclick: redo });
   const left = el("div", { class: "tleft" }, [playBtn, undoBtn, redoBtn]);
   const tempo = el("div", { class: "ttempo" }, [bpmEl]);
-  transport.append(left, tempo);
+  // View toggle + File button live in the header (always visible)
+  const viewBtn = el("div", {
+    class: "tbtn" + (view === "arrangement" ? " accent" : ""),
+    text: "View",
+    id: "view-toggle-btn",
+    onclick: () => setView(view === "session" ? "arrangement" : "session"),
+  });
+  const fileBtn = el("div", { class: "tbtn", text: "File", id: "file-btn", onclick: openExport });
+  const mixBtn = el("div", { class: "view-mix", text: "Mix", id: "mix-btn", onclick: openMixer });
+  transport.append(left, tempo, mixBtn, viewBtn, fileBtn);
   updateUndoButtons();
   renderFooter();
 }
@@ -202,35 +212,63 @@ function renderFooter() {
   });
   scaleSel.addEventListener("change", () => setKeyScale(song.key, scaleSel.value));
   const keyctl = el("div", { class: "keyctl" }, [el("span", { class: "swlabel", text: "Key" }), keySel, scaleSel]);
-  const seg = el("div", { class: "seg" }, [
-    el("div", {
-      class: "opt" + (view === "session" ? " on" : ""),
-      text: "Session",
-      onclick: () => setView("session"),
-    }),
-    el("div", {
-      class: "opt" + (view === "arrangement" ? " on" : ""),
-      text: "Arrange",
-      onclick: () => setView("arrangement"),
-    }),
-  ]);
-  const expBtn = el("div", { class: "tbtn", text: "Exp", "data-action": "open-export", onclick: openExport });
-  const addBtn = el("div", {
-    class: "tbtn",
-    text: "+ Scene",
-    "data-action": "add-scene",
+  // Magic button: Generate a new inspiring scene
+  const magicBtn = el("div", {
+    class: "tbtn accent",
+    text: "✨ Magic",
+    id: "magic-btn",
+    title: "Generate a new random scene",
     onclick: () => {
       pushUndo();
-      const from = playingScene >= 0 ? playingScene : song.scenes.length - 1;
-      song.scenes.push(cloneScene(song.scenes[from]));
+      generateMagicScene();
       renderSession();
     },
   });
   footer.append(
-    el("div", { class: "frow" }, [keyctl, groove]),
-    el("div", { class: "frow" }, [seg, el("div", { class: "fspacer" }), expBtn, addBtn])
+    el("div", { class: "frow" }, [keyctl, el("div", { class: "fspacer" }), groove]),
+    el("div", { class: "frow" }, [magicBtn])
   );
 }
+
+function generateMagicScene() {
+  const dens = { kick: 0.2, snare: 0.1, hat: 0.4, clap: 0.05 };
+  const drums = {};
+  for (const v of ["kick", "snare", "hat", "clap"]) {
+    drums[v] = new Array(16).fill(false);
+    for (let s = 0; s < 16; s++) drums[v][s] = Math.random() < dens[v];
+  }
+  drums.kick[0] = true;
+  drums.snare[4] = true;
+  drums.snare[12] = true;
+  
+  const harmony = [
+    Math.floor(Math.random() * 7),
+    Math.floor(Math.random() * 7),
+    Math.floor(Math.random() * 7),
+    Math.floor(Math.random() * 7)
+  ];
+  
+  const ns = scaleNotes(PIANO.melody.base, PIANO.melody.rows);
+  const melody = new Array(16).fill(null);
+  for (let s = 0; s < 16; s++) {
+    if (Math.random() < 0.3) {
+      melody[s] = { midi: ns[Math.floor(Math.random() * ns.length)], len: 1, vel: 0.7 + Math.random() * 0.3 };
+    }
+  }
+
+  const bs = scaleNotes(PIANO.bass.base, PIANO.bass.rows);
+  const bass = new Array(16).fill(null);
+  for (let s = 0; s < 16; s += 4) {
+    if (Math.random() < 0.8) {
+      bass[s] = { midi: bs[Math.floor(Math.random() * Math.min(bs.length, 5))], len: 4, vel: 0.9 };
+    }
+  }
+
+  const newScene = makeScene(harmony, drums, melody, bass);
+  newScene.tag = "✨";
+  song.scenes.push(newScene);
+}
+
 
 function setView(v) {
   view = v;
@@ -379,9 +417,11 @@ const sessionEl = document.getElementById("session");
 
 function clipContent(scene, track) {
   if (track === "harmony") {
-    return el("div", { text: scene.harmony.map((ci) => CHORDS[ci].roman).join("  ") });
+    if (!scene.harmony || scene.harmony.length === 0) return null;
+    return el("div", { text: scene.harmony.map((ci) => CHORDS[ci]?.roman || "?").join("  ") });
   }
   if (track === "drums") {
+    if (!scene.drums || !Object.values(scene.drums).some(v => v.some(x => x))) return null;
     const mini = el("div", { class: "mini" });
     for (let s = 0; s < 16; s++) {
       const hit = scene.drums.kick[s] || scene.drums.snare[s] || scene.drums.clap[s];
@@ -390,6 +430,7 @@ function clipContent(scene, track) {
     return mini;
   }
   if (track === "melody" || track === "bass") {
+    if (!scene[track] || !scene[track].some(n => n !== null)) return null;
     const mini = el("div", { class: "mini" });
     const lane = scene[track];
     for (let s = 0; s < 16; s++)
@@ -410,7 +451,6 @@ function launchBadge(scene, track) {
 }
 
 function bindSessionClip(clip, sceneIndex, track, filled) {
-  if (!filled) return;
   let timer = 0;
   let longPress = false;
   let startX = 0;
@@ -426,12 +466,12 @@ function bindSessionClip(clip, sceneIndex, track, filled) {
     moved = false;
     startX = e.clientX;
     startY = e.clientY;
-    clip.classList.add("pressing");
+    if (filled) clip.classList.add("pressing");
     timer = window.setTimeout(() => {
       longPress = true;
       clear();
-      openClipProps(sceneIndex, track);
-    }, 520);
+      if (filled) beginClipDrag(e, clip, sceneIndex, track);
+    }, 480);
   });
   clip.addEventListener("pointermove", (e) => {
     if (Math.hypot(e.clientX - startX, e.clientY - startY) > 12) {
@@ -441,10 +481,153 @@ function bindSessionClip(clip, sceneIndex, track, filled) {
   });
   clip.addEventListener("pointerup", clear);
   clip.addEventListener("pointercancel", clear);
-  // click fires reliably on mobile even when pointerup is swallowed by scroll
   clip.addEventListener("click", () => {
-    if (!longPress && !moved) openEditor(sceneIndex, track);
+    if (longPress || moved) return;
+    if (filled) openEditor(sceneIndex, track);
+    else openNewClipSheet(sceneIndex, track);
   });
+}
+
+// Long-press on a filled clip: drag it vertically to another scene slot
+function beginClipDrag(origEv, clip, sceneIndex, track) {
+  // gather all scene slot positions for this track column
+  const allSlots = [...document.querySelectorAll(`.clip[data-track="${track}"]`)];
+  if (!allSlots.length) return;
+  const rects = allSlots.map((sl) => ({ el: sl, rect: sl.getBoundingClientRect(), si: parseInt(sl.dataset.scene, 10) }));
+  clip.style.opacity = "0.4";
+  let targetSI = sceneIndex;
+  const move = (ev) => {
+    const hit = rects.find((r) => ev.clientY >= r.rect.top && ev.clientY < r.rect.bottom);
+    if (hit) {
+      rects.forEach((r) => r.el.style.outline = "");
+      hit.el.style.outline = "2px solid #e8b84b";
+      targetSI = hit.si;
+    }
+  };
+  const up = () => {
+    document.removeEventListener("pointermove", move);
+    document.removeEventListener("pointerup", up);
+    clip.style.opacity = "";
+    rects.forEach((r) => r.el.style.outline = "");
+    if (targetSI !== sceneIndex) {
+      pushUndo();
+      // Swap the clip data between the two scene slots for this track
+      const srcScene = song.scenes[sceneIndex];
+      const dstScene = song.scenes[targetSI];
+      // For drums, harmony, bass, melody — swap the data fields
+      const tmp = structuredClone(srcScene[track]);
+      srcScene[track] = structuredClone(dstScene[track]);
+      dstScene[track] = tmp;
+      const tl = srcScene.launch?.[track];
+      const tdl = dstScene.launch?.[track];
+      if (srcScene.launch && dstScene.launch) {
+        srcScene.launch[track] = structuredClone(tdl);
+        dstScene.launch[track] = structuredClone(tl);
+      }
+      renderSession();
+    }
+  };
+  document.addEventListener("pointermove", move, { passive: true });
+  document.addEventListener("pointerup", up);
+}
+
+function openNewClipSheet(sceneIndex, track) {
+  // An empty slot was tapped — offer to create a clip or do nothing
+  // For now, opening the editor on an empty slot makes sense (adds content on edit)
+  openEditor(sceneIndex, track);
+}
+
+// Scene label cell: single tap = launch, long press = Scene Options
+function bindSceneCell(launch, sceneIndex) {
+  let timer = 0;
+  let longPress = false;
+  let startX = 0, startY = 0;
+  const clear = () => { clearTimeout(timer); timer = 0; };
+  launch.addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".scene-opt-btn")) return;
+    longPress = false;
+    startX = e.clientX; startY = e.clientY;
+    timer = window.setTimeout(() => {
+      longPress = true;
+      clear();
+      openSceneOptions(sceneIndex);
+    }, 480);
+  });
+  launch.addEventListener("pointermove", (e) => {
+    if (Math.hypot(e.clientX - startX, e.clientY - startY) > 12) clear();
+  });
+  launch.addEventListener("pointerup", clear);
+  launch.addEventListener("pointercancel", clear);
+  launch.addEventListener("click", async () => {
+    if (longPress) return;
+    await ensureStarted();
+    audio.launchScene(sceneIndex);
+    setPlaying(sceneIndex);
+    updatePlayBtn(true);
+  });
+}
+
+function openSceneOptions(sceneIndex) {
+  const scene = song.scenes[sceneIndex];
+  editor = null;
+  cancelAnimationFrame(mixerRAF);
+  mixerRAF = 0;
+  sheet.innerHTML = "";
+  sheet.style.setProperty("--tc", "#e8b84b");
+  sheet.appendChild(
+    el("div", { class: "sheet-bar" }, [
+      el("div", { class: "swatch" }),
+      el("div", { class: "title", text: "Scene Options" }),
+      el("div", { class: "sub", text: `Scene ${scene.tag}` }),
+      el("div", { class: "close", text: "Done", onclick: closeEditor }),
+    ])
+  );
+  sheet.appendChild(
+    el("div", { class: "tfrow" }, [
+      el("div", { class: "tfbtn", text: "▶ Launch", onclick: async () => {
+        closeEditor();
+        await ensureStarted();
+        audio.launchScene(sceneIndex);
+        setPlaying(sceneIndex);
+        updatePlayBtn(true);
+      }}),
+      el("div", { class: "tfbtn", text: "Duplicate", onclick: () => {
+        pushUndo();
+        const cloned = cloneScene(scene);
+        song.scenes.splice(sceneIndex + 1, 0, cloned);
+        closeEditor();
+        renderSession();
+      }}),
+      el("div", { class: "tfbtn", text: "Move Up", onclick: () => {
+        if (sceneIndex === 0) return;
+        pushUndo();
+        const tmp = song.scenes[sceneIndex - 1];
+        song.scenes[sceneIndex - 1] = song.scenes[sceneIndex];
+        song.scenes[sceneIndex] = tmp;
+        closeEditor();
+        renderSession();
+      }}),
+      el("div", { class: "tfbtn", text: "Move Down", onclick: () => {
+        if (sceneIndex >= song.scenes.length - 1) return;
+        pushUndo();
+        const tmp = song.scenes[sceneIndex + 1];
+        song.scenes[sceneIndex + 1] = song.scenes[sceneIndex];
+        song.scenes[sceneIndex] = tmp;
+        closeEditor();
+        renderSession();
+      }}),
+      el("div", { class: "tfbtn", style: "color:#d24b4b", text: "Delete", onclick: () => {
+        if (song.scenes.length <= 1) { closeEditor(); return; }
+        pushUndo();
+        song.scenes.splice(sceneIndex, 1);
+        if (playingScene >= song.scenes.length) playingScene = song.scenes.length - 1;
+        closeEditor();
+        renderSession();
+      }}),
+    ])
+  );
+  scrim.classList.add("open");
+  sheet.classList.add("open");
 }
 
 function renderSession() {
@@ -469,13 +652,9 @@ function renderSession() {
     const refs = { clips: {} };
     const launch = el("div", {
       class: "scenecell",
-      onclick: async () => {
-        await ensureStarted();
-        audio.launchScene(i);
-        setPlaying(i);
-        updatePlayBtn(true);
-      },
+      "data-scene": String(i),
     }, [el("div", { class: "tri", text: "▶" }), el("div", { text: scene.tag })]);
+    bindSceneCell(launch, i);
     refs.row = launch;
     grid.appendChild(launch);
 
@@ -494,7 +673,7 @@ function renderSession() {
         const badge = launchBadge(scene, t.key);
         if (badge) clip.appendChild(badge);
       } else {
-        clip.textContent = "＋";
+        clip.textContent = "+";
       }
       bindSessionClip(clip, i, t.key, filled);
       refs.clips[t.key] = clip;
@@ -502,6 +681,24 @@ function renderSession() {
     }
     sceneEls.push(refs);
   });
+
+  // "+" add-scene cell at the very bottom of the scene column
+  const addSceneCell = el("div", {
+    class: "scenecell scene-add-cell",
+    title: "Add scene",
+    onclick: () => {
+      pushUndo();
+      const from = playingScene >= 0 ? playingScene : song.scenes.length - 1;
+      song.scenes.push(cloneScene(song.scenes[from]));
+      renderSession();
+    },
+  }, [el("div", { class: "tri", style: "color:#e8b84b;font-size:22px", text: "+" })]);
+  grid.appendChild(addSceneCell);
+  // fill remaining track cells in that last row with blank spacers
+  for (let ti = 0; ti < TRACKS.length; ti++) {
+    grid.appendChild(el("div", { class: "clip empty", style: "opacity:0;pointer-events:none" }));
+  }
+
   sessionEl.appendChild(grid);
   applyPlaying();
   updateTrackMixUI();
@@ -522,11 +719,22 @@ function applyPlaying() {
   sceneEls.forEach((r, i) => {
     const rowOn = i === playingScene;
     r.row.classList.toggle("playing", rowOn);
+    // Row is "queued" if ALL tracks are queued to this scene
+    const rowQueued = !rowOn && TRACKS.every((t) => queuedSceneTracks[t.key] === i);
+    r.row.classList.toggle("queued", rowQueued);
     for (const t of TRACKS) {
       const c = r.clips[t.key];
-      if (c && c.classList.contains("filled")) c.classList.toggle("playing", playingTracks[t.key] === i);
+      if (c && c.classList.contains("filled")) {
+        c.classList.toggle("playing", playingTracks[t.key] === i);
+        c.classList.toggle("queued", queuedSceneTracks[t.key] === i && playingTracks[t.key] !== i);
+      }
     }
   });
+}
+
+function applyQueued(qt) {
+  for (const t of TRACKS) queuedSceneTracks[t.key] = qt?.[t.key] ?? -1;
+  applyPlaying();
 }
 
 // ---------------------------------------------------------------------------
@@ -550,6 +758,7 @@ function openEditor(sceneIndex, track) {
       el("div", { class: "swatch" }),
       el("div", { class: "title", text: title }),
       el("div", { class: "sub", text: `${TRACKS.find((t) => t.key === track).name} · Scene ${scene.tag}` }),
+      el("div", { class: "close", style: "margin-right:6px", text: "Options", onclick: () => openClipProps(sceneIndex, track) }),
       el("div", { class: "close", text: "Done", onclick: closeEditor }),
     ])
   );
@@ -674,6 +883,23 @@ function openClipProps(sceneIndex, track) {
           openClipProps(next, track);
         },
       }),
+      el("div", {
+        class: "tfbtn",
+        style: "color:#d24b4b",
+        text: "Delete Clip",
+        onclick: () => {
+          pushUndo();
+          if (track === "drums") {
+            for (const v of DRUM_VOICES) for (let s = 0; s < 16; s++) scene.drums[v][s] = false;
+          } else if (track === "melody" || track === "bass") {
+            for (let s = 0; s < 16; s++) scene[track][s] = null;
+          } else if (track === "harmony") {
+            scene.harmony = [];
+          }
+          closeEditor();
+          renderSession();
+        },
+      }),
     ])
   );
 
@@ -789,11 +1015,11 @@ function trackToggleButton(track, kind) {
   });
 }
 function viewMixButton() {
+  // Corner Mix buttons in session/arrangement headers — kept for legacy layout compat
   return el("div", {
     class: "view-mix",
     text: "Mix",
-    onpointerdown: (e) => {
-      e.preventDefault();
+    onclick: (e) => {
       e.stopPropagation();
       openMixer();
     },
@@ -1018,24 +1244,63 @@ function buildDrumEditor(scene) {
   const stepEls = {};
   for (const v of DRUM_VOICES) {
     stepEls[v] = [];
-    const steps = el("div", { class: "steps" });
+    const steps = el("div", { class: "steps", style: "touch-action:none" });
+    // Drag-paint: pointerdown sets add/delete mode based on initial cell state;
+    // dragging over subsequent cells applies the same action to each.
+    let drumDragMode = null; // 'add' | 'delete' | null
+    let drumDragPre = null;
+    const stepsArr = [];
     for (let s = 0; s < 16; s++) {
       const on = scene.drums[v][s];
       const cell = el("div", {
         class: `step ${Math.floor(s / 4) % 2 ? "" : "g"} ${on ? "on" : ""}`,
         style: `--pc:${padHex(v)}`,
-        onclick: async () => {
-          await ensureStarted();
-          pushUndo();
-          scene.drums[v][s] = !scene.drums[v][s];
-          cell.classList.toggle("on", scene.drums[v][s]);
-          if (scene.drums[v][s]) audio.previewHit(v);
-          refreshClip(editor.scene, "drums");
-        },
       });
+      stepsArr.push(cell);
       stepEls[v].push(cell);
       steps.appendChild(cell);
     }
+
+    // Build a hit-test function: given clientX within the steps row, return step index
+    const stepAtX = (clientX) => {
+      const rect = steps.getBoundingClientRect();
+      const idx = Math.floor((clientX - rect.left) / (rect.width / 16));
+      return Math.max(0, Math.min(15, idx));
+    };
+
+    steps.addEventListener("pointerdown", async (e) => {
+      e.preventDefault();
+      await ensureStarted();
+      drumDragPre = snapshot();
+      const s0 = stepAtX(e.clientX);
+      // If cell is on → delete mode; if off → add mode
+      drumDragMode = scene.drums[v][s0] ? "delete" : "add";
+      scene.drums[v][s0] = drumDragMode === "add";
+      stepsArr[s0].classList.toggle("on", scene.drums[v][s0]);
+      if (drumDragMode === "add") audio.previewHit(v);
+      refreshClip(editor.scene, "drums");
+      steps.setPointerCapture?.(e.pointerId);
+    });
+    steps.addEventListener("pointermove", (e) => {
+      if (drumDragMode === null) return;
+      const s = stepAtX(e.clientX);
+      const shouldOn = drumDragMode === "add";
+      if (scene.drums[v][s] !== shouldOn) {
+        scene.drums[v][s] = shouldOn;
+        stepsArr[s].classList.toggle("on", shouldOn);
+        refreshClip(editor.scene, "drums");
+      }
+    });
+    steps.addEventListener("pointerup", () => {
+      if (drumDragPre) commitUndo(drumDragPre);
+      drumDragMode = null;
+      drumDragPre = null;
+    });
+    steps.addEventListener("pointercancel", () => {
+      drumDragMode = null;
+      drumDragPre = null;
+    });
+
     const pad = el("div", {
       class: "pad",
       style: `--pc:${padHex(v)}`,
@@ -1234,6 +1499,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
 }
 
 function buildHarmonyEditor(sceneIndex, scene) {
+  if (!scene.harmony || scene.harmony.length === 0) scene.harmony = [0, 0, 0, 0];
   let selected = 0;
   const row = el("div", { class: "chordrow" });
   const slots = scene.harmony.map((ci, idx) => {
@@ -1697,6 +1963,8 @@ function applyProject(rawProject) {
   restoreDevices(project.devices);
   selClip = null;
   arrPlayBar = 0;
+  playingScene = -1;
+  for (const t of TRACKS) playingTracks[t.key] = -1;
   refreshAll();
 }
 
@@ -1817,6 +2085,8 @@ audio.onVisual((e) => {
   }
   if (e.activeScenes) setActiveTracks(e.activeScenes);
   else if (e.scene !== undefined && e.scene !== playingScene) setPlaying(e.scene);
+  // Always sync queued state from audio engine
+  if (e.queuedTracks !== undefined) applyQueued(e.queuedTracks);
   if (e.type === "step" && editor && editor.cursorCols) {
     if (editor.cursor >= 0) editor.cursorCols[editor.cursor]?.forEach((c) => c.classList.remove("cursor"));
     editor.cursor = e.stepInBar;
@@ -1826,3 +2096,10 @@ audio.onVisual((e) => {
 
 renderTransport();
 renderSession();
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && audio.playing) {
+    audio.stop();
+    updatePlayBtn(false);
+  }
+});

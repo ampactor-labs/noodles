@@ -314,6 +314,18 @@
       .scenecell.playing .tri {
         color: #7bd67b;
       }
+      @keyframes queued-pulse {
+        0%, 100% { opacity: 1; }
+        50%       { opacity: 0.35; }
+      }
+      .scenecell.queued .tri {
+        color: #e8b84b;
+        animation: queued-pulse 0.9s ease-in-out infinite;
+      }
+      .clip.queued {
+        box-shadow: 0 0 0 2px #e8b84b inset;
+        animation: queued-pulse 0.9s ease-in-out infinite;
+      }
       .clip {
         position: relative;
         min-height: 62px;
