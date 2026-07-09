@@ -15,11 +15,11 @@ const SEND_OFF_DB = -60;
 const FIRST_PLAY_WARMUP_MS = 400;
 const PLAY_START_LEAD_TIME = "+0.18";
 const SOURCE_LEVEL_DB = {
-  harmonyPad: -3,
-  harmonyHalo: -17,
-  harmonyRoot: -23,
+  harmonyPad: -9,
+  harmonyHalo: -23,
+  harmonyRoot: -29,
   bass: -7,
-  melody: 0,
+  melody: -10,
   kick: 0,
   snare: 5,
   hat: -3,
@@ -132,6 +132,7 @@ export function createAudio(song) {
   // Mixer strips — direct gain wiring (no send/receive bus, which can silently
   // fail depending on Tone.js version and context lifecycle).
   const channels = {};
+  const trackInputs = {};
   const meters = {};
   const verbSends = {};
   const echoSends = {};
@@ -149,7 +150,9 @@ export function createAudio(song) {
   const echoDefault = { harmony: SEND_OFF_DB, melody: SEND_OFF_DB, drums: SEND_OFF_DB, bass: SEND_OFF_DB };
   for (const k of TRACK_KEYS) {
     const chVol = DEFAULT_TRACK_VOLUME_DB;
+    trackInputs[k] = new Tone.Compressor({ threshold: -20, ratio: 4, attack: 0.005, release: 0.15, knee: 12 });
     channels[k] = new Tone.Channel({ volume: chVol, pan: 0 });
+    trackInputs[k].connect(channels[k]);
     if (k === "drums") {
       channels[k].connect(drumDry);
       channels[k].connect(drumParallel);
@@ -180,7 +183,7 @@ export function createAudio(song) {
   new Tone.LFO({ frequency: 0.05, min: 850, max: 2600 }).connect(padFilter.frequency).start();
   padHighpass.connect(padFilter);
   padFilter.connect(chorus);
-  chorus.connect(channels.harmony);
+  chorus.connect(trackInputs.harmony);
   const pad = new Tone.PolySynth(Tone.Synth, {
     maxPolyphony: 4,
     oscillator: { type: "sawtooth" },
@@ -203,8 +206,8 @@ export function createAudio(song) {
     oscillator: { type: "sine" },
     envelope: { attack: 0.9, decay: 1, sustain: 0.5, release: 1.6 },
     volume: SOURCE_LEVEL_DB.harmonyHalo,
-  }).connect(channels.harmony);
-  const rootHintFilter = new Tone.Filter({ type: "highpass", frequency: 120, Q: 0.7 }).connect(channels.harmony);
+  }).connect(trackInputs.harmony);
+  const rootHintFilter = new Tone.Filter({ type: "highpass", frequency: 120, Q: 0.7 }).connect(trackInputs.harmony);
   // A quiet low-mid root hint, not a sub-bass voice. Bass owns the low end.
   const sub = new Tone.Synth({
     oscillator: { type: "sine" },
@@ -213,7 +216,7 @@ export function createAudio(song) {
   }).connect(rootHintFilter);
 
   // Bass + lead — device params live-adjustable.
-  const bassHighpass = new Tone.Filter({ type: "highpass", frequency: 34, Q: 0.7 }).connect(channels.bass);
+  const bassHighpass = new Tone.Filter({ type: "highpass", frequency: 34, Q: 0.7 }).connect(trackInputs.bass);
   const bassFilter = new Tone.Filter({ type: "lowpass", frequency: 750, Q: 0.9 }).connect(bassHighpass);
   const bassDrive = new Tone.Distortion(0).connect(bassFilter);
   const bassTrk = new Tone.PolySynth(Tone.Synth, {
@@ -222,7 +225,7 @@ export function createAudio(song) {
     envelope: { attack: 0.02, decay: 0.2, sustain: 0.6, release: 0.25 },
     volume: SOURCE_LEVEL_DB.bass,
   }).connect(bassDrive);
-  const leadHighpass = new Tone.Filter({ type: "highpass", frequency: 180, Q: 0.7 }).connect(channels.melody);
+  const leadHighpass = new Tone.Filter({ type: "highpass", frequency: 180, Q: 0.7 }).connect(trackInputs.melody);
   const leadFilter = new Tone.Filter({ type: "lowpass", frequency: 3200, Q: 0.6 }).connect(leadHighpass);
   const lead = new Tone.PolySynth(Tone.Synth, {
     maxPolyphony: 8,
@@ -714,11 +717,14 @@ export function createAudio(song) {
         const offEchoReturn = new Tone.Gain(Tone.dbToGain(-4)).connect(offMaster);
         const offEcho = new Tone.FeedbackDelay({ delayTime: "8n", feedback: 0.26, wet: 1 }).connect(offEchoReturn);
         const offCh = {};
+        const offTrackInputs = {};
         const anySolo = TRACK_KEYS.some((track) => channelState[track].solo);
         for (const k of TRACK_KEYS) {
           const st = channelState[k];
           const muted = soloTrack ? k !== soloTrack : st.mute || (anySolo && !st.solo);
+          offTrackInputs[k] = new Tone.Compressor({ threshold: -20, ratio: 4, attack: 0.005, release: 0.15, knee: 12 });
           offCh[k] = new Tone.Channel({ volume: muted ? -Infinity : st.vol, pan: st.pan, mute: muted });
+          offTrackInputs[k].connect(offCh[k]);
           if (k === "drums") {
             offCh[k].connect(offDrumDry);
             offCh[k].connect(offDrumParallel);
@@ -733,31 +739,31 @@ export function createAudio(song) {
         const offPadHp = new Tone.Filter({ type: "highpass", frequency: 170, Q: 0.6 });
         const offPadF = new Tone.Filter({ type: "lowpass", frequency: hp.filter, Q: 0.7 });
         const offChorus = new Tone.Chorus({ frequency: 0.4, delayTime: 4, depth: hp.chorusDepth, wet: hp.chorusWet }).start();
-        offPadHp.connect(offPadF); offPadF.connect(offChorus); offChorus.connect(offCh.harmony);
+        offPadHp.connect(offPadF); offPadF.connect(offChorus); offChorus.connect(offTrackInputs.harmony);
         const offPad = new Tone.PolySynth(Tone.Synth, { maxPolyphony: 4, oscillator: { type: hp.osc }, envelope: { attack: hp.attack, decay: hp.decay, sustain: hp.sustain, release: hp.release }, volume: SOURCE_LEVEL_DB.harmonyPad }).connect(offPadHp);
-        const offHalo = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.9, decay: 1, sustain: 0.5, release: 1.6 }, volume: SOURCE_LEVEL_DB.harmonyHalo }).connect(offCh.harmony);
-        const offRootHp = new Tone.Filter({ type: "highpass", frequency: 120, Q: 0.7 }).connect(offCh.harmony);
+        const offHalo = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.9, decay: 1, sustain: 0.5, release: 1.6 }, volume: SOURCE_LEVEL_DB.harmonyHalo }).connect(offTrackInputs.harmony);
+        const offRootHp = new Tone.Filter({ type: "highpass", frequency: 120, Q: 0.7 }).connect(offTrackInputs.harmony);
         const offSub = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.08, decay: 0.4, sustain: 0.85, release: 1.6 }, volume: SOURCE_LEVEL_DB.harmonyRoot }).connect(offRootHp);
 
         const bp = BASS_PRESETS[devices.bass.preset] || BASS_PRESETS.deep;
-        const offBHp = new Tone.Filter({ type: "highpass", frequency: 34, Q: 0.7 }).connect(offCh.bass);
+        const offBHp = new Tone.Filter({ type: "highpass", frequency: 34, Q: 0.7 }).connect(offTrackInputs.bass);
         const offBF = new Tone.Filter({ type: "lowpass", frequency: bp.cutoff, Q: 0.9 }).connect(offBHp);
         const offBDrive = new Tone.Distortion(bp.drive || 0).connect(offBF);
         const offBass = new Tone.PolySynth(Tone.Synth, { maxPolyphony: 6, oscillator: { type: bp.wave, detune: bp.detune || 0 }, envelope: { attack: bp.attack, decay: bp.decay, sustain: bp.sustain, release: bp.release }, volume: SOURCE_LEVEL_DB.bass + (bp.gain || 0) }).connect(offBDrive);
         if (bp.wave === "fmsquare") offBass.set({ oscillator: { modulationType: "sawtooth", harmonicity: 0.5, modulationIndex: 2 } });
 
         const mp = MELODY_PRESETS[devices.melody.preset] || MELODY_PRESETS.lead;
-        const offLHp = new Tone.Filter({ type: "highpass", frequency: 180, Q: 0.7 }).connect(offCh.melody);
+        const offLHp = new Tone.Filter({ type: "highpass", frequency: 180, Q: 0.7 }).connect(offTrackInputs.melody);
         const offLF = new Tone.Filter({ type: "lowpass", frequency: mp.cutoff, Q: 0.6 }).connect(offLHp);
         const offLead = new Tone.PolySynth(Tone.Synth, { maxPolyphony: 8, oscillator: { type: mp.wave }, envelope: { attack: mp.attack, decay: mp.decay, sustain: mp.sustain, release: mp.release }, volume: SOURCE_LEVEL_DB.melody }).connect(offLF);
 
-        const offKickF = new Tone.Filter({ type: "lowpass", frequency: 1800, Q: 0.5 }).connect(offCh.drums);
+        const offKickF = new Tone.Filter({ type: "lowpass", frequency: 1800, Q: 0.5 }).connect(offTrackInputs.drums);
         const offKick = new Tone.MembraneSynth({ volume: SOURCE_LEVEL_DB.kick }).connect(offKickF);
-        const offSnF = new Tone.Filter({ type: "highpass", frequency: 950 }).connect(offCh.drums);
+        const offSnF = new Tone.Filter({ type: "highpass", frequency: 950 }).connect(offTrackInputs.drums);
         const offSnare = new Tone.NoiseSynth({ noise: { type: "white" }, volume: SOURCE_LEVEL_DB.snare }).connect(offSnF);
-        const offHatF = new Tone.Filter({ type: "highpass", frequency: 7500 }).connect(offCh.drums);
+        const offHatF = new Tone.Filter({ type: "highpass", frequency: 7500 }).connect(offTrackInputs.drums);
         const offHat = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.02, sustain: 0 }, volume: SOURCE_LEVEL_DB.hat }).connect(offHatF);
-        const offClF = new Tone.Filter({ type: "bandpass", frequency: 1400, Q: 1.2 }).connect(offCh.drums);
+        const offClF = new Tone.Filter({ type: "bandpass", frequency: 1400, Q: 1.2 }).connect(offTrackInputs.drums);
         const offClap = new Tone.NoiseSynth({ noise: { type: "pink" }, volume: SOURCE_LEVEL_DB.clap }).connect(offClF);
 
         let offPrev = null;
