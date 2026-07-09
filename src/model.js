@@ -210,7 +210,9 @@ export function makeMagicScene() {
 
   const harmony = Array.from({ length: 4 }, () => Math.floor(Math.random() * 7));
 
-  const melodyBases = [36, 48, 60, 72]; // Octaves 2, 3, 4, 5
+  // Octaves 3-5. Octave 2 measured ~4 dB down through the lead highpass and
+  // sits on top of the bass register — thin AND muddy, so it's out.
+  const melodyBases = [48, 60, 72];
   const melodyBase = melodyBases[Math.floor(Math.random() * melodyBases.length)];
   const melodyNotes = scaleNotes(melodyBase, 15);
   const melody = new Array(16).fill(null);

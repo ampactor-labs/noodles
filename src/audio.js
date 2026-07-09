@@ -47,26 +47,26 @@ function scheduleKickDuck(param, time) {
 // gain values are trims measured so every preset of a track lands at the same
 // loudness — randomizing presets must never change the mix balance.
 const HARMONY_PRESETS = {
-  pad:     { osc: "sawtooth", filter: 1200, attack: 0.35, decay: 1.5, sustain: 0.8, release: 1.2, chorusWet: 0.4, chorusDepth: 0.7, gain: -4 },
-  keys:    { osc: "sine",     filter: 3000, attack: 0.01, decay: 0.4, sustain: 0.2, release: 0.4, chorusWet: 0.15, chorusDepth: 0.3, gain: 0 },
-  ambient: { osc: "triangle", filter: 800,  attack: 1.0,  decay: 2.0, sustain: 0.9, release: 2.5, chorusWet: 0.8,  chorusDepth: 0.9, gain: 2 },
-  stab:    { osc: "square",   filter: 2500, attack: 0.01, decay: 0.2, sustain: 0.0, release: 0.2, chorusWet: 0.1,  chorusDepth: 0.2, gain: -6 },
+  pad:     { osc: "sawtooth", filter: 1200, attack: 0.35, decay: 1.5, sustain: 0.8, release: 1.2, chorusWet: 0.4, chorusDepth: 0.7, gain: -4.5 },
+  keys:    { osc: "sine",     filter: 3000, attack: 0.01, decay: 0.4, sustain: 0.2, release: 0.4, chorusWet: 0.15, chorusDepth: 0.3, gain: -3 },
+  ambient: { osc: "triangle", filter: 800,  attack: 1.0,  decay: 2.0, sustain: 0.9, release: 2.5, chorusWet: 0.8,  chorusDepth: 0.9, gain: -4 },
+  stab:    { osc: "square",   filter: 2500, attack: 0.01, decay: 0.2, sustain: 0.0, release: 0.2, chorusWet: 0.1,  chorusDepth: 0.2, gain: 3 },
 };
 export const HARMONY_PRESET_NAMES = Object.keys(HARMONY_PRESETS);
 
 const BASS_PRESETS = {
-  deep:   { wave: "sine",     cutoff: 500,  attack: 0.01,  decay: 0.3,  sustain: 0.7,  release: 0.3, gain: 0, drive: 0, detune: 0 },
+  deep:   { wave: "sine",     cutoff: 500,  attack: 0.01,  decay: 0.3,  sustain: 0.7,  release: 0.3, gain: -2.5, drive: 0, detune: 0 },
   bright: { wave: "sawtooth", cutoff: 2500, attack: 0.02,  decay: 0.15, sustain: 0.4,  release: 0.2, gain: -3, drive: 0.1, detune: 0 },
-  pluck:  { wave: "fmsquare", cutoff: 1800, attack: 0.001, decay: 0.2,  sustain: 0.1,  release: 0.1, gain: -2, drive: 0.5, detune: 0 },
-  sub:    { wave: "triangle", cutoff: 350,  attack: 0.05,  decay: 0.4,  sustain: 1.0,  release: 0.4, gain: 4, drive: 0.35, detune: 0 },
+  pluck:  { wave: "fmsquare", cutoff: 1800, attack: 0.001, decay: 0.2,  sustain: 0.1,  release: 0.1, gain: -4.5, drive: 0.5, detune: 0 },
+  sub:    { wave: "triangle", cutoff: 350,  attack: 0.05,  decay: 0.4,  sustain: 1.0,  release: 0.4, gain: -9.5, drive: 0.35, detune: 0 },
 };
 export const BASS_PRESET_NAMES = Object.keys(BASS_PRESETS);
 
 const MELODY_PRESETS = {
-  lead:  { wave: "sawtooth", cutoff: 3500, attack: 0.02,  decay: 0.2,  sustain: 0.4, release: 0.3, gain: 0 },
-  bell:  { wave: "sine",     cutoff: 4000, attack: 0.001, decay: 0.8,  sustain: 0.0, release: 0.6, gain: 4 },
-  synth: { wave: "square",   cutoff: 2000, attack: 0.01,  decay: 0.15, sustain: 0.2, release: 0.15, gain: -2 },
-  pluck: { wave: "triangle", cutoff: 2800, attack: 0.005, decay: 0.1,  sustain: 0.0, release: 0.1, gain: 2 },
+  lead:  { wave: "sawtooth", cutoff: 3500, attack: 0.02,  decay: 0.2,  sustain: 0.4, release: 0.3, gain: -5.5 },
+  bell:  { wave: "sine",     cutoff: 4000, attack: 0.001, decay: 0.8,  sustain: 0.0, release: 0.6, gain: -7 },
+  synth: { wave: "square",   cutoff: 2000, attack: 0.01,  decay: 0.15, sustain: 0.2, release: 0.15, gain: -6 },
+  pluck: { wave: "triangle", cutoff: 2800, attack: 0.005, decay: 0.1,  sustain: 0.0, release: 0.1, gain: 1.5 },
 };
 export const MELODY_PRESET_NAMES = Object.keys(MELODY_PRESETS);
 
@@ -84,25 +84,28 @@ const KITS = {
     snare: 0.12,
     hat: { decay: 0.026, resonance: 5000 },
     clap: 0.11,
-    gain: 2,
+    gain: 2.5,
   },
   clean: {
     kick: { pitchDecay: 0.04, octaves: 6, envelope: { attack: 0.001, decay: 0.4, sustain: 0 } },
     snare: 0.17,
     hat: { decay: 0.05, resonance: 4000 },
     clap: 0.14,
-    gain: 0,
+    gain: -1.5,
   },
 };
 export const KIT_NAMES = Object.keys(KITS);
 
-// Key-tracked velocity boosts: low octaves lose audible energy to the bass
-// highpass and small speakers, so quieter registers get pushed back up.
+// Key-tracked velocity boosts: octave 1 loses audible energy to the 34 Hz
+// highpass and to small speakers, so every preset pushes the low register
+// back up. Factors close the measured octave-1 vs octave-2 RMS gaps
+// (npm run calibrate, bassOct table).
 function bassVelocityBoost(preset, midi) {
-  if (preset === "sub" && midi < 36) return 2.5;
-  if (preset === "bright" && midi >= 36 && midi < 48) return 1.25;
-  if (preset === "pluck" && midi >= 36 && midi < 48) return 1.4;
-  return 1;
+  if (midi >= 36) return 1;
+  if (preset === "sub") return 2.5;
+  if (preset === "pluck") return 1.35;
+  if (preset === "bright") return 1.1;
+  return 1; // deep: pure sine — a boost only booms woofers, phones stay deaf
 }
 
 // --- The signal chain, built once for live playback and once per offline
@@ -140,6 +143,7 @@ function buildGraph({ meters = false } = {}) {
   // parallel compression — a third stage on top was mud, not glue).
   g.channels = {};
   g.inputs = {};
+  g.trims = {};
   g.verbSends = {};
   g.echoSends = {};
   g.meters = {};
@@ -149,8 +153,13 @@ function buildGraph({ meters = false } = {}) {
       g.channels[k].connect(g.drumDry);
       g.channels[k].connect(g.drumParallel);
     } else {
+      // Preset level trims land AFTER the input compressor: pre-comp (and
+      // pre-drive) gain shapes tone and gets eaten by the nonlinearities,
+      // so leveling there never converges. Drive for tone, trim for level.
       g.inputs[k] = new Tone.Compressor({ threshold: -20, ratio: 4, attack: 0.005, release: 0.15, knee: 12 });
-      g.inputs[k].connect(g.channels[k]);
+      g.trims[k] = new Tone.Gain(1);
+      g.inputs[k].connect(g.trims[k]);
+      g.trims[k].connect(g.channels[k]);
       g.channels[k].connect(g.musicDuck);
     }
     g.verbSends[k] = new Tone.Gain(0).connect(g.reverb);
@@ -232,13 +241,18 @@ function buildGraph({ meters = false } = {}) {
 }
 
 // --- Preset appliers, parameterized by graph so live and offline share them.
-function applyHarmonyPresetTo(g, name) {
+function setTrim(g, track, db, ramp) {
+  if (ramp) g.trims[track].gain.rampTo(Tone.dbToGain(db), 0.05);
+  else g.trims[track].gain.value = Tone.dbToGain(db);
+}
+
+function applyHarmonyPresetTo(g, name, { ramp = false } = {}) {
   const p = HARMONY_PRESETS[name] || HARMONY_PRESETS.keys;
   g.pad.set({ oscillator: { type: p.osc }, envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release } });
   g.padLfo.min = p.filter * 0.5;
   g.padLfo.max = p.filter * 1.5;
   g.chorus.set({ wet: p.chorusWet, depth: p.chorusDepth });
-  g.pad.volume.value = SOURCE_LEVEL_DB.harmonyPad + p.gain;
+  setTrim(g, "harmony", p.gain, ramp);
 }
 
 function applyBassPresetTo(g, name, { ramp = false } = {}) {
@@ -248,7 +262,7 @@ function applyBassPresetTo(g, name, { ramp = false } = {}) {
   if (ramp) g.bassFilter.frequency.rampTo(p.cutoff, 0.05);
   else g.bassFilter.frequency.value = p.cutoff;
   g.bassDrive.distortion = p.drive || 0;
-  g.bassSynth.volume.value = SOURCE_LEVEL_DB.bass + p.gain;
+  setTrim(g, "bass", p.gain, ramp);
 }
 
 function applyMelodyPresetTo(g, name, { ramp = false } = {}) {
@@ -256,7 +270,7 @@ function applyMelodyPresetTo(g, name, { ramp = false } = {}) {
   g.lead.set({ oscillator: { type: p.wave }, envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release } });
   if (ramp) g.leadFilter.frequency.rampTo(p.cutoff, 0.05);
   else g.leadFilter.frequency.value = p.cutoff;
-  g.lead.volume.value = SOURCE_LEVEL_DB.melody + p.gain;
+  setTrim(g, "melody", p.gain, ramp);
 }
 
 function applyKitTo(g, name) {
