@@ -19,7 +19,7 @@ const SOURCE_LEVEL_DB = {
   harmonyHalo: -23,
   harmonyRoot: -29,
   bass: -7,
-  melody: -10,
+  melody: -7,
   kick: 0,
   snare: 5,
   hat: -3,
