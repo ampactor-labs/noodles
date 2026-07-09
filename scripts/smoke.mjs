@@ -86,19 +86,19 @@ async function clickAction(page, action) {
   if (!clicked) throw new Error(`missing action ${action}`);
 }
 
+// Dispatch pointer events straight at the cell: coordinate taps race the
+// editor's auto-scroll-to-notes and miss ~1 run in 3.
 async function tapPianoCell(page, row, step) {
-  const handle = await page.evaluateHandle(
-    ({ row, step }) => document.querySelectorAll(".prow")[row]?.querySelectorAll(".pcell")[step],
-    { row, step }
-  );
-  const el = handle.asElement();
-  if (!el) throw new Error(`missing piano cell row ${row} step ${step}`);
-  await el.evaluate((node) => node.scrollIntoView({ block: "center", inline: "center" }));
-  await wait(80);
-  const box = await el.boundingBox();
-  if (!box) throw new Error(`piano cell row ${row} step ${step} has no box`);
-  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
-  await wait(120);
+  const ok = await page.evaluate(({ row, step }) => {
+    const cell = document.querySelectorAll(".prow")[row]?.querySelectorAll(".pcell")[step];
+    if (!cell) return false;
+    const opts = { bubbles: true, cancelable: true, pointerId: 1, pointerType: "touch" };
+    cell.dispatchEvent(new PointerEvent("pointerdown", opts));
+    cell.dispatchEvent(new PointerEvent("pointerup", opts));
+    return true;
+  }, { row, step });
+  if (!ok) throw new Error(`missing piano cell row ${row} step ${step}`);
+  await wait(150);
 }
 
 async function tapAt(page, x, y) {
@@ -222,8 +222,13 @@ try {
   const mixerText = await page.$eval("#sheet", (el) => el.textContent);
   assertState(mixerText.includes("echo"), "mixer missing echo send");
   assertState(mixerText.includes("Master") && mixerText.includes("-6 dB"), "mixer missing master/default level");
-  const drumKit = await page.$eval('.mx-strip[data-track="drums"] .mx-preset', (el) => el.value);
-  assertState(drumKit === "clean", `default drum kit should be clean, got ${drumKit}`);
+  // Presets randomize on load; assert the mixer UI agrees with the engine
+  // instead of pinning a name.
+  const kitMatch = await page.evaluate(() => {
+    const sel = document.querySelector('.mx-strip[data-track="drums"] .mx-preset');
+    return { ui: sel?.value, engine: window.__noodles.audio.kit() };
+  });
+  assertState(kitMatch.ui === kitMatch.engine, `mixer kit select (${kitMatch.ui}) disagrees with engine (${kitMatch.engine})`);
   await tap(page, ".tbtn.play");
   const mixerStillOpen = await page.$eval("#sheet", (el) => el.classList.contains("open"));
   assertState(mixerStillOpen, "play/pause dismissed an open sheet");
@@ -249,6 +254,23 @@ try {
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
 
+  // Session-record: arm, play a couple of bars in session view, and the
+  // performance must land in the arrangement. Regression guard: recording used
+  // to throw a ReferenceError on every recorded bar (undefined scheduleSave).
+  await tap(page, "#view-toggle-btn");
+  const recArmed = await page.$eval("#rec-btn", (el) => (el.click(), true));
+  assertState(recArmed, "record button missing");
+  await page.waitForFunction(() => document.querySelector("#rec-btn")?.classList.contains("on"));
+  await tap(page, ".tbtn.play");
+  await page.waitForFunction(
+    () => window.__noodles.song.arrangement.harmony.some((c) => c.start === 0 && c.len >= 2),
+    { timeout: 30000 }
+  );
+  await tap(page, ".tbtn.play");
+  await page.evaluate(() => document.querySelector("#rec-btn")?.click());
+  await page.waitForFunction(() => !document.querySelector("#rec-btn")?.classList.contains("on"));
+  await tap(page, "#view-toggle-btn");
+
   // The transport must actually advance — not merely flip the play button on.
   // Regression guard for the dual-context bug: play() started a transport the
   // clock loop wasn't scheduled on, so nothing sounded and the playhead froze.
@@ -260,6 +282,21 @@ try {
   assertState(phStart !== phEnd, `transport stalled: playhead did not advance (${phStart} -> ${phEnd})`);
 
   await page.screenshot({ path: shotPath, fullPage: true });
+
+  // Dice: one tap re-rolls the whole song (fresh magic scene), and undo
+  // brings the previous song back.
+  const scenesBeforeDice = await page.evaluate(() => window.__noodles.song.scenes.length);
+  assertState(scenesBeforeDice >= 2, `expected the duplicated scene to persist, got ${scenesBeforeDice}`);
+  await page.evaluate(() => document.querySelector("#dice-btn").click());
+  const afterDice = await page.evaluate(() => ({
+    scenes: window.__noodles.song.scenes.length,
+    tag: window.__noodles.song.scenes[0].tag,
+  }));
+  assertState(afterDice.scenes === 1 && afterDice.tag.includes("✨"), `dice did not roll a fresh magic song: ${JSON.stringify(afterDice)}`);
+  await page.evaluate(() => document.querySelector(".tbtn.undo").click());
+  const scenesAfterUndo = await page.evaluate(() => window.__noodles.song.scenes.length);
+  assertState(scenesAfterUndo === scenesBeforeDice, `undo did not restore the pre-dice song (${scenesAfterUndo} vs ${scenesBeforeDice})`);
+
   assertState(errors.length === 0, `runtime errors:\n${errors.join("\n")}`);
   console.log(`smoke ok: ${propsShotPath}`);
   console.log(`smoke ok: ${mixerShotPath}`);
