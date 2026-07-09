@@ -301,8 +301,9 @@ export function makeSong() {
   setScaleContext(key, scale);
   const s = defaultScene();
   const len = s.harmony.length;
+  const tempo = Math.floor(70 + Math.random() * 61); // 70-130
   return {
-    tempo: 92,
+    tempo,
     key,
     scale,
     scenes: [s],
