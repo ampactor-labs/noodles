@@ -1,21 +1,24 @@
 # Roadmap / TODO
 
-The live prototype is the Vite + Tone.js + DOM app at the repo root. Working today: Session +
-Arrangement views, four clip editors (chords / drum rack / two piano rolls), mixer,
-devices (kit picker + synth cutoff/decay), global Key + Scale (scale-aware), one-tap
-Transforms (Arp / Oct / Humanize / Random / Clear), undo/redo, pinned transport.
+The live prototype is the Vite + Tone.js + DOM app at the repo root. `AGENTS.md` carries the
+full "what works today" list; the short version: Session + Arrangement views with quantized
+launch, launch modes and follow-actions, session-record into the arrangement, four clip
+editors with velocity lanes, a vertical mixer with reverb/echo sends and loudness-matched
+device presets, a randomized-but-balanced cold open with a 🎲 reroll, WAV export (master +
+stems) through the same graph as live playback, project save/load, undo/redo, and two
+headless gates (`npm run smoke`, `npm run calibrate`).
 
 ## Agreed next (in order)
 
-1. **Clip launch modes** — loop vs one-shot per clip, and follow-actions (Ableton's
-   clip properties). Long-press a clip → a properties sheet.
-2. **Mixer as vertical channel strips** — tall faders, prominent meters, sends A/B/C,
-   horizontally scrollable. The Ableton mixer look (reference shots #3, #6).
-3. **Sound / sample browser** — and it is the home for the **drum-sample loader**.
+1. **Sound / sample browser** — and it is the home for the **drum-sample loader**.
    *Priority:* real drum one-shots (tight funk / UK-garage kicks, snares, hats, claps)
    played by the Drum Rack instead of the synth kit. Keep the synth kit as a fallback
    option — it's good — but samples are what nail the sound. Browser organized by
-   type/character; user can load their own WAVs.
+   type/character; user can load their own WAVs (offline constraint: no CDN fetches).
+
+Shipped since the last revision: clip launch modes + follow-actions, the vertical mixer,
+sends, sidechain duck, per-preset loudness calibration, session record, WAV/stem export,
+project files, and the dice.
 
 ## Performance (Galaxy A16 5G / Dimensity 6300)
 

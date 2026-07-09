@@ -1,7 +1,7 @@
-# Handoff — Noodles (a mobile Ableton-style DAW)
+# Agent brief — Noodles (a mobile Ableton-style DAW)
 
-You (Codex / GPT-5.5) are taking over this project. This file is the current source of
-truth. Read it fully before touching code; then read `ROADMAP.md`. The other root docs
+This file is the current source of truth for whoever (or whatever) works on the code.
+Read it fully before touching anything; then read `ROADMAP.md`. The other root docs
 are history — see "Stale docs" below so they don't mislead you.
 
 ## What this is, in one paragraph
@@ -104,15 +104,24 @@ mixolydian (all 7-note, so 7 chords each). Also here: `voiceLead`, `sharedTones`
 the drum-voice metadata, and `makeSong` / `makeScene` / `cloneScene` / `arrangeLength` / `clipAt`.
 
 **`src/audio.js`** — `createAudio(song)` builds the Tone.js graph and returns the transport
-API. Graph: four per-track `Tone.Channel`s (volume/pan/send + a meter) → master limiter; a
-`Freeverb` send return; harmony = detuned-ish saw pad + mono sine halo + sine sub; bass and
-lead `Synth`s with filters (device params); a drum kit (kick MembraneSynth, snare/clap/hat as
-filtered noise). One `Tone.Loop("16n")` clock drives **both** Scene looping and Arrangement
-playback (per bar, `clipAt` picks each track's active clip), emitting UI events through
-`Tone.Draw.schedule` → the `onVisual` callback. Public API: `init/play/stop/toggle/playing`,
-`launchScene`, `playArrangement`/`setArrangePos`/`enterArrangement`, `setMode`, `setTempo`,
-`setSwing`, `preview`/`previewHit`/`previewNote`, mixer `setVol`/`setPan`/`setSend`/`meter`,
-devices `kit`/`setKit`/`device`/`setDevice`, and `onVisual`. Context is created with
+API. The one rule that matters: **`buildGraph()` is the only place the signal chain exists.**
+The live context and `renderOffline` (WAV export) both call it, so export-matches-app holds
+by construction — never fork the chain. Topology: per track a preset **trim** Gain and
+`Tone.Channel` (drums skip the per-track input compressor; they already get parallel
+compression), reverb + echo sends, a kick-sidechain duck on everything melodic, a drum bus
+with a parallel compressor, and a master section (gain → saturation → soft clip → glue
+compressor → +8 dB makeup → limiter at -2). Harmony = saw pad (LFO owns its filter cutoff —
+a signal connected to a param overrides it; presets rescale the LFO range) + mono halo + a
+highpassed root hint; bass and lead are PolySynths behind drive/filters; the kit is
+MembraneSynth kick + filtered-noise snare/hat/clap. Four preset tables (kit, harmony, bass,
+melody) carry **measured** gain trims — run `npm run calibrate` before and after changing
+any of them; presets of a track must stay loudness-matched or the on-load randomizer
+unbalances the mix. One `Tone.Loop("16n")` clock drives both Scene looping and Arrangement
+playback, emitting UI events through `Tone.Draw.schedule` → `onVisual`. Public API:
+`init/play/stop/playing`, `launchScene`/`launchClip`, `playArrangement`/`setArrangePos`/
+`enterArrangement`, `setTempo`/`setSwing`, `preview`/`previewHit`/`previewNote`, mixer
+`setVol`/`setPan`/`setSend`/`setEcho`/`setMute`/`setSolo`/`meter`, preset getters/setters
+per track, `onVisual`, and `renderOffline(soloTrack)`. Context is created with
 `latencyHint:"playback"` for weak devices; keep the default 0.1s lookAhead.
 
 **`src/main.js`** — all UI and interaction, vanilla DOM (no framework). It builds: the
@@ -131,20 +140,20 @@ a key/scale change or an undo (and re-applies `setScaleContext`).
 
 ## What works today
 
-Session clip grid and launch; Arrangement timeline with drag-move, edge-resize, split,
-duplicate, delete, cross-track drag, a loop brace, and a gliding playhead; four clip editors;
-mixer (vol/pan/send + live meters); devices (kit picker: garage/funk/clean, plus bass/melody
-cutoff + decay); global Key + Scale (the whole app transposes and re-snaps in key); one-tap
-Transforms; undo/redo; a global groove/swing slider; a pinned always-available transport. Two
-performance passes are done (see `ROADMAP.md`).
+Session clip grid with quantized launch, per-clip launch modes (loop/one-shot) and
+follow-actions; Arrangement timeline with drag-move, edge-resize, split, duplicate, delete,
+cross-track drag, a loop brace, and a gliding playhead; session-record (arm ● and your
+scene launches get written into the arrangement bar by bar); four clip editors, each with a
+velocity lane; vertical mixer strips (fader, pan, reverb + echo sends, live meters with peak
+hold, preset pickers); loudness-matched device presets per track; randomized-but-balanced
+cold open (key, scale, tempo, presets, magic scene) plus a 🎲 button that rerolls it all;
+global Key + Scale (the whole app transposes and re-snaps in key); one-tap Transforms;
+undo/redo; groove/swing; WAV export (master + four stems) rendered through the same graph
+as live playback; project save/load to file and localStorage; GitHub Pages deploy on push.
 
 ## What's next (priority order — from `ROADMAP.md`)
 
-1. **Clip launch modes** — loop vs one-shot per clip, and follow-actions. Long-press a clip →
-   a properties sheet.
-2. **Mixer as vertical channel strips** — tall faders, prominent meters, sends A/B/C,
-   horizontally scrollable (the real Ableton mixer look).
-3. **Sound / sample browser** — and it is the home for the **drum-sample loader**. This is the
+1. **Sound / sample browser** — and it is the home for the **drum-sample loader**. This is the
    one the builder wants most: real drum one-shots (tight funk / UK-garage kicks, snares,
    hats, claps) played by the Drum Rack instead of the synth kit. Keep the synth kit as a
    fallback — it's good — but samples are the goal. The loader must accept user-loaded local
@@ -170,8 +179,13 @@ Plus tier-2 performance work listed in `ROADMAP.md` (diff-based cell repaints, p
   key change. Keep every new note-producing surface scale-snapped by default.
 - **Modern-browser features in use:** `structuredClone`, CSS `color-mix()`, `esnext` build
   target. Fine for the target phones; don't add polyfills.
-- **Nothing is committed.** The repo is `git init`'d with no commits — the whole working tree
-  is uncommitted. Make an initial commit early so you have a baseline to diff against.
+- **Two gates before claiming anything works:** `npm run smoke` (headless Chrome drives the
+  core flow — launch, editors, record, export, dice — and fails on any page error) and, if
+  you touched the audio chain or presets, `npm run calibrate` (renders every preset through
+  the real graph and prints RMS/peak tables; per-track spreads should stay ≲1.5 dB). A green
+  `npm run build` proves nothing about runtime.
+- **`window.__noodles`** exposes `{ song, audio, applyProject }` for the headless harnesses.
+  It is not a public API, but keep it working — smoke and calibrate depend on it.
 
 ## Stale docs — read for philosophy, not for what to build
 

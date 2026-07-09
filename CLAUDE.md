@@ -15,7 +15,7 @@ The whole product lives or dies in the **first 30 seconds cold.** That loop is t
 
 ## Repository status
 
-A working prototype now lives at the repo root: a Vite + Tone.js + vanilla DOM/CSS app, phone-first, run with `npm run dev -- --host`. Working today: Session and Arrangement views, four clip editors (chords, drum rack, two piano rolls), a mixer, global key/scale, one-tap transforms, undo/redo, and per-clip launch modes. `ROADMAP.md` tracks what's next and the performance work. The directory name is `noodles`.
+A working prototype now lives at the repo root: a Vite + Tone.js + vanilla DOM/CSS app, phone-first, run with `npm run dev -- --host`. `AGENTS.md` keeps the authoritative "what works today" list (don't duplicate it here — it goes stale); the shape of it: Session + Arrangement, four clip editors, a mixer with sends and loudness-matched device presets, a randomized-but-balanced cold open with a 🎲 reroll, session record, WAV export through the live graph, and project save/load. `ROADMAP.md` tracks what's next and the performance work. The directory name is `noodles`.
 
 The build intentionally took the literal mobile-Ableton road (clip grid, launch-and-loop, direct drag), a pivot the builder chose over the original fractal "cold-open harmony playground" milestone in `HANDOFF.md` §7. Read `AGENTS.md` + `ROADMAP.md` for what the app is today; read `HANDOFF.md` + `DECISIONS.md` for the north star and the reasoning, which still hold (the instrument is the lesson; learning is pull; can't-make-it-wrong). Where surface detail disagrees, the code and `AGENTS.md` win; on *why*, `HANDOFF.md` wins.
 
@@ -67,7 +67,8 @@ Run from the repo root (the app moved up out of `prototype/`, so an old shell si
 - `npm install` — install dependencies (first run only).
 - `npm run dev -- --host` — Vite dev server; open the printed Network URL on a phone.
 - `npm run build && npm run preview -- --host` — production build and preview; judge on-device performance here, never on the dev server.
-- `npm run smoke` — headless-Chrome smoke test (`puppeteer-core` + a Chrome binary); drives the core flow and asserts the transport actually advances, not just that the play button lights up.
+- `npm run smoke` — headless-Chrome smoke test (`puppeteer-core` + a Chrome binary); drives the core flow (launch, editors, record, export, dice) and asserts the transport actually advances, not just that the play button lights up.
+- `npm run calibrate` — renders every device preset through the real signal chain and prints RMS/peak tables. Run it before and after touching `src/audio.js` presets or the master chain; per-track preset spreads should stay within about 1.5 dB or the randomized cold open stops being balanced.
 
 ## A note on naming
 
