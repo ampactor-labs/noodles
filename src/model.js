@@ -227,14 +227,25 @@ export function makeMagicScene() {
 
   const bassBase = Math.random() < 0.5 ? 36 : 24;
   const bassNotes = scaleNotes(bassBase, 12);
+  const bassPick = () => bassNotes[Math.floor(Math.random() * Math.min(bassNotes.length, 5))];
   const bass = new Array(16).fill(null);
   for (let s = 0; s < 16; s += 4) {
     if (Math.random() < 0.8) {
-      bass[s] = [{ midi: bassNotes[Math.floor(Math.random() * Math.min(bassNotes.length, 5))], len: 4, vel: 0.9 }];
+      bass[s] = [{ midi: bassPick(), len: 4, vel: 0.9 }];
     }
   }
   if (!bass.some(Boolean)) {
-    bass[0] = [{ midi: bassNotes[Math.floor(Math.random() * Math.min(bassNotes.length, 5))], len: 4, vel: 0.9 }];
+    bass[0] = [{ midi: bassPick(), len: 4, vel: 0.9 }];
+  }
+  // Syncopation: a short pickup on the "and" before beat 3 or pushing into
+  // the next bar — what makes a bassline groove instead of plod. The held
+  // note underneath gets cut short so the low end never doubles up.
+  for (const s of [6, 14]) {
+    if (Math.random() < 0.45 && !bass[s]) {
+      const held = bass[s - 2]?.[0];
+      if (held) held.len = 2;
+      bass[s] = [{ midi: bassPick(), len: 2, vel: 0.7 + Math.random() * 0.15 }];
+    }
   }
 
   const scene = makeScene(harmony, drums, melody, bass);
