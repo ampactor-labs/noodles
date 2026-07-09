@@ -1442,6 +1442,22 @@ function buildDrumEditor(scene) {
     }),
     el("div", {
       class: "tfbtn",
+      text: "Humanize",
+      onclick: () => {
+        pushUndo();
+        for (const v of DRUM_VOICES) {
+          for (let s = 0; s < 16; s++) {
+            if (scene.drums[v][s] > 0) {
+              scene.drums[v][s] = Math.max(0.4, Math.min(1, scene.drums[v][s] + (Math.random() * 0.4 - 0.2)));
+            }
+          }
+        }
+        openEditor(editor.scene, "drums");
+        refreshClip(editor.scene, "drums");
+      },
+    }),
+    el("div", {
+      class: "tfbtn",
       text: "Clear",
       onclick: () => {
         pushUndo();
