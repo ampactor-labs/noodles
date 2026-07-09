@@ -193,8 +193,8 @@ async function togglePlayback() {
 function renderTransport() {
   transport.innerHTML = "";
   playBtn = el("div", {
-    class: "tbtn play",
-    text: "▶",
+    class: "tbtn play" + (audio.playing ? " on" : ""),
+    text: audio.playing ? "⏹" : "▶",
     onclick: togglePlayback,
   });
   const recBtn = el("div", {
@@ -1274,7 +1274,7 @@ function openMixer(focusTrack = null) {
     meterBars[k] = meterFill;
     const meter = el("div", { class: "mx-meter" }, [el("div", { class: "mx-meter-track" }, [meterFill])]);
 
-    const volSlider = el("input", { type: "range", min: "-40", max: "6", step: "1", value: String(ms.vol), class: "mx-vfader" });
+    const volSlider = el("input", { type: "range", min: "-18", max: "6", step: "1", value: String(ms.vol), class: "mx-vfader" });
     const volLabel = el("div", { class: "mx-val", text: `${ms.vol}` });
     volSlider.addEventListener("input", () => { ms.vol = parseFloat(volSlider.value); audio.setVol(k, ms.vol); volLabel.textContent = `${ms.vol}`; });
 

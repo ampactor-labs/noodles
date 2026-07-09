@@ -188,7 +188,7 @@ export function createAudio(song) {
   const clapFilter = new Tone.Filter({ type: "bandpass", frequency: 1400, Q: 1.2 }).connect(channels.drums);
   const clap = new Tone.NoiseSynth({ noise: { type: "pink" }, volume: -12 }).connect(clapFilter);
 
-  let kitName = "garage";
+  let kitName = "clean";
   function applyKit(name) {
     const k = KITS[name] || KITS.garage;
     kitName = name;
