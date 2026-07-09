@@ -21,7 +21,7 @@ import {
   setScaleContext,
   snapToScale,
 } from "./model.js";
-import { createAudio, KIT_NAMES } from "./audio.js";
+import { createAudio, KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES } from "./audio.js";
 
 // Pitch range shown in the piano roll, per track.
 const PIANO = { melody: { base: 60, rows: 15 }, bass: { base: 36, rows: 12 } };
@@ -198,6 +198,7 @@ function renderTransport() {
   ]);
   seg.style.marginLeft = "auto";
   const mixBtn = el("div", { class: "tbtn", text: "Mix", onclick: openMixer });
+  const expBtn = el("div", { class: "tbtn", text: "Exp", onclick: openExport });
   const addBtn = el("div", {
     class: "tbtn",
     text: "＋",
@@ -212,7 +213,7 @@ function renderTransport() {
   undoBtn = el("div", { class: "tbtn undo", text: "↶", onclick: undo });
   redoBtn = el("div", { class: "tbtn redo", text: "↷", onclick: redo });
   const left = el("div", { class: "tleft" }, [playBtn, undoBtn, redoBtn]);
-  const scroll = el("div", { class: "tscroll" }, [bpmEl, minus, plus, keyctl, groove, seg, mixBtn, addBtn]);
+  const scroll = el("div", { class: "tscroll" }, [bpmEl, minus, plus, keyctl, groove, seg, mixBtn, expBtn, addBtn]);
   transport.append(left, scroll);
   updateUndoButtons();
 }
@@ -300,6 +301,7 @@ function bindSessionClip(clip, sceneIndex, track, filled) {
   let longPress = false;
   let startX = 0;
   let startY = 0;
+  let moved = false;
   const clear = () => {
     clearTimeout(timer);
     timer = 0;
@@ -307,6 +309,7 @@ function bindSessionClip(clip, sceneIndex, track, filled) {
   };
   clip.addEventListener("pointerdown", (e) => {
     longPress = false;
+    moved = false;
     startX = e.clientX;
     startY = e.clientY;
     clip.classList.add("pressing");
@@ -317,14 +320,17 @@ function bindSessionClip(clip, sceneIndex, track, filled) {
     }, 520);
   });
   clip.addEventListener("pointermove", (e) => {
-    if (Math.hypot(e.clientX - startX, e.clientY - startY) > 12) clear();
+    if (Math.hypot(e.clientX - startX, e.clientY - startY) > 12) {
+      moved = true;
+      clear();
+    }
   });
-  clip.addEventListener("pointerup", () => {
-    const wasLong = longPress;
-    clear();
-    if (!wasLong) openEditor(sceneIndex, track);
-  });
+  clip.addEventListener("pointerup", clear);
   clip.addEventListener("pointercancel", clear);
+  // click fires reliably on mobile even when pointerup is swallowed by scroll
+  clip.addEventListener("click", () => {
+    if (!longPress && !moved) openEditor(sceneIndex, track);
+  });
 }
 
 function renderSession() {
@@ -333,7 +339,17 @@ function renderSession() {
   const grid = el("div", { class: "grid" });
   grid.appendChild(el("div", { class: "head corner", text: "" }));
   for (const t of TRACKS) {
-    grid.appendChild(el("div", { class: "head", style: `--tc:${t.color}`, text: t.name }));
+    const head = el("div", { class: "head", style: `--tc:${t.color}`, text: t.name });
+    // Long-press track header → open mixer for that track
+    let ht = 0, hlp = false;
+    head.addEventListener("pointerdown", () => {
+      hlp = false;
+      ht = window.setTimeout(() => { hlp = true; openMixer(); }, 520);
+    });
+    head.addEventListener("pointerup", () => { clearTimeout(ht); });
+    head.addEventListener("pointercancel", () => { clearTimeout(ht); });
+    head.addEventListener("click", () => { if (hlp) { hlp = false; } });
+    grid.appendChild(head);
   }
   song.scenes.forEach((scene, i) => {
     const refs = { clips: {} };
@@ -543,7 +559,7 @@ function openClipProps(sceneIndex, track) {
 // ---------------------------------------------------------------------------
 let mixerRAF = 0;
 const mixState = {
-  harmony: { vol: 0, pan: 0, send: -9 },
+  harmony: { vol: -6, pan: 0, send: -9 },
   drums: { vol: 0, pan: 0, send: -22 },
   bass: { vol: 0, pan: 0, send: -48 },
   melody: { vol: 0, pan: 0, send: -11 },
@@ -567,43 +583,59 @@ function openMixer() {
     ])
   );
 
+  const container = el("div", { class: "mx-container" });
   const meterBars = {};
   for (const t of TRACKS) {
     const k = t.key;
     const ms = mixState[k];
-    const meter = el("div", { class: "mxmeter" }, [el("i")]);
-    meterBars[k] = meter.firstChild;
-    const ctrl = el("div", { class: "mxctrl" }, [
-      el("label", { text: "vol" }), slider(-40, 6, 1, ms.vol, (v) => { ms.vol = v; audio.setVol(k, v); }),
-      el("label", { text: "pan" }), slider(-1, 1, 0.05, ms.pan, (v) => { ms.pan = v; audio.setPan(k, v); }),
-      el("label", { text: "send" }), slider(-60, 0, 1, ms.send, (v) => { ms.send = v; audio.setSend(k, v); }),
-    ]);
-    const dev = el("div", { class: "mxdev" });
+    const meterFill = el("i");
+    meterBars[k] = meterFill;
+    const meter = el("div", { class: "mx-meter" }, [el("div", { class: "mx-meter-track" }, [meterFill])]);
+
+    const volSlider = el("input", { type: "range", min: "-40", max: "6", step: "1", value: String(ms.vol), class: "mx-vfader" });
+    volSlider.addEventListener("input", () => { ms.vol = parseFloat(volSlider.value); audio.setVol(k, ms.vol); });
+    const volLabel = el("div", { class: "mx-val", text: `${ms.vol} dB` });
+    volSlider.addEventListener("input", () => { volLabel.textContent = `${ms.vol} dB`; });
+
+    const panSlider = slider(-1, 1, 0.05, ms.pan, (v) => { ms.pan = v; audio.setPan(k, v); });
+    const sendSlider = slider(-60, 0, 1, ms.send, (v) => { ms.send = v; audio.setSend(k, v); });
+
+    // Device preset selector — all tracks get 3 options
+    const devSection = el("div", { class: "mx-dev-section" });
     if (k === "drums") {
-      const sel = el("select");
-      KIT_NAMES.forEach((n) => {
-        const o = el("option", { value: n, text: n });
-        if (n === audio.kit()) o.selected = true;
-        sel.appendChild(o);
-      });
+      const sel = el("select", { class: "mx-preset" });
+      KIT_NAMES.forEach((n) => { const o = el("option", { value: n, text: n }); if (n === audio.kit()) o.selected = true; sel.appendChild(o); });
       sel.addEventListener("change", () => audio.setKit(sel.value));
-      dev.append(el("label", { text: "kit" }), sel);
-    } else if (k === "bass" || k === "melody") {
-      const d = audio.device(k);
-      dev.append(
-        el("label", { text: "cutoff" }), slider(120, 8000, 20, d.cutoff, (v) => audio.setDevice(k, "cutoff", v)),
-        el("label", { text: "decay" }), slider(0.03, 1.2, 0.01, d.decay, (v) => audio.setDevice(k, "decay", v))
-      );
+      devSection.append(el("div", { class: "mx-devlabel", text: "kit" }), sel);
+    } else if (k === "harmony") {
+      const sel = el("select", { class: "mx-preset" });
+      HARMONY_PRESET_NAMES.forEach((n) => { const o = el("option", { value: n, text: n }); if (n === audio.harmonyPreset()) o.selected = true; sel.appendChild(o); });
+      sel.addEventListener("change", () => audio.setHarmonyPreset(sel.value));
+      devSection.append(el("div", { class: "mx-devlabel", text: "preset" }), sel);
+    } else if (k === "bass") {
+      const sel = el("select", { class: "mx-preset" });
+      BASS_PRESET_NAMES.forEach((n) => { const o = el("option", { value: n, text: n }); if (n === audio.bassPreset()) o.selected = true; sel.appendChild(o); });
+      sel.addEventListener("change", () => audio.setBassPreset(sel.value));
+      devSection.append(el("div", { class: "mx-devlabel", text: "preset" }), sel);
+    } else {
+      const sel = el("select", { class: "mx-preset" });
+      MELODY_PRESET_NAMES.forEach((n) => { const o = el("option", { value: n, text: n }); if (n === audio.melodyPreset()) o.selected = true; sel.appendChild(o); });
+      sel.addEventListener("change", () => audio.setMelodyPreset(sel.value));
+      devSection.append(el("div", { class: "mx-devlabel", text: "preset" }), sel);
     }
-    sheet.appendChild(
-      el("div", { class: "mxstrip", style: `--tc:${t.color}` }, [
-        el("div", { class: "mxhead" }, [el("span", { class: "mxdot" }), el("span", { text: t.name })]),
-        meter,
-        ctrl,
-        dev,
-      ])
-    );
+
+    const strip = el("div", { class: "mx-strip", style: `--tc:${t.color}` }, [
+      el("div", { class: "mx-name" }, [el("span", { class: "mx-dot" }), el("span", { text: t.name })]),
+      meter,
+      volSlider,
+      volLabel,
+      el("div", { class: "mx-knob" }, [el("label", { text: "pan" }), panSlider]),
+      el("div", { class: "mx-knob" }, [el("label", { text: "send" }), sendSlider]),
+      devSection,
+    ]);
+    container.appendChild(strip);
   }
+  sheet.appendChild(container);
 
   scrim.classList.add("open");
   sheet.classList.add("open");
@@ -612,7 +644,7 @@ function openMixer() {
       const lvl = Math.max(0, Math.min(1, (audio.meter(t.key) + 54) / 54));
       const bar = meterBars[t.key];
       if (bar && Math.abs((bar._lvl || 0) - lvl) > 0.01) {
-        bar.style.transform = `scaleX(${lvl})`;
+        bar.style.transform = `scaleY(${lvl})`;
         bar._lvl = lvl;
       }
     }
@@ -1215,6 +1247,95 @@ function attachPinch(scroll) {
   };
   scroll.addEventListener("pointerup", rm);
   scroll.addEventListener("pointercancel", rm);
+}
+
+// ---------------------------------------------------------------------------
+// WAV Export
+// ---------------------------------------------------------------------------
+function encodeWav(buffer) {
+  const numCh = buffer.numberOfChannels;
+  const sr = buffer.sampleRate;
+  const len = buffer.length;
+  const bitsPerSample = 16;
+  const bytesPerSample = bitsPerSample / 8;
+  const blockAlign = numCh * bytesPerSample;
+  const dataSize = len * blockAlign;
+  const buf = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buf);
+  const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  writeStr(0, "RIFF"); view.setUint32(4, 36 + dataSize, true); writeStr(8, "WAVE");
+  writeStr(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, numCh, true); view.setUint32(24, sr, true);
+  view.setUint32(28, sr * blockAlign, true); view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true); writeStr(36, "data"); view.setUint32(40, dataSize, true);
+  const channels = [];
+  for (let c = 0; c < numCh; c++) channels.push(buffer.getChannelData(c));
+  let off = 44;
+  for (let i = 0; i < len; i++) {
+    for (let c = 0; c < numCh; c++) {
+      const s = Math.max(-1, Math.min(1, channels[c][i]));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      off += 2;
+    }
+  }
+  return new Blob([buf], { type: "audio/wav" });
+}
+
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+let exporting = false;
+function openExport() {
+  editor = null;
+  sheet.innerHTML = "";
+  sheet.style.setProperty("--tc", "#e8b84b");
+  const status = el("div", { class: "exp-status", text: "" });
+
+  async function doExport(mode) {
+    if (exporting) return;
+    exporting = true;
+    await ensureStarted();
+    status.textContent = mode === "master" ? "Rendering master\u2026" : "Rendering stems\u2026";
+    try {
+      if (mode === "master") {
+        const buf = await audio.renderOffline(null);
+        downloadBlob(encodeWav(buf), "noodles-master.wav");
+        status.textContent = "Master exported \u2713";
+      } else {
+        for (const t of TRACKS) {
+          status.textContent = `Rendering ${t.name}\u2026`;
+          const buf = await audio.renderOffline(t.key);
+          downloadBlob(encodeWav(buf), `noodles-${t.key}.wav`);
+        }
+        status.textContent = "4 stems exported \u2713";
+      }
+    } catch (e) {
+      status.textContent = "Export failed: " + e.message;
+    }
+    exporting = false;
+  }
+
+  sheet.appendChild(
+    el("div", { class: "sheet-bar" }, [
+      el("div", { class: "swatch" }),
+      el("div", { class: "title", text: "Export" }),
+      el("div", { class: "sub", text: "WAV \u00b7 44.1 kHz \u00b7 16-bit" }),
+      el("div", { class: "close", text: "Done", onclick: closeEditor }),
+    ])
+  );
+  sheet.appendChild(
+    el("div", { class: "exp-grid" }, [
+      el("div", { class: "exp-btn", text: "\uD83C\uDFB5  Master", onclick: () => doExport("master") }),
+      el("div", { class: "exp-btn", text: "\uD83C\uDFDA  Stems (4\u00d7)", onclick: () => doExport("stems") }),
+    ])
+  );
+  sheet.appendChild(status);
+  scrim.classList.add("open");
+  sheet.classList.add("open");
 }
 
 // ---------------------------------------------------------------------------
