@@ -196,7 +196,8 @@ export function makeMagicScene() {
 
   const harmony = Array.from({ length: 4 }, () => Math.floor(Math.random() * 7));
 
-  const melodyNotes = scaleNotes(60, 15);
+  const melodyBase = Math.random() < 0.5 ? 60 : 48;
+  const melodyNotes = scaleNotes(melodyBase, 15);
   const melody = new Array(16).fill(null);
   for (let s = 0; s < 16; s++) {
     if (Math.random() < 0.3) {
@@ -207,7 +208,8 @@ export function makeMagicScene() {
     melody[0] = [{ midi: melodyNotes[Math.floor(Math.random() * melodyNotes.length)], len: 2, vel: 0.85 }];
   }
 
-  const bassNotes = scaleNotes(36, 12);
+  const bassBase = Math.random() < 0.5 ? 36 : 24;
+  const bassNotes = scaleNotes(bassBase, 12);
   const bass = new Array(16).fill(null);
   for (let s = 0; s < 16; s += 4) {
     if (Math.random() < 0.8) {
