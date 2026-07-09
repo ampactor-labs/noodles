@@ -986,24 +986,23 @@ function openClipProps(sceneIndex, track) {
   );
 
   const bars = el("div", { class: "numval", text: `${launch.followBars} bar${launch.followBars === 1 ? "" : "s"}` });
-  sheet.appendChild(
-    el("div", { class: "propsection" }, [
-      el("div", { class: "proplabel", text: "after" }),
-      el("div", { class: "numrow" }, [
-        el("div", {
-          class: "choice stepper",
-          text: "-",
-          onclick: () => setLaunch({ followBars: Math.max(1, launch.followBars - 1) }),
-        }),
-        bars,
-        el("div", {
-          class: "choice stepper",
-          text: "+",
-          onclick: () => setLaunch({ followBars: Math.min(16, launch.followBars + 1) }),
-        }),
-      ]),
-    ])
-  );
+  const afterSection = el("div", { class: "propsection" + (launch.follow === "none" ? " disabled" : ""), style: launch.follow === "none" ? "opacity: 0.3; pointer-events: none;" : "" }, [
+    el("div", { class: "proplabel", text: "after" }),
+    el("div", { class: "numrow" }, [
+      el("div", {
+        class: "choice stepper",
+        text: "-",
+        onclick: () => setLaunch({ followBars: Math.max(1, launch.followBars - 1) }),
+      }),
+      bars,
+      el("div", {
+        class: "choice stepper",
+        text: "+",
+        onclick: () => setLaunch({ followBars: Math.min(16, launch.followBars + 1) }),
+      }),
+    ]),
+  ]);
+  sheet.appendChild(afterSection);
 
   sheet.appendChild(
     el("div", { class: "tfrow" }, [
@@ -1061,10 +1060,10 @@ function openClipProps(sceneIndex, track) {
 // ---------------------------------------------------------------------------
 let mixerRAF = 0;
 const MIX_DEFAULTS = {
-  harmony: { vol: -6, pan: 0, verb: -60, echo: -60, mute: false, solo: false },
-  drums: { vol: -6, pan: 0, verb: -60, echo: -60, mute: false, solo: false },
-  bass: { vol: -6, pan: 0, verb: -60, echo: -60, mute: false, solo: false },
-  melody: { vol: -6, pan: 0, verb: -60, echo: -60, mute: false, solo: false },
+  harmony: { vol: 0, pan: 0, verb: -60, echo: -60, mute: false, solo: false },
+  drums: { vol: 0, pan: 0, verb: -60, echo: -60, mute: false, solo: false },
+  bass: { vol: 0, pan: 0, verb: -60, echo: -60, mute: false, solo: false },
+  melody: { vol: 0, pan: 0, verb: -60, echo: -60, mute: false, solo: false },
 };
 const mixState = structuredClone(MIX_DEFAULTS);
 
@@ -1072,6 +1071,55 @@ function slider(min, max, step, val, oninput) {
   const s = el("input", { type: "range", min, max, step, value: val });
   s.addEventListener("input", () => oninput(parseFloat(s.value)));
   return s;
+}
+
+function knob(label, min, max, step, val, onChange, format = (v) => v) {
+  const container = el("div", { class: "knob-container" });
+  const lbl = el("div", { class: "knob-label", text: label });
+  const dial = el("div", { class: "knob-dial" });
+  const indicator = el("div", { class: "knob-indicator" });
+  const valEl = el("div", { class: "knob-val", text: format(val) });
+  dial.appendChild(indicator);
+  container.append(lbl, dial, valEl);
+
+  let currentVal = val;
+  const updateVisuals = () => {
+    const pct = (currentVal - min) / (max - min);
+    const deg = -135 + pct * 270;
+    indicator.style.transform = `rotate(${deg}deg)`;
+    valEl.textContent = format(currentVal);
+  };
+  updateVisuals();
+
+  let startY = 0;
+  let startVal = 0;
+  
+  dial.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    startY = e.clientY;
+    startVal = currentVal;
+    
+    const move = (ev) => {
+      const deltaY = startY - ev.clientY;
+      const range = max - min;
+      let newVal = startVal + (deltaY / 120) * range;
+      newVal = Math.max(min, Math.min(max, newVal));
+      newVal = Math.round(newVal / step) * step;
+      if (Math.abs(newVal - currentVal) > 1e-5) {
+        currentVal = newVal;
+        updateVisuals();
+        onChange(currentVal);
+      }
+    };
+    const up = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+  });
+  
+  return container;
 }
 
 function applyTrackMix(track) {
@@ -1278,9 +1326,9 @@ function openMixer(focusTrack = null) {
     const volLabel = el("div", { class: "mx-val", text: `${ms.vol}` });
     volSlider.addEventListener("input", () => { ms.vol = parseFloat(volSlider.value); audio.setVol(k, ms.vol); volLabel.textContent = `${ms.vol}`; });
 
-    const panSlider = slider(-1, 1, 0.05, ms.pan, (v) => { ms.pan = v; audio.setPan(k, v); });
-    const verbSlider = slider(-60, 0, 1, ms.verb, (v) => { ms.verb = v; audio.setSend(k, v); });
-    const echoSlider = slider(-60, 0, 1, ms.echo, (v) => { ms.echo = v; audio.setEcho(k, v); });
+    const panSlider = knob("pan", -1, 1, 0.05, ms.pan, (v) => { ms.pan = v; audio.setPan(k, v); }, (v) => (v === 0 ? "C" : v < 0 ? `L${Math.round(-v * 100)}` : `R${Math.round(v * 100)}`));
+    const verbSlider = knob("verb", -60, 0, 1, ms.verb, (v) => { ms.verb = v; audio.setSend(k, v); });
+    const echoSlider = knob("echo", -60, 0, 1, ms.echo, (v) => { ms.echo = v; audio.setEcho(k, v); });
 
     // Device preset selector — all tracks get 3 options
     const devSection = el("div", { class: "mx-dev-section" });
@@ -1312,9 +1360,9 @@ function openMixer(focusTrack = null) {
       meter,
       volSlider,
       volLabel,
-      el("div", { class: "mx-knob" }, [el("label", { text: "pan" }), panSlider]),
-      el("div", { class: "mx-knob" }, [el("label", { text: "verb" }), verbSlider]),
-      el("div", { class: "mx-knob" }, [el("label", { text: "echo" }), echoSlider]),
+      panSlider,
+      verbSlider,
+      echoSlider,
       devSection,
     ]);
     container.appendChild(strip);
@@ -1325,7 +1373,6 @@ function openMixer(focusTrack = null) {
     el("div", { class: "mx-strip mx-master", style: "--tc:#d2d2d4", "data-track": "master" }, [
       el("div", { class: "mx-name" }, [el("span", { class: "mx-dot" }), el("span", { text: "Master" })]),
       el("div", { class: "mx-meter" }, [el("div", { class: "mx-meter-track" }, [masterFill])]),
-      el("div", { class: "mx-master-chain", text: "trim · warm · glue · clip · limit" }),
     ])
   );
   sheet.appendChild(container);
@@ -2302,6 +2349,20 @@ audio.onVisual((e) => {
       }
       arrPlayBar++;
       if (dirty) scheduleSave();
+    }
+
+    if (e.progress) {
+      for (const t of TRACKS) {
+        const p = e.progress[t.key];
+        const sceneIdx = playingTracks[t.key];
+        if (p !== undefined && sceneIdx >= 0) {
+          const row = sceneEls[sceneIdx];
+          if (row) {
+            const clipEl = row.clips[t.key];
+            if (clipEl) clipEl.style.setProperty("--pct", p * 100);
+          }
+        }
+      }
     }
 
     if (editor && editor.cursorCols) {

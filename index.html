@@ -372,6 +372,21 @@
         font-size: 9px;
         color: color-mix(in srgb, var(--tc) 80%, #fff 20%);
       }
+      .clip.filled::after {
+        content: "";
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: conic-gradient(color-mix(in srgb, var(--tc) 85%, #fff) calc(var(--pct, 0) * 1%), rgba(0,0,0,0.3) 0);
+        opacity: 0;
+        pointer-events: none;
+      }
+      .clip.playing::after {
+        opacity: 1;
+      }
       .clip.playing {
         background: color-mix(in srgb, var(--tc) 62%, #161616);
         border-color: color-mix(in srgb, var(--tc) 85%, #fff);
@@ -940,6 +955,7 @@
       }
       .mx-master {
         background: #202022;
+        flex: 0 0 36px;
       }
       .mx-master-note,
       .mx-master-chain {
@@ -966,6 +982,11 @@
         overflow: hidden;
         position: relative;
       }
+      .mx-master .mx-meter {
+        width: 20px;
+        flex: 1 1 0;
+        height: auto;
+      }
       .mx-meter-track {
         position: absolute;
         inset: 0;
@@ -990,6 +1011,45 @@
         accent-color: var(--tc);
       }
       .mx-val {
+        font-size: 9px;
+        font-weight: 700;
+        color: var(--dim);
+        font-variant-numeric: tabular-nums;
+      }
+      .knob-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        margin-top: 4px;
+      }
+      .knob-label {
+        font-size: 8px;
+        font-weight: 800;
+        color: var(--dim);
+        text-transform: uppercase;
+      }
+      .knob-dial {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #2a2a2c;
+        border: 1px solid color-mix(in srgb, var(--tc) 40%, #000);
+        position: relative;
+        touch-action: none;
+        cursor: ns-resize;
+      }
+      .knob-indicator {
+        position: absolute;
+        top: 2px;
+        left: 9px;
+        width: 2px;
+        height: 6px;
+        background: #fff;
+        transform-origin: 1px 8px;
+        border-radius: 1px;
+      }
+      .knob-val {
         font-size: 9px;
         font-weight: 700;
         color: var(--dim);

@@ -12,23 +12,26 @@ export const TRACK_KEYS = ["harmony", "drums", "bass", "melody"];
 
 // --- Device presets (3 per track, like drum kits) ---
 const HARMONY_PRESETS = {
-  pad:     { osc: "sawtooth", filter: 1500, attack: 0.28, decay: 1.1, sustain: 0.72, release: 1.0, chorusWet: 0.35, chorusDepth: 0.6 },
-  keys:    { osc: "triangle", filter: 3200, attack: 0.01, decay: 0.5, sustain: 0.4,  release: 0.5, chorusWet: 0.12, chorusDepth: 0.25 },
-  ambient: { osc: "sine",     filter: 900,  attack: 0.8,  decay: 1.8, sustain: 0.85, release: 2.0, chorusWet: 0.6,  chorusDepth: 0.8 },
+  pad:     { osc: "sawtooth", filter: 1200, attack: 0.35, decay: 1.5, sustain: 0.8, release: 1.2, chorusWet: 0.4, chorusDepth: 0.7 },
+  keys:    { osc: "sine",     filter: 3000, attack: 0.01, decay: 0.4, sustain: 0.2, release: 0.4, chorusWet: 0.15, chorusDepth: 0.3 },
+  ambient: { osc: "triangle", filter: 800,  attack: 1.0,  decay: 2.0, sustain: 0.9, release: 2.5, chorusWet: 0.8,  chorusDepth: 0.9 },
+  stab:    { osc: "square",   filter: 2500, attack: 0.01, decay: 0.2, sustain: 0.0, release: 0.2, chorusWet: 0.1,  chorusDepth: 0.2 },
 };
 export const HARMONY_PRESET_NAMES = Object.keys(HARMONY_PRESETS);
 
 const BASS_PRESETS = {
-  deep:   { wave: "sawtooth", cutoff: 750,  attack: 0.02,  decay: 0.2,  sustain: 0.6,  release: 0.25 },
-  bright: { wave: "square",   cutoff: 2200, attack: 0.01,  decay: 0.15, sustain: 0.5,  release: 0.2  },
-  pluck:  { wave: "sawtooth", cutoff: 1800, attack: 0.005, decay: 0.12, sustain: 0.1,  release: 0.15 },
+  deep:   { wave: "sine",     cutoff: 500,  attack: 0.01,  decay: 0.3,  sustain: 0.7,  release: 0.3 },
+  bright: { wave: "sawtooth", cutoff: 2500, attack: 0.02,  decay: 0.15, sustain: 0.4,  release: 0.2 },
+  pluck:  { wave: "square",   cutoff: 1500, attack: 0.005, decay: 0.1,  sustain: 0.0,  release: 0.1 },
+  sub:    { wave: "triangle", cutoff: 350,  attack: 0.05,  decay: 0.4,  sustain: 1.0,  release: 0.4 },
 };
 export const BASS_PRESET_NAMES = Object.keys(BASS_PRESETS);
 
 const MELODY_PRESETS = {
-  lead:  { wave: "triangle", cutoff: 3200, attack: 0.01,  decay: 0.16, sustain: 0.35, release: 0.3 },
-  bell:  { wave: "sine",     cutoff: 5000, attack: 0.001, decay: 0.6,  sustain: 0.15, release: 0.8 },
-  synth: { wave: "square",   cutoff: 2400, attack: 0.005, decay: 0.2,  sustain: 0.3,  release: 0.2 },
+  lead:  { wave: "sawtooth", cutoff: 3500, attack: 0.02,  decay: 0.2,  sustain: 0.4, release: 0.3 },
+  bell:  { wave: "sine",     cutoff: 4000, attack: 0.001, decay: 0.8,  sustain: 0.0, release: 0.6 },
+  synth: { wave: "square",   cutoff: 2000, attack: 0.01,  decay: 0.15, sustain: 0.2, release: 0.15 },
+  pluck: { wave: "triangle", cutoff: 2800, attack: 0.005, decay: 0.1,  sustain: 0.0, release: 0.1 },
 };
 export const MELODY_PRESET_NAMES = Object.keys(MELODY_PRESETS);
 
@@ -92,9 +95,12 @@ export function createAudio(song) {
   const soloState = Object.fromEntries(TRACK_KEYS.map((track) => [track, false]));
   const verbDefault = { harmony: -60, melody: -60, drums: -60, bass: -60 };
   const echoDefault = { harmony: -60, melody: -60, drums: -60, bass: -60 };
+  const duckGain = new Tone.Gain(1).connect(master);
   for (const k of TRACK_KEYS) {
-    const chVol = -6;
-    channels[k] = new Tone.Channel({ volume: chVol, pan: 0 }).connect(master);
+    const chVol = 0;
+    channels[k] = new Tone.Channel({ volume: chVol, pan: 0 });
+    if (k === "drums") channels[k].connect(master);
+    else channels[k].connect(duckGain);
     meters[k] = new Tone.Meter();
     channels[k].connect(meters[k]);
     // Direct gain nodes wired to the effects instead of the send/receive bus
@@ -286,6 +292,21 @@ export function createAudio(song) {
     return Object.fromEntries(TRACK_KEYS.map((track) => [track, queuedTracks[track]]));
   }
 
+  function getTrackProgress() {
+    const res = {};
+    for (const track of TRACK_KEYS) {
+      const st = trackState[track];
+      if (st.active && song.scenes[st.scene]) {
+        const scene = song.scenes[st.scene];
+        const launch = clipLaunch(scene, track);
+        const naturalBars = clipLengthBars(scene, track);
+        const limitBars = launch.follow !== "none" ? launch.followBars : naturalBars;
+        res[track] = st.step / (limitBars * 16);
+      }
+    }
+    return res;
+  }
+
   function resetTrack(track, sceneIndex) {
     trackState[track] = { scene: sceneIndex, step: 0, active: !!song.scenes[sceneIndex] };
   }
@@ -398,7 +419,7 @@ export function createAudio(song) {
     for (const track of TRACK_KEYS) advanceSceneTrack(track);
     const activeAfter = activeScenes();
     const queuedAfter = getQueuedTracks();
-    draw.schedule(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeAfter, queuedTracks: queuedAfter }), time);
+    draw.schedule(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeAfter, queuedTracks: queuedAfter, progress: getTrackProgress() }), time);
   }, "16n");
 
   let playing = false;
@@ -579,26 +600,36 @@ export function createAudio(song) {
         const offSat = new Tone.Distortion(0.16).connect(offGlue);
         offSat.wet.value = 0.60;
         const offMaster = new Tone.Gain(Tone.dbToGain(-3)).connect(offSat);
+        const offDuckGain = new Tone.Gain(1).connect(offMaster);
         const offReverb = new Tone.Freeverb({ roomSize: 0.72, dampening: 2600, wet: 1 }).connect(offMaster);
         const offEchoReturn = new Tone.Gain(Tone.dbToGain(-4)).connect(offMaster);
         const offEcho = new Tone.FeedbackDelay({ delayTime: "8n", feedback: 0.26, wet: 1 }).connect(offEchoReturn);
         const offCh = {};
         for (const k of TRACK_KEYS) {
           const muted = soloTrack && k !== soloTrack;
-          offCh[k] = new Tone.Channel({ volume: muted ? -Infinity : (k === "harmony" ? -6 : 0) }).connect(offMaster);
-          offCh[k].connect(new Tone.Gain(Tone.dbToGain(verbDefault[k])).connect(offReverb));
-          offCh[k].connect(new Tone.Gain(Tone.dbToGain(echoDefault[k])).connect(offEcho));
+          offCh[k] = new Tone.Channel({ volume: muted ? -Infinity : chState[k].vol, pan: chState[k].pan, mute: muted });
+          if (k === "drums") offCh[k].connect(offMaster);
+          else offCh[k].connect(offDuckGain);
+          offCh[k].connect(new Tone.Gain(Tone.dbToGain(chState[k].verb ?? verbDefault[k])).connect(offReverb));
+          offCh[k].connect(new Tone.Gain(Tone.dbToGain(chState[k].echo ?? echoDefault[k])).connect(offEcho));
         }
-        const offPadF = new Tone.Filter({ type: "lowpass", frequency: 1500, Q: 0.7 });
-        const offChorus = new Tone.Chorus({ frequency: 0.4, delayTime: 4, depth: 0.6, wet: 0.35 }).start();
+
+        const hp = HARMONY_PRESETS[harmonyPreset] || HARMONY_PRESETS.keys;
+        const offPadF = new Tone.Filter({ type: "lowpass", frequency: hp.filter, Q: 0.7 });
+        const offChorus = new Tone.Chorus({ frequency: 0.4, delayTime: 4, depth: hp.chorusDepth, wet: hp.chorusWet }).start();
         offPadF.connect(offChorus); offChorus.connect(offCh.harmony);
-        const offPad = new Tone.PolySynth(Tone.Synth, { maxPolyphony: 4, oscillator: { type: "sawtooth" }, envelope: { attack: 0.28, decay: 1.1, sustain: 0.72, release: 1.0 }, volume: -16 }).connect(offPadF);
+        const offPad = new Tone.PolySynth(Tone.Synth, { maxPolyphony: 4, oscillator: { type: hp.osc }, envelope: { attack: hp.attack, decay: hp.decay, sustain: hp.sustain, release: hp.release }, volume: -16 }).connect(offPadF);
         const offHalo = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.9, decay: 1, sustain: 0.5, release: 1.6 }, volume: -26 }).connect(offCh.harmony);
         const offSub = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 0.08, decay: 0.4, sustain: 0.85, release: 1.6 }, volume: -13 }).connect(offCh.harmony);
-        const offBF = new Tone.Filter({ type: "lowpass", frequency: 750, Q: 0.9 }).connect(offCh.bass);
-        const offBass = new Tone.PolySynth(Tone.Synth, { maxPolyphony: 6, oscillator: { type: "sawtooth" }, envelope: { attack: 0.02, decay: 0.2, sustain: 0.6, release: 0.25 }, volume: -10 }).connect(offBF);
-        const offLF = new Tone.Filter({ type: "lowpass", frequency: 3200, Q: 0.6 }).connect(offCh.melody);
-        const offLead = new Tone.PolySynth(Tone.Synth, { maxPolyphony: 8, oscillator: { type: "triangle" }, envelope: { attack: 0.01, decay: 0.16, sustain: 0.35, release: 0.3 }, volume: -14 }).connect(offLF);
+
+        const bp = BASS_PRESETS[bassPreset] || BASS_PRESETS.deep;
+        const offBF = new Tone.Filter({ type: "lowpass", frequency: bp.cutoff, Q: 0.9 }).connect(offCh.bass);
+        const offBass = new Tone.PolySynth(Tone.Synth, { maxPolyphony: 6, oscillator: { type: bp.wave }, envelope: { attack: bp.attack, decay: bp.decay, sustain: bp.sustain, release: bp.release }, volume: -10 }).connect(offBF);
+
+        const mp = MELODY_PRESETS[melodyPreset] || MELODY_PRESETS.lead;
+        const offLF = new Tone.Filter({ type: "lowpass", frequency: mp.cutoff, Q: 0.6 }).connect(offCh.melody);
+        const offLead = new Tone.PolySynth(Tone.Synth, { maxPolyphony: 8, oscillator: { type: mp.wave }, envelope: { attack: mp.attack, decay: mp.decay, sustain: mp.sustain, release: mp.release }, volume: -14 }).connect(offLF);
+
         const offKick = new Tone.MembraneSynth({ volume: -2 }).connect(offCh.drums);
         const offSnF = new Tone.Filter({ type: "highpass", frequency: 1400 }).connect(offCh.drums);
         const offSnare = new Tone.NoiseSynth({ noise: { type: "white" }, volume: -10 }).connect(offSnF);
@@ -606,6 +637,7 @@ export function createAudio(song) {
         const offHat = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.02, sustain: 0 }, volume: -14 }).connect(offHatF);
         const offClF = new Tone.Filter({ type: "bandpass", frequency: 1400, Q: 1.2 }).connect(offCh.drums);
         const offClap = new Tone.NoiseSynth({ noise: { type: "pink" }, volume: -12 }).connect(offClF);
+
         let offPrev = null;
         const offSix = () => Tone.Time("16n").toSeconds();
         let step = 0;
@@ -628,7 +660,32 @@ export function createAudio(song) {
             }
           }
           const d = clipAt(song, "drums", bar);
-          if (d) { const sc = song.scenes[d.scene]; for (const v of DRUM_VOICES) if (sc.drums[v][sib]) { if (v === "kick") offKick.triggerAttackRelease("C1", "8n", time); else if (v === "snare") offSnare.triggerAttackRelease("16n", time); else if (v === "clap") offClap.triggerAttackRelease("16n", time); else offHat.triggerAttackRelease("32n", time); } }
+          if (d) { 
+            const sc = song.scenes[d.scene]; 
+            for (const v of DRUM_VOICES) {
+              if (sc.drums[v][sib]) { 
+                const kParams = KITS[kitName];
+                if (v === "kick") {
+                  offDuckGain.gain.cancelScheduledValues(time);
+                  offDuckGain.gain.setValueAtTime(1, time);
+                  offDuckGain.gain.exponentialRampToValueAtTime(0.2, time + 0.01);
+                  offDuckGain.gain.exponentialRampToValueAtTime(1, time + 0.25);
+                  offKick.set({ pitchDecay: kParams.kick.pitchDecay, octaves: kParams.kick.octaves, envelope: kParams.kick.envelope });
+                  offKick.triggerAttackRelease("C1", "8n", time); 
+                } else if (v === "snare") {
+                  offSnare.set({ envelope: { attack: 0.001, decay: kParams.snare, sustain: 0 } });
+                  offSnare.triggerAttackRelease("16n", time); 
+                } else if (v === "clap") {
+                  offClap.set({ envelope: { attack: 0.001, decay: kParams.clap, sustain: 0 } });
+                  offClap.triggerAttackRelease("16n", time); 
+                } else {
+                  offHat.set({ envelope: { attack: 0.001, decay: kParams.hat.decay, sustain: 0 } });
+                  offHatF.frequency.value = kParams.hat.resonance;
+                  offHat.triggerAttackRelease("32n", time); 
+                }
+              } 
+            }
+          }
           for (const trk of ["bass", "melody"]) {
             const c = clipAt(song, trk, bar);
             if (c) {
