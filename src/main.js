@@ -551,7 +551,13 @@ const sessionEl = document.getElementById("session");
 function clipContent(scene, track) {
   if (track === "harmony") {
     if (!scene.harmony || scene.harmony.length === 0) return null;
-    return el("div", { text: scene.harmony.map((ci) => CHORDS[ci]?.roman || "?").join("  ") });
+    return el("div", { 
+      class: "harmony-mini", 
+      html: scene.harmony.map((ci) => {
+        const ch = CHORDS[ci];
+        return ch ? `<div><b>${ch.roman}</b><span>${ch.name}</span></div>` : "";
+      }).join("") 
+    });
   }
   if (track === "drums") {
     if (!scene.drums || !Object.values(scene.drums).some(v => v.some(x => x))) return null;
@@ -1719,7 +1725,7 @@ function buildHarmonyEditor(sceneIndex, scene) {
     const slot = el("div", {
       class: "cslot" + (idx === 0 ? " sel" : ""),
       style: `--tc:${trackColor("harmony")}`,
-      text: CHORDS[ci].roman,
+      html: `<b>${CHORDS[ci].roman}</b><span>${CHORDS[ci].name}</span>`,
       onclick: () => {
         selected = idx;
         slots.forEach((s, k) => s.classList.toggle("sel", k === idx));
@@ -1736,12 +1742,12 @@ function buildHarmonyEditor(sceneIndex, scene) {
       el("div", {
         class: "copt",
         style: `background:${chordHex(ci)}`,
-        text: ch.roman,
+        html: `<b>${ch.roman}</b><span>${ch.name}</span>`,
         onclick: async () => {
           await ensureStarted();
           pushUndo();
           scene.harmony[selected] = ci;
-          slots[selected].textContent = ch.roman;
+          slots[selected].innerHTML = `<b>${ch.roman}</b><span>${ch.name}</span>`;
           audio.preview(ci);
           refreshClip(sceneIndex, "harmony");
         },
@@ -1778,7 +1784,7 @@ let arrPlayhead = null;
 
 function arrMini(scene, track) {
   if (track === "harmony") {
-    return el("div", { text: scene.harmony.map((c) => CHORDS[c].roman).join(" ") });
+    return el("div", { class: "arr-harmony-mini", html: scene.harmony.map((c) => `<div><b>${CHORDS[c].roman}</b><span>${CHORDS[c].name}</span></div>`).join("") });
   }
   if (track === "drums") {
     const mini = el("div", { class: "cmini" });

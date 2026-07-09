@@ -365,6 +365,23 @@
         background: color-mix(in srgb, var(--tc) 34%, #161616);
         border: 1px solid color-mix(in srgb, var(--tc) 50%, #000);
       }
+      .harmony-mini, .arr-harmony-mini {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+      }
+      .arr-harmony-mini {
+        gap: 16px;
+      }
+      .harmony-mini div, .arr-harmony-mini div {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.1;
+      }
+      .harmony-mini b, .arr-harmony-mini b { font-size: 11px; }
+      .harmony-mini span, .arr-harmony-mini span { font-size: 8px; opacity: 0.65; font-weight: 500; }
       .clip.filled .tri {
         position: absolute;
         top: 5px;
@@ -613,18 +630,24 @@
         margin-bottom: 14px;
       }
       .cslot {
-        height: 56px;
-        border-radius: 6px;
+        flex: 1 1 0;
+        height: 60px;
+        background: color-mix(in srgb, var(--tc) 20%, #161616);
+        border: 2px solid color-mix(in srgb, var(--tc) 35%, #000);
+        border-radius: 8px;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        font-size: 18px;
+        font-size: 15px;
         font-weight: 700;
-        background: color-mix(in srgb, var(--tc) 40%, #161616);
-        border: 1px solid #000;
+        color: #fff;
       }
+      .cslot b { font-size: 16px; }
+      .cslot span { font-size: 10px; opacity: 0.6; font-weight: 600; margin-top: 2px; }
       .cslot.sel {
-        outline: 2px solid #e8b84b;
+        outline: 2px solid #fff;
+        z-index: 3;
       }
       .picker {
         display: grid;
@@ -632,15 +655,18 @@
         gap: 6px;
       }
       .copt {
-        height: 46px;
         border-radius: 6px;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        font-size: 14px;
+        font-size: 15px;
         font-weight: 700;
-        color: #0d0d0f;
+        color: #fff;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
       }
+      .copt b { font-size: 16px; }
+      .copt span { font-size: 10px; opacity: 0.8; font-weight: 600; margin-top: 2px; }
 
       /* Session / Arrangement toggle */
       .seg {
