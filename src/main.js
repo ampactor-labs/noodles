@@ -90,6 +90,10 @@ function chordMarkup(ci, { notes = false } = {}) {
 const song = makeSong();
 setScaleContext(song.key, song.scale);
 const audio = createAudio(song);
+audio.setHarmonyPreset(HARMONY_PRESET_NAMES[Math.floor(Math.random() * HARMONY_PRESET_NAMES.length)]);
+audio.setBassPreset(BASS_PRESET_NAMES[Math.floor(Math.random() * BASS_PRESET_NAMES.length)]);
+audio.setMelodyPreset(MELODY_PRESET_NAMES[Math.floor(Math.random() * MELODY_PRESET_NAMES.length)]);
+audio.setKit(KIT_NAMES[Math.floor(Math.random() * KIT_NAMES.length)]);
 const PROJECT_SCHEMA = "noodles-project";
 const PROJECT_VERSION = 1;
 const LOCAL_PROJECT_KEY = "noodles:last-project";

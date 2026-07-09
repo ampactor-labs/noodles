@@ -15,11 +15,11 @@ const SEND_OFF_DB = -60;
 const FIRST_PLAY_WARMUP_MS = 400;
 const PLAY_START_LEAD_TIME = "+0.18";
 const SOURCE_LEVEL_DB = {
-  harmonyPad: -12,
-  harmonyHalo: -26,
-  harmonyRoot: -32,
-  bass: -4,
-  melody: -1,
+  harmonyPad: -11,
+  harmonyHalo: -25,
+  harmonyRoot: -31,
+  bass: -7,
+  melody: 0,
   kick: 0,
   snare: 5,
   hat: -3,
@@ -39,26 +39,26 @@ function scheduleKickDuck(param, time) {
 
 // --- Device presets (3 per track, like drum kits) ---
 const HARMONY_PRESETS = {
-  pad:     { osc: "sawtooth", filter: 1200, attack: 0.35, decay: 1.5, sustain: 0.8, release: 1.2, chorusWet: 0.4, chorusDepth: 0.7 },
-  keys:    { osc: "sine",     filter: 3000, attack: 0.01, decay: 0.4, sustain: 0.2, release: 0.4, chorusWet: 0.15, chorusDepth: 0.3 },
-  ambient: { osc: "triangle", filter: 800,  attack: 1.0,  decay: 2.0, sustain: 0.9, release: 2.5, chorusWet: 0.8,  chorusDepth: 0.9 },
-  stab:    { osc: "square",   filter: 2500, attack: 0.01, decay: 0.2, sustain: 0.0, release: 0.2, chorusWet: 0.1,  chorusDepth: 0.2 },
+  pad:     { osc: "sawtooth", filter: 1200, attack: 0.35, decay: 1.5, sustain: 0.8, release: 1.2, chorusWet: 0.4, chorusDepth: 0.7, gain: -4 },
+  keys:    { osc: "sine",     filter: 3000, attack: 0.01, decay: 0.4, sustain: 0.2, release: 0.4, chorusWet: 0.15, chorusDepth: 0.3, gain: 0 },
+  ambient: { osc: "triangle", filter: 800,  attack: 1.0,  decay: 2.0, sustain: 0.9, release: 2.5, chorusWet: 0.8,  chorusDepth: 0.9, gain: 2 },
+  stab:    { osc: "square",   filter: 2500, attack: 0.01, decay: 0.2, sustain: 0.0, release: 0.2, chorusWet: 0.1,  chorusDepth: 0.2, gain: -6 },
 };
 export const HARMONY_PRESET_NAMES = Object.keys(HARMONY_PRESETS);
 
 const BASS_PRESETS = {
-  deep:   { wave: "sine",     cutoff: 500,  attack: 0.01,  decay: 0.3,  sustain: 0.7,  release: 0.3 },
-  bright: { wave: "sawtooth", cutoff: 2500, attack: 0.02,  decay: 0.15, sustain: 0.4,  release: 0.2 },
-  pluck:  { wave: "square",   cutoff: 1500, attack: 0.005, decay: 0.1,  sustain: 0.0,  release: 0.1 },
-  sub:    { wave: "triangle", cutoff: 350,  attack: 0.05,  decay: 0.4,  sustain: 1.0,  release: 0.4 },
+  deep:   { wave: "sine",     cutoff: 500,  attack: 0.01,  decay: 0.3,  sustain: 0.7,  release: 0.3, gain: 0 },
+  bright: { wave: "sawtooth", cutoff: 2500, attack: 0.02,  decay: 0.15, sustain: 0.4,  release: 0.2, gain: -6 },
+  pluck:  { wave: "square",   cutoff: 1500, attack: 0.005, decay: 0.1,  sustain: 0.0,  release: 0.1, gain: -5 },
+  sub:    { wave: "triangle", cutoff: 350,  attack: 0.05,  decay: 0.4,  sustain: 1.0,  release: 0.4, gain: 2 },
 };
 export const BASS_PRESET_NAMES = Object.keys(BASS_PRESETS);
 
 const MELODY_PRESETS = {
-  lead:  { wave: "sawtooth", cutoff: 3500, attack: 0.02,  decay: 0.2,  sustain: 0.4, release: 0.3 },
-  bell:  { wave: "sine",     cutoff: 4000, attack: 0.001, decay: 0.8,  sustain: 0.0, release: 0.6 },
-  synth: { wave: "square",   cutoff: 2000, attack: 0.01,  decay: 0.15, sustain: 0.2, release: 0.15 },
-  pluck: { wave: "triangle", cutoff: 2800, attack: 0.005, decay: 0.1,  sustain: 0.0, release: 0.1 },
+  lead:  { wave: "sawtooth", cutoff: 3500, attack: 0.02,  decay: 0.2,  sustain: 0.4, release: 0.3, gain: 0 },
+  bell:  { wave: "sine",     cutoff: 4000, attack: 0.001, decay: 0.8,  sustain: 0.0, release: 0.6, gain: 4 },
+  synth: { wave: "square",   cutoff: 2000, attack: 0.01,  decay: 0.15, sustain: 0.2, release: 0.15, gain: -2 },
+  pluck: { wave: "triangle", cutoff: 2800, attack: 0.005, decay: 0.1,  sustain: 0.0, release: 0.1, gain: 2 },
 };
 export const MELODY_PRESET_NAMES = Object.keys(MELODY_PRESETS);
 
@@ -70,6 +70,7 @@ const KITS = {
     hat: { decay: 0.018, resonance: 6000 },
     clap: 0.09,
     swing: 0.16,
+    gain: 4,
   },
   funk: {
     kick: { pitchDecay: 0.03, octaves: 5, envelope: { attack: 0.001, decay: 0.2, sustain: 0 } },
@@ -77,6 +78,7 @@ const KITS = {
     hat: { decay: 0.026, resonance: 5000 },
     clap: 0.11,
     swing: 0.06,
+    gain: 2,
   },
   clean: {
     kick: { pitchDecay: 0.04, octaves: 6, envelope: { attack: 0.001, decay: 0.4, sustain: 0 } },
@@ -84,6 +86,7 @@ const KITS = {
     hat: { decay: 0.05, resonance: 4000 },
     clap: 0.14,
     swing: 0,
+    gain: 0,
   },
 };
 export const KIT_NAMES = Object.keys(KITS);
@@ -192,6 +195,7 @@ export function createAudio(song) {
     pad.set({ oscillator: { type: p.osc }, envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release } });
     padFilter.frequency.value = p.filter;
     chorus.set({ wet: p.chorusWet, depth: p.chorusDepth });
+    pad.volume.value = SOURCE_LEVEL_DB.harmonyPad + p.gain;
   }
   applyHarmonyPreset("keys");
   // Mono shimmer on the top note (was a 6-voice PolySynth, inaudible at -28 dB).
@@ -235,12 +239,14 @@ export function createAudio(song) {
     devices.bass.preset = name; devices.bass.wave = p.wave; devices.bass.cutoff = p.cutoff;
     bassTrk.set({ oscillator: { type: p.wave }, envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release } });
     bassFilter.frequency.rampTo(p.cutoff, 0.05);
+    bassTrk.volume.value = SOURCE_LEVEL_DB.bass + p.gain;
   }
   function applyMelodyPreset(name) {
     const p = MELODY_PRESETS[name] || MELODY_PRESETS.lead;
     devices.melody.preset = name; devices.melody.wave = p.wave; devices.melody.cutoff = p.cutoff;
     lead.set({ oscillator: { type: p.wave }, envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release } });
     leadFilter.frequency.rampTo(p.cutoff, 0.05);
+    lead.volume.value = SOURCE_LEVEL_DB.melody + p.gain;
   }
 
   // Kit.
@@ -264,6 +270,10 @@ export function createAudio(song) {
     hat.set({ envelope: { attack: 0.001, decay: k.hat.decay, sustain: 0 } });
     hatFilter.frequency.value = k.hat.resonance;
     clap.set({ envelope: { attack: 0.001, decay: k.clap, sustain: 0 } });
+    kick.volume.value = SOURCE_LEVEL_DB.kick + k.gain;
+    snare.volume.value = SOURCE_LEVEL_DB.snare + k.gain;
+    hat.volume.value = SOURCE_LEVEL_DB.hat + k.gain;
+    clap.volume.value = SOURCE_LEVEL_DB.clap + k.gain;
   }
   applyKit("clean");
 
