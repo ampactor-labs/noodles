@@ -310,9 +310,53 @@ function renderFooter() {
   // The dice sits with the song's musical identity: one tap rolls a whole new
   // key + tempo + sounds + magic scene, same as a fresh load. Undo-safe.
   const diceBtn = el("div", { class: "tbtn accent", text: "🎲", id: "dice-btn", title: "New song: random key, tempo, sounds", onclick: rerollSong });
+  const aboutBtn = el("div", { class: "tbtn", text: "?", id: "about-btn", title: "What is this?", onclick: openAboutSheet });
   footer.append(
-    el("div", { class: "frow" }, [keyctl, diceBtn, el("div", { class: "fspacer" }), groove])
+    el("div", { class: "frow" }, [keyctl, diceBtn, aboutBtn, el("div", { class: "fspacer" }), groove])
   );
+}
+
+// ---------------------------------------------------------------------------
+// About — what this is, in the product's own voice. Pull, never push: it
+// lives behind the ? and never opens itself.
+// ---------------------------------------------------------------------------
+function openAboutSheet() {
+  resetSheet("#e8b84b");
+  sheet.appendChild(sheetBar("noodles", "a pocket instrument"));
+  const p = (text) => el("div", { class: "about-p", text });
+  sheet.appendChild(
+    el("div", { class: "editor-scroll" }, [
+      p("This isn't a recording — it's an instrument. The song playing right now was rolled just for you, and every bit of it is yours to change."),
+      el("div", { class: "about-label", text: "the three moves" }),
+      p("▶ plays. Scene rows launch. Tap any clip to open it — chords, drums, notes — and draw."),
+      p("🎲 rolls a whole new song: new key, new tempo, new sounds."),
+      p("You can't break it. Everything stays in key, every roll comes out mixed, and undo is always right there."),
+      el("div", { class: "about-label", text: "when you want more" }),
+      p("Mix opens the mixer; ✦ sound morphs a track between its four sounds and adds color. Long-press a clip for launch tricks. View is the song timeline — arm ● and your jam records into it. File saves projects and exports WAV."),
+      p("Made for phones. Made for couches. Tell your friends."),
+    ])
+  );
+  openSheet();
+}
+
+// First visit only: one line that corrects the one fatal misread — "this is
+// someone's loop" — then dies on the first touch, forever. pointer-events is
+// none, so it cannot block or intercept anything.
+const GREETED_KEY = "noodles:greeted";
+function maybeGreet() {
+  let greeted = null;
+  try { greeted = localStorage.getItem(GREETED_KEY); } catch {}
+  if (greeted) return;
+  const greet = el("div", { class: "greet", html: "this is an <b>instrument</b> — tap anything<br />the <b>🎲</b> rolls a whole new song" });
+  document.body.appendChild(greet);
+  requestAnimationFrame(() => greet.classList.add("in"));
+  const dismiss = () => {
+    document.removeEventListener("pointerdown", dismiss, true);
+    try { localStorage.setItem(GREETED_KEY, "1"); } catch {}
+    greet.classList.remove("in");
+    setTimeout(() => greet.remove(), 500);
+  };
+  document.addEventListener("pointerdown", dismiss, true);
 }
 
 function emptyScene() {
@@ -2579,6 +2623,7 @@ applyMixState();
 applyStepDur();
 renderTransport();
 renderSession();
+maybeGreet();
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden && audio.playing) {

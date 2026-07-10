@@ -6,7 +6,11 @@
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
-    <title>noodles</title>
+    <title>noodles — a pocket instrument</title>
+    <meta name="description" content="Not a demo — an instrument. Tap play, roll the dice, make a beat in thirty seconds. Runs in your browser, no account, nothing to install." />
+    <meta property="og:title" content="noodles — a pocket instrument" />
+    <meta property="og:description" content="Not a demo — an instrument. Everything you hear, you can edit. The dice rolls a whole new song. Thirty seconds to your first beat." />
+    <meta property="og:type" content="website" />
     <link rel="icon" href="data:," />
     <style>
       /* Registered so the clip pie timers can transition it (smooth sweep
@@ -1271,6 +1275,54 @@
       }
       .project-file {
         display: none;
+      }
+
+      /* First-open greeting: a ghost pill — pointer-events none, so it can
+         never intercept a tap. Dies on the first touch, forever. */
+      .greet {
+        position: fixed;
+        left: 50%;
+        bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+        transform: translateX(-50%) translateY(8px);
+        z-index: 8; /* under sheets and the transport */
+        max-width: 86vw;
+        padding: 10px 18px;
+        border-radius: 999px;
+        background: rgba(20, 20, 22, 0.94);
+        border: 1px solid rgba(232, 184, 75, 0.55);
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.5;
+        text-align: center;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.45s ease, transform 0.45s ease;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+      }
+      .greet.in {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+      .greet b {
+        color: #e8b84b;
+      }
+
+      /* About sheet */
+      .about-p {
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--text);
+        margin-bottom: 10px;
+      }
+      .about-label {
+        margin-top: 6px;
+        margin-bottom: 7px;
+        color: var(--dim);
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
       }
 
       /* Transform buttons (Arp / Humanize / ...) */

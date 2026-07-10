@@ -150,8 +150,13 @@ try {
   assertState(initial.clips >= 4, `expected at least 4 filled clips, got ${initial.clips}`);
   assertState(initial.drums, "drum clip missing");
   assertState(initial.sceneTag.includes("✨"), `default scene was not magic-generated: ${initial.sceneTag}`);
+  // Fresh profile = first visit: the greeting pill is up, and it must die on
+  // the first touch (the tempo tap below) and never block input.
+  const greeted = await page.$eval(".greet", (el) => getComputedStyle(el).pointerEvents === "none");
+  assertState(greeted, "first-open greeting missing or intercepting input");
 
   await tap(page, "#bpm");
+  await page.waitForFunction(() => !document.querySelector(".greet"));
   await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Tempo");
   await page.$eval(".tempo-input", (el) => { el.value = "104"; });
   await closeSheet(page);
@@ -291,6 +296,14 @@ try {
     throw new Error(`export timed out; status="${status}"; errors=${errors.join(" | ") || "none"}`);
   }
   await page.screenshot({ path: exportShotPath, fullPage: true });
+  await closeSheet(page);
+  await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
+
+  // The ? opens the about sheet — the pull-based "what is this".
+  await tap(page, "#about-btn");
+  await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "noodles");
+  const aboutText = await page.$eval("#sheet", (el) => el.textContent);
+  assertState(aboutText.includes("instrument"), "about sheet missing its one job");
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
 
