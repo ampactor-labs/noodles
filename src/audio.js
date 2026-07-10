@@ -87,12 +87,6 @@ const MELODY_PRESETS = {
 export const MELODY_PRESET_NAMES = Object.keys(MELODY_PRESETS);
 
 const PRESET_TABLES = { harmony: HARMONY_PRESETS, bass: BASS_PRESETS, melody: MELODY_PRESETS };
-// Corner order = table order, laid out TL, TR, BL, BR on the XY pad.
-export const CORNERS = {
-  harmony: HARMONY_PRESET_NAMES,
-  bass: BASS_PRESET_NAMES,
-  melody: MELODY_PRESET_NAMES,
-};
 export const COLOR_NAMES = ["none", "tape", "crush", "phase", "trem", "wob"];
 
 // Tight, dead kits — funk / UK garage register (short decays, damped).
@@ -118,27 +112,42 @@ const KITS = {
     clap: 0.14,
     gain: -1.5,
   },
+  // The fourth corner: trap/808 register — long boomy kick, crisp tight hats,
+  // fat snare/clap tails. Gives the kit pad its BR corner and the dice a
+  // heavier place to land.
+  heavy: {
+    kick: { pitchDecay: 0.08, octaves: 7, envelope: { attack: 0.001, decay: 0.7, sustain: 0 } },
+    snare: 0.22,
+    hat: { decay: 0.012, resonance: 9000 },
+    clap: 0.18,
+    gain: -5,
+  },
 };
 export const KIT_NAMES = Object.keys(KITS);
 
-// --- Patch specs ---
-// Melodic: { x, y, color, amount, motion }. Drums: { color, amount, motion }.
-export function defaultPatch(track) {
-  const base = { color: "none", amount: 0.5, motion: 0.5 };
-  return track === "drums" ? base : { x: 0, y: 0, ...base };
+// Corner order = table order, laid out TL, TR, BL, BR on the XY pad. Drums
+// morph too: kit parameters are all scalars, so their space needs no layers.
+export const CORNERS = {
+  harmony: HARMONY_PRESET_NAMES,
+  bass: BASS_PRESET_NAMES,
+  melody: MELODY_PRESET_NAMES,
+  drums: KIT_NAMES,
+};
+
+// --- Patch specs: { x, y, color, amount, motion } for every track. ---
+export function defaultPatch() {
+  return { x: 0, y: 0, color: "none", amount: 0.5, motion: 0.5 };
 }
 
 const clamp01 = (v) => Math.max(0, Math.min(1, Number(v) || 0));
 
 function normalizePatch(track, raw = {}) {
-  const p = { ...defaultPatch(track), ...raw };
+  const p = { ...defaultPatch(), ...raw };
   p.color = COLOR_NAMES.includes(p.color) ? p.color : "none";
   p.amount = clamp01(p.amount);
   p.motion = clamp01(p.motion);
-  if (track !== "drums") {
-    p.x = clamp01(p.x);
-    p.y = clamp01(p.y);
-  }
+  p.x = clamp01(p.x);
+  p.y = clamp01(p.y);
   return p;
 }
 
@@ -146,6 +155,22 @@ function normalizePatch(track, raw = {}) {
 function cornerWeights(patch) {
   const { x, y } = patch;
   return [(1 - x) * (1 - y), x * (1 - y), (1 - x) * y, x * y];
+}
+
+// The voices that actually get triggered: the two heaviest corners,
+// renormalized to constant power. The ear tracks the nearest corners; the
+// other two still shape the sound through the blended filter/drive/envelope
+// params, which cost nothing. This caps the morph's voice bill at 2x a
+// single synth instead of 4x — the difference between a Dimensity 6300
+// keeping up and choking.
+function activeLayerWeights(patch) {
+  const w = cornerWeights(patch);
+  const kept = [0, 1, 2, 3]
+    .filter((i) => w[i] > 0.02)
+    .sort((a, b) => w[b] - w[a])
+    .slice(0, 2);
+  const sum = kept.reduce((s, i) => s + w[i], 0) || 1;
+  return kept.map((i) => ({ i, w: w[i] / sum }));
 }
 
 export function cornerXY(track, name) {
@@ -308,10 +333,10 @@ function buildGraph({ meters = false } = {}) {
   g.bassHighpass = new Tone.Filter({ type: "highpass", frequency: 34, Q: 0.7 }).connect(g.colorIn.bass);
   g.bassFilter = new Tone.Filter({ type: "lowpass", frequency: 750, Q: 0.9 }).connect(g.bassHighpass);
   g.bassDrive = new Tone.Distortion(0).connect(g.bassFilter);
-  g.bassLayers = makeLayers(BASS_PRESETS, 6, g.bassDrive, SOURCE_LEVEL_DB.bass);
+  g.bassLayers = makeLayers(BASS_PRESETS, 4, g.bassDrive, SOURCE_LEVEL_DB.bass);
   g.leadHighpass = new Tone.Filter({ type: "highpass", frequency: 180, Q: 0.7 }).connect(g.colorIn.melody);
   g.leadFilter = new Tone.Filter({ type: "lowpass", frequency: 3200, Q: 0.6 }).connect(g.leadHighpass);
-  g.leadLayers = makeLayers(MELODY_PRESETS, 8, g.leadFilter, SOURCE_LEVEL_DB.melody);
+  g.leadLayers = makeLayers(MELODY_PRESETS, 5, g.leadFilter, SOURCE_LEVEL_DB.melody);
   g.layers = { harmony: g.padLayers, bass: g.bassLayers, melody: g.leadLayers };
 
   // Kit. Hat is a filtered noise burst on purpose — MetalSynth's 6 FM
@@ -343,8 +368,10 @@ const layerDb = (w) => 10 * Math.log10(Math.max(w, 1e-4));
 function applyMorphTo(g, track, patch, { ramp = false } = {}) {
   const table = Object.values(PRESET_TABLES[track]);
   const w = cornerWeights(patch);
+  const active = activeLayerWeights(patch);
   g.layers[track].forEach((layer, i) => {
-    const db = w[i] > 0.02 ? layerDb(w[i]) : -96;
+    const entry = active.find((a) => a.i === i);
+    const db = entry ? layerDb(entry.w) : -96;
     if (ramp) layer.volume.rampTo(db, 0.03);
     else layer.volume.value = db;
   });
@@ -467,31 +494,39 @@ function applyColorTo(g, track, patch) {
 }
 
 function applyPatchTo(g, track, patch, opts) {
-  if (track !== "drums") applyMorphTo(g, track, patch, opts);
+  if (track === "drums") applyKitMorphTo(g, patch);
+  else applyMorphTo(g, track, patch, opts);
   applyColorTo(g, track, patch);
 }
 
-function applyKitTo(g, name) {
-  const k = KITS[name] || KITS.garage;
-  g.kick.set({ pitchDecay: k.kick.pitchDecay, octaves: k.kick.octaves, envelope: k.kick.envelope });
-  g.snare.set({ envelope: { attack: 0.001, decay: k.snare, sustain: 0 } });
-  g.hat.set({ envelope: { attack: 0.001, decay: k.hat.decay, sustain: 0 } });
-  g.hatFilter.frequency.value = k.hat.resonance;
-  g.clap.set({ envelope: { attack: 0.001, decay: k.clap, sustain: 0 } });
-  g.kick.volume.value = SOURCE_LEVEL_DB.kick + k.gain;
-  g.snare.volume.value = SOURCE_LEVEL_DB.snare + k.gain;
-  g.hat.volume.value = SOURCE_LEVEL_DB.hat + k.gain;
-  g.clap.volume.value = SOURCE_LEVEL_DB.clap + k.gain;
+// Kit morph: every kit parameter is a scalar, so drums morph by direct
+// blending — same one kick/snare/hat/clap, zero extra nodes or voices.
+function applyKitMorphTo(g, patch) {
+  const kits = Object.values(KITS);
+  const w = cornerWeights(patch);
+  const lin = (get) => blendLin(kits.map(get), w);
+  const log = (get) => blendLog(kits.map(get), w);
+  g.kick.set({
+    pitchDecay: log((k) => k.kick.pitchDecay),
+    octaves: lin((k) => k.kick.octaves),
+    envelope: { attack: 0.001, decay: log((k) => k.kick.envelope.decay), sustain: 0 },
+  });
+  g.snare.set({ envelope: { attack: 0.001, decay: log((k) => k.snare), sustain: 0 } });
+  g.hat.set({ envelope: { attack: 0.001, decay: log((k) => k.hat.decay), sustain: 0 } });
+  g.hatFilter.frequency.value = log((k) => k.hat.resonance);
+  g.clap.set({ envelope: { attack: 0.001, decay: log((k) => k.clap), sustain: 0 } });
+  const gainDb = lin((k) => k.gain);
+  g.kick.volume.value = SOURCE_LEVEL_DB.kick + gainDb;
+  g.snare.volume.value = SOURCE_LEVEL_DB.snare + gainDb;
+  g.hat.volume.value = SOURCE_LEVEL_DB.hat + gainDb;
+  g.clap.volume.value = SOURCE_LEVEL_DB.clap + gainDb;
 }
 
 // --- Note triggers, parameterized by graph + patch state. vstate carries the
 // voice-leading memory ({ prev }) so each render gets its own. Only layers
 // carrying weight get triggered — silent corners cost nothing.
 function eachActiveLayer(g, track, patch, fn) {
-  const w = cornerWeights(patch);
-  g.layers[track].forEach((layer, i) => {
-    if (w[i] > 0.02) fn(layer);
-  });
+  for (const { i } of activeLayerWeights(patch)) fn(g.layers[track][i]);
 }
 
 function playChordOn(g, patches, vstate, ci, time) {
@@ -567,9 +602,8 @@ export function createAudio(song) {
   };
 
   const live = buildGraph({ meters: true });
-  let kitName = "clean";
-  const patches = Object.fromEntries(TRACK_KEYS.map((t) => [t, defaultPatch(t)]));
-  applyKitTo(live, kitName);
+  const patches = Object.fromEntries(TRACK_KEYS.map((t) => [t, defaultPatch()]));
+  patches.drums = normalizePatch("drums", cornerXY("drums", "clean"));
   for (const t of TRACK_KEYS) applyPatchTo(live, t, patches[t]);
 
   const channelState = Object.fromEntries(TRACK_KEYS.map((track) => [track, {
@@ -913,16 +947,27 @@ export function createAudio(song) {
       return { ...patches[track] };
     },
     setPatch(track, partial) {
+      const prevColor = patches[track].color;
       patches[track] = normalizePatch(track, { ...patches[track], ...partial });
-      applyPatchTo(live, track, patches[track], { ramp: true });
+      if (patches[track].color !== prevColor) {
+        // Splicing a different insert mid-stream clicks; duck the junction for
+        // the swap. ~45 ms of dip on a deliberate sound-design tap is free.
+        const junction = live.colorIn[track].gain;
+        junction.rampTo(0, 0.012);
+        setTimeout(() => {
+          applyPatchTo(live, track, patches[track], { ramp: true });
+          junction.rampTo(1, 0.03);
+        }, 18);
+      } else {
+        applyPatchTo(live, track, patches[track], { ramp: true });
+      }
       return { ...patches[track] };
     },
     // Corner-name compatibility: the dropdowns, project files from v1, and the
     // register rules all speak preset names. A name is just a corner of the pad.
-    kit: () => kitName,
+    kit: () => dominantCorner("drums", patches.drums),
     setKit(name) {
-      if (KITS[name]) kitName = name;
-      applyKitTo(live, kitName);
+      this.setPatch("drums", cornerXY("drums", name));
     },
     harmonyPreset: () => dominantCorner("harmony", patches.harmony),
     setHarmonyPreset(name) {
@@ -950,7 +995,6 @@ export function createAudio(song) {
         offTr.swing = song.swing ?? 0;
         offTr.swingSubdivision = "16n";
         const g = buildGraph({ meters: false });
-        applyKitTo(g, kitName);
         for (const t of TRACK_KEYS) applyPatchTo(g, t, patchesCopy[t]);
         const anySolo = TRACK_KEYS.some((track) => channelState[track].solo);
         for (const k of TRACK_KEYS) {

@@ -94,17 +94,11 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 // A rolled sound is any point in the track's morph space plus a color, with
 // "none" weighted so a full-song roll doesn't stack four effects at once.
 const COLOR_POOL = ["none", "none", "tape", "crush", "phase", "trem", "wob"];
-function rolledPatch(track) {
-  const p = { color: pick(COLOR_POOL), amount: 0.3 + Math.random() * 0.55, motion: Math.random() };
-  if (track !== "drums") {
-    p.x = Math.random();
-    p.y = Math.random();
-  }
-  return p;
+function rolledPatch() {
+  return { x: Math.random(), y: Math.random(), color: pick(COLOR_POOL), amount: 0.3 + Math.random() * 0.55, motion: Math.random() };
 }
 function randomizePresets() {
-  for (const t of ["harmony", "bass", "melody", "drums"]) audio.setPatch(t, rolledPatch(t));
-  audio.setKit(pick(KIT_NAMES));
+  for (const t of ["harmony", "bass", "melody", "drums"]) audio.setPatch(t, rolledPatch());
 }
 // The dice must never deal dead air: "deep" is a driveless sine, and a sine
 // in octave 1 (~33 Hz fundamental, no harmonics) is inaudible on phone and
@@ -1430,20 +1424,19 @@ function openMixer(focusTrack = null) {
 function openSoundSheet(track) {
   const meta = TRACKS.find((t) => t.key === track);
   resetSheet(meta.color);
-  const isDrums = track === "drums";
   const soundDice = el("div", {
     class: "close",
     style: "margin-right:6px",
     text: "🎲",
     "data-action": `sound-dice-${track}`,
     onclick: () => {
-      audio.setPatch(track, rolledPatch(track));
+      audio.setPatch(track, rolledPatch());
       openSoundSheet(track);
     },
   });
   sheet.appendChild(sheetBar("Sound", meta.name, { buttons: [soundDice] }));
 
-  if (!isDrums) {
+  {
     const padWrap = el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "morph" })]);
     const xy = el("div", { class: "xy-pad", style: `--tc:${meta.color}`, "data-action": `xy-${track}` });
     const names = CORNERS[track];
@@ -2341,13 +2334,21 @@ function downloadProject() {
 }
 
 function restoreDevices(devices = {}) {
+  // Names are corners; full patch specs win when present. Early v2 drum
+  // patches had no x/y — keep the kit corner instead of defaulting to 0,0.
   if (KIT_NAMES.includes(devices.drums?.kit)) audio.setKit(devices.drums.kit);
-  // v2 projects carry patch specs; v1 carried preset names (a corner).
   const legacy = { harmony: HARMONY_PRESET_NAMES, bass: BASS_PRESET_NAMES, melody: MELODY_PRESET_NAMES };
   for (const t of ["harmony", "bass", "melody", "drums"]) {
     const d = devices[t] || {};
-    if (d.patch && typeof d.patch === "object") audio.setPatch(t, d.patch);
-    else if (t !== "drums" && legacy[t].includes(d.preset)) {
+    if (d.patch && typeof d.patch === "object") {
+      const patch = { ...d.patch };
+      if (!("x" in patch)) {
+        const cur = audio.patch(t);
+        patch.x = cur.x;
+        patch.y = cur.y;
+      }
+      audio.setPatch(t, patch);
+    } else if (t !== "drums" && legacy[t].includes(d.preset)) {
       if (t === "harmony") audio.setHarmonyPreset(d.preset);
       else if (t === "bass") audio.setBassPreset(d.preset);
       else audio.setMelodyPreset(d.preset);

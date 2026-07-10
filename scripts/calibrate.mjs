@@ -139,7 +139,7 @@ try {
       harmony: ["pad", "keys", "ambient", "stab"],
       bass: ["deep", "bright", "pluck", "sub"],
       melody: ["lead", "bell", "synth", "pluck"],
-      kits: ["garage", "funk", "clean"],
+      kits: ["garage", "funk", "clean", "heavy"],
     };
 
     for (const p of PRESETS.harmony) {
@@ -214,7 +214,7 @@ try {
       { label: "wob", x: 0.5, y: 0.5, color: "wob", amount: 0.6, motion: 0.6 },
     ];
     out.space = {};
-    for (const t of ["harmony", "bass", "melody"]) {
+    for (const t of ["harmony", "bass", "melody", "drums"]) {
       const rows = {};
       for (const spec of SPACE_SPECS) {
         audio.setPatch(t, { x: spec.x, y: spec.y, color: spec.color, amount: spec.amount ?? 0.5, motion: spec.motion ?? 0.5 });

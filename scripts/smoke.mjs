@@ -258,6 +258,14 @@ try {
     `sound dice rolled out of range: ${JSON.stringify(rolled)}`
   );
   await page.evaluate(() => window.__noodles.audio.setPatch("bass", { x: 0, y: 0, color: "none" }));
+  // Drums morph too: their sound sheet must carry the kit pad. The sound
+  // sheet replaced the mixer, so reopen it to reach the drums strip.
+  await closeSheet(page);
+  await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
+  await tap(page, ".arr-corner .view-mix");
+  await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Mixer");
+  await clickAction(page, "sound-drums");
+  await page.waitForSelector('[data-action="xy-drums"]', { visible: true });
 
   await tapAt(page, 200, 70);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
