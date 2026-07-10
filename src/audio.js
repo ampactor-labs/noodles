@@ -183,6 +183,45 @@ function loadSamples() {
 // User-loaded one-shots, one per voice, session-scoped.
 const userSamples = {};
 
+// Condition a raw take into a one-shot that sits beside the bundled library:
+// find the onset, trim the room before it and the noise after it, fade the
+// edges, cap at 1.5 s, and normalize to the library's -1 dBFS peak. This is
+// the difference between "cute demo" and a mouth-boom that actually knocks.
+function conditionOneShot(audioBuf) {
+  const sr = audioBuf.sampleRate;
+  const src = audioBuf.getChannelData(0);
+  let peak = 0;
+  for (let i = 0; i < src.length; i++) peak = Math.max(peak, Math.abs(src[i]));
+  if (peak < 0.003) throw new Error("too quiet");
+  const startThresh = peak * 0.12;
+  let start = 0;
+  while (start < src.length && Math.abs(src[start]) < startThresh) start++;
+  start = Math.max(0, start - Math.floor(0.003 * sr));
+  const tailThresh = peak * 0.02;
+  let end = src.length - 1;
+  while (end > start && Math.abs(src[end]) < tailThresh) end--;
+  end = Math.min(src.length, end + Math.floor(0.02 * sr));
+  const len = Math.min(end - start, Math.floor(1.5 * sr));
+  if (len < Math.floor(0.01 * sr)) throw new Error("too short");
+  const out = Tone.getContext().rawContext.createBuffer(1, len, sr);
+  const dst = out.getChannelData(0);
+  let localPeak = 0;
+  for (let i = 0; i < len; i++) {
+    dst[i] = src[start + i];
+    localPeak = Math.max(localPeak, Math.abs(dst[i]));
+  }
+  const gain = 0.891 / (localPeak || 1);
+  const fadeIn = Math.floor(0.002 * sr);
+  const fadeOut = Math.min(Math.floor(0.02 * sr), Math.floor(len / 4));
+  for (let i = 0; i < len; i++) {
+    let v = dst[i] * gain;
+    if (i < fadeIn) v *= i / fadeIn;
+    if (i >= len - fadeOut) v *= (len - i) / fadeOut;
+    dst[i] = v;
+  }
+  return out;
+}
+
 // Corner order = table order, laid out TL, TR, BL, BR on the XY pad. Drums
 // morph too: the synth bank blends kit scalars, the sample bank crossfades
 // one-shots.
@@ -1254,8 +1293,44 @@ export function createAudio(song) {
     userSampleName: (voice) => userSamples[voice]?.name || null,
     async loadUserSample(voice, arrayBuffer, name) {
       const audioBuf = await Tone.getContext().rawContext.decodeAudioData(arrayBuffer);
-      userSamples[voice] = { buffer: new Tone.ToneAudioBuffer(audioBuf), name };
+      userSamples[voice] = { buffer: new Tone.ToneAudioBuffer(conditionOneShot(audioBuf)), name };
       return name;
+    },
+    // Beatbox capture: record the mic straight into a voice slot. Raw-ish
+    // constraints — AGC and noise suppression would eat the transient that
+    // IS the drum. Returns { done, stop() }; both resolve the sample name.
+    async beginMicCapture(voice, { maxMs = 2500 } = {}) {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
+      const rec = new MediaRecorder(stream);
+      const chunks = [];
+      rec.ondataavailable = (e) => chunks.push(e.data);
+      const done = new Promise((resolve, reject) => {
+        rec.onerror = (e) => reject(e.error || new Error("recorder failed"));
+        rec.onstop = async () => {
+          try {
+            stream.getTracks().forEach((t) => t.stop());
+            const raw = await new Blob(chunks).arrayBuffer();
+            const audioBuf = await Tone.getContext().rawContext.decodeAudioData(raw);
+            const name = `mic ${voice}`;
+            userSamples[voice] = { buffer: new Tone.ToneAudioBuffer(conditionOneShot(audioBuf)), name };
+            resolve(name);
+          } catch (err) {
+            reject(err);
+          }
+        };
+      });
+      rec.start();
+      const timer = setTimeout(() => rec.state !== "inactive" && rec.stop(), maxMs);
+      return {
+        done,
+        stop() {
+          clearTimeout(timer);
+          if (rec.state !== "inactive") rec.stop();
+          return done;
+        },
+      };
     },
     harmonyPreset: () => dominantCorner("harmony", patches.harmony),
     setHarmonyPreset(name) {

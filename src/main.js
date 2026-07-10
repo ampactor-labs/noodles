@@ -1704,7 +1704,64 @@ function openDrumSamplePicker(voice) {
   });
   const userLabel = current === "user" && audio.userSampleName(voice) ? audio.userSampleName(voice) : "load a wav…";
   list.appendChild(choice(userLabel, current === "user", () => fileInput.click(), { "data-action": "pin-user" }));
+  if (navigator.mediaDevices?.getUserMedia) {
+    list.appendChild(choice("🎙 record", false, () => openMicCapture(voice), { "data-action": "pin-mic" }));
+  }
   body.appendChild(el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "pick one — it auditions as you tap" }), list, fileInput]));
+  openSheet();
+}
+
+// Beatbox a drum: boom into the mic, it becomes the kick. Playback pauses so
+// the take doesn't catch the speakers; the conditioned one-shot pins itself
+// and auditions the moment you stop.
+function openMicCapture(voice) {
+  const meta = TRACKS.find((t) => t.key === "drums");
+  resetSheet(meta.color);
+  sheet.appendChild(sheetBar("Record", DRUM_META[voice].label, { onDone: () => openDrumSamplePicker(voice) }));
+  const status = el("div", { class: "exp-status", text: "mouth ready?" });
+  const big = el("div", { class: "mic-big", "data-action": "mic-go", text: "🎙 tap, then make the sound" });
+  sheet.appendChild(el("div", { class: "propsection" }, [big, status]));
+
+  let capture = null;
+  const keep = async () => {
+    big.classList.remove("live");
+    big.textContent = "…";
+    const cap = capture;
+    capture = null;
+    try {
+      await cap.stop();
+      const pins = { ...audio.patch("drums").pins, [voice]: "user" };
+      audio.setPatch("drums", { pins });
+      await ensureStarted();
+      audio.previewHit(voice);
+      openDrumSamplePicker(voice);
+    } catch (e) {
+      status.textContent = e?.message === "too quiet" ? "too quiet — get closer, go again" : "take failed — go again";
+      big.textContent = "🎙 tap, then make the sound";
+    }
+  };
+  big.addEventListener("click", async () => {
+    if (capture) {
+      keep();
+      return;
+    }
+    try {
+      if (audio.playing) {
+        audio.stop();
+        updatePlayBtn(false);
+        status.textContent = "paused the beat so the mic hears only you";
+      }
+      capture = await audio.beginMicCapture(voice);
+      big.classList.add("live");
+      big.textContent = "● recording — tap to keep";
+      status.textContent = "boom / psst / tss — it trims itself";
+      capture.done.then(() => {
+        if (capture) keep();
+      }).catch(() => {});
+    } catch {
+      status.textContent = "mic blocked — allow microphone access and retry";
+    }
+  });
   openSheet();
 }
 

@@ -126,6 +126,9 @@ try {
       "--use-angle=swiftshader",
       "--enable-unsafe-swiftshader",
       "--mute-audio",
+      // Fake mic so the beatbox-capture path runs headless.
+      "--use-fake-device-for-media-stream",
+      "--use-fake-ui-for-media-stream",
     ],
   });
   const page = await browser.newPage();
@@ -350,6 +353,23 @@ try {
   await page.waitForFunction(() => !window.__noodles.audio.patch("drums").pins.kick);
   const samplesReady = await page.evaluate(() => window.__noodles.audio.samplesReady());
   assertState(samplesReady, "bundled drum samples did not load");
+  // Beatbox capture: record the (fake) mic into the kick slot, expect a
+  // conditioned one-shot pinned as "user".
+  await clickAction(page, "pin-mic");
+  await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Record");
+  await clickAction(page, "mic-go");
+  await page.waitForFunction(() => document.querySelector(".mic-big")?.classList.contains("live"), { timeout: 10000 });
+  await wait(500);
+  await clickAction(page, "mic-go");
+  await page.waitForFunction(
+    () => window.__noodles.audio.userSampleName("kick") === "mic kick" && window.__noodles.audio.patch("drums").pins.kick === "user",
+    { timeout: 15000 }
+  );
+  await page.evaluate(() => {
+    const pins = { ...window.__noodles.audio.patch("drums").pins };
+    delete pins.kick;
+    window.__noodles.audio.setPatch("drums", { pins });
+  });
 
   await tapAt(page, 200, 70);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
