@@ -25,7 +25,7 @@ import {
   snapToScale,
   makeMagicScene,
 } from "./model.js";
-import { createAudio, KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES } from "./audio.js";
+import { createAudio, KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, COLOR_NAMES } from "./audio.js";
 
 // Pitch range shown in the piano roll, per track.
 const PIANO = { melody: { base: 12, rows: 56 }, bass: { base: 12, rows: 56 } };
@@ -91,10 +91,19 @@ const song = makeSong();
 setScaleContext(song.key, song.scale);
 const audio = createAudio(song);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+// A rolled sound is any point in the track's morph space plus a color, with
+// "none" weighted so a full-song roll doesn't stack four effects at once.
+const COLOR_POOL = ["none", "none", "tape", "crush", "phase", "trem", "wob"];
+function rolledPatch(track) {
+  const p = { color: pick(COLOR_POOL), amount: 0.3 + Math.random() * 0.55, motion: Math.random() };
+  if (track !== "drums") {
+    p.x = Math.random();
+    p.y = Math.random();
+  }
+  return p;
+}
 function randomizePresets() {
-  audio.setHarmonyPreset(pick(HARMONY_PRESET_NAMES));
-  audio.setBassPreset(pick(BASS_PRESET_NAMES));
-  audio.setMelodyPreset(pick(MELODY_PRESET_NAMES));
+  for (const t of ["harmony", "bass", "melody", "drums"]) audio.setPatch(t, rolledPatch(t));
   audio.setKit(pick(KIT_NAMES));
 }
 // The dice must never deal dead air: "deep" is a driveless sine, and a sine
@@ -113,7 +122,7 @@ function fitBassRegister(scene) {
 randomizePresets();
 fitBassRegister(song.scenes[0]);
 const PROJECT_SCHEMA = "noodles-project";
-const PROJECT_VERSION = 1;
+const PROJECT_VERSION = 2; // v2: devices carry full patch specs, not just preset names
 const LOCAL_PROJECT_KEY = "noodles:last-project";
 
 // --- DOM helpers ---
@@ -1277,6 +1286,7 @@ function openTrackOptions(track) {
   );
   sheet.appendChild(
     el("div", { class: "tfrow" }, [
+      el("div", { class: "tfbtn accent", text: "✦ Sound", onclick: () => openSoundSheet(track) }),
       el("div", { class: "tfbtn", text: "Mixer Strip", onclick: () => openMixer(track) }),
       el("div", { class: "tfbtn", text: "Reset Mix", onclick: () => { resetTrackMix(track); openTrackOptions(track); } }),
       el("div", { class: "tfbtn", text: "Reset Sends", onclick: () => { resetTrackMix(track, { sendsOnly: true }); openTrackOptions(track); } }),
@@ -1336,6 +1346,9 @@ function openMixer(focusTrack = null) {
       sel.addEventListener("change", () => audio.setMelodyPreset(sel.value));
       devSection.append(el("div", { class: "mx-devlabel", text: "preset" }), sel);
     }
+    devSection.appendChild(
+      el("div", { class: "mx-sound", text: "✦ sound", "data-action": `sound-${k}`, onclick: () => openSoundSheet(k) })
+    );
 
     const strip = el("div", { class: "mx-strip" + (focusTrack === k ? " focus" : ""), style: `--tc:${t.color}`, "data-track": k }, [
       el("div", { class: "mx-name" }, [el("span", { class: "mx-dot" }), el("span", { text: t.name })]),
@@ -1407,6 +1420,90 @@ function openMixer(focusTrack = null) {
   };
   cancelAnimationFrame(mixerRAF);
   mixerRAF = requestAnimationFrame(tick);
+}
+
+// ---------------------------------------------------------------------------
+// Sound sheet — the morph pad between a track's four presets, plus one color.
+// The dropdown names are the corners; the space between them is the point of
+// this sheet. Everything auditions live while the loop plays.
+// ---------------------------------------------------------------------------
+function openSoundSheet(track) {
+  const meta = TRACKS.find((t) => t.key === track);
+  resetSheet(meta.color);
+  const isDrums = track === "drums";
+  const soundDice = el("div", {
+    class: "close",
+    style: "margin-right:6px",
+    text: "🎲",
+    "data-action": `sound-dice-${track}`,
+    onclick: () => {
+      audio.setPatch(track, rolledPatch(track));
+      openSoundSheet(track);
+    },
+  });
+  sheet.appendChild(sheetBar("Sound", meta.name, { buttons: [soundDice] }));
+
+  if (!isDrums) {
+    const padWrap = el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "morph" })]);
+    const xy = el("div", { class: "xy-pad", style: `--tc:${meta.color}`, "data-action": `xy-${track}` });
+    const names = CORNERS[track];
+    const cornerPos = ["tl", "tr", "bl", "br"];
+    names.forEach((n, i) => xy.appendChild(el("div", { class: `xy-corner ${cornerPos[i]}`, text: n })));
+    const dot = el("div", { class: "xy-dot" });
+    xy.appendChild(dot);
+    const placeDot = (p) => {
+      dot.style.left = `${p.x * 100}%`;
+      dot.style.top = `${p.y * 100}%`;
+    };
+    placeDot(audio.patch(track));
+    xy.addEventListener("pointerdown", async (e) => {
+      e.preventDefault();
+      await ensureStarted();
+      const rect = xy.getBoundingClientRect();
+      const set = (ev) => {
+        const x = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+        const y = Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height));
+        placeDot(audio.setPatch(track, { x, y }));
+      };
+      set(e);
+      capturePointer(xy, e.pointerId);
+      const move = (ev) => set(ev);
+      const up = () => {
+        xy.removeEventListener("pointermove", move);
+        xy.removeEventListener("pointerup", up);
+        xy.removeEventListener("pointercancel", up);
+      };
+      xy.addEventListener("pointermove", move);
+      xy.addEventListener("pointerup", up);
+      xy.addEventListener("pointercancel", up);
+    });
+    padWrap.appendChild(xy);
+    sheet.appendChild(padWrap);
+  }
+
+  const patch = audio.patch(track);
+  const chips = el("div", { class: "choicegrid three" });
+  const chipEls = {};
+  for (const c of COLOR_NAMES) {
+    chipEls[c] = choice(c, patch.color === c, () => {
+      const next = audio.setPatch(track, { color: c });
+      for (const [name, elc] of Object.entries(chipEls)) elc.classList.toggle("on", name === next.color);
+    }, { "data-action": `color-${c}` });
+    chips.appendChild(chipEls[c]);
+  }
+  sheet.appendChild(el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "color" }), chips]));
+
+  const pctFmt = (v) => `${Math.round(v * 100)}%`;
+  sheet.appendChild(
+    el("div", { class: "propsection" }, [
+      el("div", { class: "proplabel", text: "amount · motion" }),
+      el("div", { class: "knobrow" }, [
+        knob("amount", 0, 1, 0.01, patch.amount, (v) => audio.setPatch(track, { amount: v }), pctFmt),
+        knob("motion", 0, 1, 0.01, patch.motion, (v) => audio.setPatch(track, { motion: v }), pctFmt),
+      ]),
+    ])
+  );
+  openSheet();
 }
 
 function buildDrumEditor(scene) {
@@ -2216,10 +2313,10 @@ function downloadBlob(blob, name) {
 
 function projectDevices() {
   return {
-    drums: { kit: audio.kit() },
-    harmony: { preset: audio.harmonyPreset() },
-    bass: { preset: audio.bassPreset() },
-    melody: { preset: audio.melodyPreset() },
+    drums: { kit: audio.kit(), patch: audio.patch("drums") },
+    harmony: { preset: audio.harmonyPreset(), patch: audio.patch("harmony") },
+    bass: { preset: audio.bassPreset(), patch: audio.patch("bass") },
+    melody: { preset: audio.melodyPreset(), patch: audio.patch("melody") },
   };
 }
 
@@ -2245,9 +2342,17 @@ function downloadProject() {
 
 function restoreDevices(devices = {}) {
   if (KIT_NAMES.includes(devices.drums?.kit)) audio.setKit(devices.drums.kit);
-  if (HARMONY_PRESET_NAMES.includes(devices.harmony?.preset)) audio.setHarmonyPreset(devices.harmony.preset);
-  if (BASS_PRESET_NAMES.includes(devices.bass?.preset)) audio.setBassPreset(devices.bass.preset);
-  if (MELODY_PRESET_NAMES.includes(devices.melody?.preset)) audio.setMelodyPreset(devices.melody.preset);
+  // v2 projects carry patch specs; v1 carried preset names (a corner).
+  const legacy = { harmony: HARMONY_PRESET_NAMES, bass: BASS_PRESET_NAMES, melody: MELODY_PRESET_NAMES };
+  for (const t of ["harmony", "bass", "melody", "drums"]) {
+    const d = devices[t] || {};
+    if (d.patch && typeof d.patch === "object") audio.setPatch(t, d.patch);
+    else if (t !== "drums" && legacy[t].includes(d.preset)) {
+      if (t === "harmony") audio.setHarmonyPreset(d.preset);
+      else if (t === "bass") audio.setBassPreset(d.preset);
+      else audio.setMelodyPreset(d.preset);
+    }
+  }
 }
 
 function restoreMix(mix = {}) {

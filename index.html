@@ -552,6 +552,9 @@
       .choicegrid.two {
         grid-template-columns: repeat(2, 1fr);
       }
+      .choicegrid.three {
+        grid-template-columns: repeat(3, 1fr);
+      }
       .choicegrid.four {
         grid-template-columns: repeat(4, 1fr);
       }
@@ -1168,6 +1171,72 @@
         padding: 5px 4px;
         font-size: 11px;
         font-weight: 600;
+      }
+      .mx-sound {
+        width: 100%;
+        margin-top: 3px;
+        padding: 5px 2px;
+        border: 1px solid color-mix(in srgb, var(--tc) 45%, #000);
+        border-radius: 5px;
+        background: color-mix(in srgb, var(--tc) 16%, #1a1a1c);
+        color: color-mix(in srgb, var(--tc) 80%, #fff);
+        font-size: 10px;
+        font-weight: 800;
+        text-align: center;
+        text-transform: uppercase;
+      }
+
+      /* Sound sheet — the XY morph pad */
+      .xy-pad {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 1.7;
+        border: 1px solid #000;
+        border-radius: 8px;
+        background:
+          linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px) 0 0 / 25% 100%,
+          linear-gradient(0deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px) 0 0 / 100% 25%,
+          #151517;
+        touch-action: none;
+        overflow: hidden;
+      }
+      .xy-corner {
+        position: absolute;
+        padding: 4px 6px;
+        font-size: 10px;
+        font-weight: 800;
+        color: var(--dim);
+        text-transform: uppercase;
+        pointer-events: none;
+      }
+      .xy-corner.tl { top: 0; left: 0; }
+      .xy-corner.tr { top: 0; right: 0; }
+      .xy-corner.bl { bottom: 0; left: 0; }
+      .xy-corner.br { bottom: 0; right: 0; }
+      .xy-dot {
+        position: absolute;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: color-mix(in srgb, var(--tc) 80%, #fff);
+        border: 2px solid #fff;
+        box-shadow: 0 0 10px color-mix(in srgb, var(--tc) 70%, transparent);
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+      }
+      .knobrow {
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+      }
+      .knobrow .knob-dial {
+        width: 34px;
+        height: 34px;
+      }
+      .knobrow .knob-indicator {
+        left: 16px;
+        height: 11px;
+        transform-origin: 1px 15px;
       }
 
       /* Export sheet */
