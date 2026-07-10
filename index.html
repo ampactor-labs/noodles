@@ -10,10 +10,13 @@
     <link rel="icon" href="data:," />
     <style>
       /* Registered so the clip pie timers can transition it (smooth sweep
-         instead of 16th-note jumps). Unsupported browsers just jump. */
+         instead of 16th-note jumps). Unsupported browsers just jump.
+         inherits MUST be true: the pie lives on a ::after pseudo-element and
+         only receives --pct from its clip via inheritance — registering it
+         non-inheriting pins every pie at the initial value (empty, forever). */
       @property --pct {
         syntax: "<number>";
-        inherits: false;
+        inherits: true;
         initial-value: 0;
       }
       :root {
