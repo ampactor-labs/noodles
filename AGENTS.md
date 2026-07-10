@@ -106,22 +106,23 @@ the drum-voice metadata, and `makeSong` / `makeScene` / `cloneScene` / `arrangeL
 **`src/audio.js`** — `createAudio(song)` builds the Tone.js graph and returns the transport
 API. The one rule that matters: **`buildGraph()` is the only place the signal chain exists.**
 The live context and `renderOffline` (WAV export) both call it, so export-matches-app holds
-by construction — never fork the chain. Topology: per track a preset **trim** Gain and
+by construction; never fork the chain. Topology: per track a preset **trim** Gain and
 `Tone.Channel` (drums skip the per-track input compressor; they already get parallel
 compression), reverb + echo sends, a kick-sidechain duck on everything melodic, a drum bus
 with a parallel compressor, and a master section (gain → saturation → soft clip → glue
-compressor → +8 dB makeup → limiter at -2). Harmony = saw pad (LFO owns its filter cutoff —
-a signal connected to a param overrides it; presets rescale the LFO range) + mono halo + a
-highpassed root hint; bass and lead are PolySynths behind drive/filters; the kit is
-MembraneSynth kick + filtered-noise snare/hat/clap. Each melodic track's device is a
+compressor → +8 dB makeup → limiter at -2). Harmony = saw pad (the LFO owns its filter
+cutoff, because a signal connected to a param overrides it; presets rescale the LFO range)
++ mono halo + a highpassed root hint; bass and lead are PolySynths behind drive/filters; the
+kit is MembraneSynth kick + filtered-noise snare/hat/clap. Each track's device is a
 **morph**: four synth layers (one per preset corner, oscillator + envelope fixed) crossfaded
-by a patch `{x, y}` with equal-power bilinear weights, shared tone controls blended; plus one
-**color** insert per track (tape/crush/phase/trem/wob) with amount + motion, motion rates
-tempo-synced. Preset *names* are the corners — the old preset API snaps to them and reads
-back the dominant one. The corner tables carry **measured** gain trims and the morph space
-inherits them — run `npm run calibrate` before and after changing corners, colors, or the
-chain; per-track spreads (corners AND space table) must stay ≲2.5 dB or randomizing sounds
-starts randomizing the mix. One `Tone.Loop("16n")` clock drives both Scene looping and Arrangement
+by a patch `{x, y}` with equal-power bilinear weights, shared tone controls blended; drums
+morph by blending kit scalars directly. Plus one **color** insert per track
+(tape/crush/phase/trem/wob) with amount + motion, motion rates tempo-synced. Preset *names*
+are the corners, and the old preset API snaps to them and reads back the dominant one. The
+corner tables carry **measured** gain trims and the morph space inherits them. Run
+`npm run calibrate` before and after changing corners, colors, or the chain; per-track
+spreads (corners AND space table) must stay ≲2.5 dB or randomizing sounds starts randomizing
+the mix. One `Tone.Loop("16n")` clock drives both Scene looping and Arrangement
 playback, emitting UI events through `Tone.Draw.schedule` → `onVisual`. Public API:
 `init/play/stop/playing`, `launchScene`/`launchClip`, `playArrangement`/`setArrangePos`/
 `enterArrangement`, `setTempo`/`setSwing`, `preview`/`previewHit`/`previewNote`, mixer
@@ -185,12 +186,12 @@ Plus tier-2 performance work listed in `ROADMAP.md` (diff-based cell repaints, p
 - **Modern-browser features in use:** `structuredClone`, CSS `color-mix()`, `esnext` build
   target. Fine for the target phones; don't add polyfills.
 - **Two gates before claiming anything works:** `npm run smoke` (headless Chrome drives the
-  core flow — launch, editors, record, export, dice — and fails on any page error) and, if
-  you touched the audio chain or presets, `npm run calibrate` (renders every preset through
-  the real graph and prints RMS/peak tables; per-track spreads should stay ≲1.5 dB). A green
-  `npm run build` proves nothing about runtime.
+  core flow of launch, editors, record, export, and dice, and fails on any page error) and,
+  if you touched the audio chain or presets, `npm run calibrate` (renders every preset
+  through the real graph and prints RMS/peak tables; per-track spreads should stay ≲2.5 dB).
+  A green `npm run build` proves nothing about runtime.
 - **`window.__noodles`** exposes `{ song, audio, applyProject }` for the headless harnesses.
-  It is not a public API, but keep it working — smoke and calibrate depend on it.
+  It is not a public API, but keep it working; smoke and calibrate depend on it.
 
 ## Stale docs — read for philosophy, not for what to build
 

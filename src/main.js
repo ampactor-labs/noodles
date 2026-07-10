@@ -326,14 +326,14 @@ function openAboutSheet() {
   const p = (text) => el("div", { class: "about-p", text });
   sheet.appendChild(
     el("div", { class: "editor-scroll" }, [
-      p("This isn't a recording — it's an instrument. The song playing right now was rolled just for you, and every bit of it is yours to change."),
+      p("This is an instrument. The song playing right now was rolled on the spot, just for you, and every bit of it is yours to change."),
       el("div", { class: "about-label", text: "the three moves" }),
-      p("▶ plays. Scene rows launch. Tap any clip to open it — chords, drums, notes — and draw."),
-      p("🎲 rolls a whole new song: new key, new tempo, new sounds."),
-      p("You can't break it. Everything stays in key, every roll comes out mixed, and undo is always right there."),
+      p("▶ plays. Scene rows launch. Tap any clip (chords, drums, notes) and draw."),
+      p("🎲 rolls a whole new song: a new key, tempo, sounds, and groove."),
+      p("You can't break it. Everything stays in key and every roll comes out mixed. Undo is always right there."),
       el("div", { class: "about-label", text: "when you want more" }),
-      p("Mix opens the mixer; ✦ sound morphs a track between its four sounds and adds color. Long-press a clip for launch tricks. View is the song timeline — arm ● and your jam records into it. File saves projects and exports WAV."),
-      p("Made for phones. Made for couches. Tell your friends."),
+      p("Mix opens the mixer; ✦ sound morphs a track between its four sounds and adds color. Long-press a clip for launch tricks. View is the song timeline, and if you arm ● your jam records into it. File saves projects and exports WAV."),
+      p("Made for couches and phone speakers. Tell your friends."),
     ])
   );
   openSheet();
@@ -347,7 +347,7 @@ function maybeGreet() {
   let greeted = null;
   try { greeted = localStorage.getItem(GREETED_KEY); } catch {}
   if (greeted) return;
-  const greet = el("div", { class: "greet", html: "this is an <b>instrument</b> — tap anything<br />the <b>🎲</b> rolls a whole new song" });
+  const greet = el("div", { class: "greet", html: "this is an <b>instrument</b>, tap anything<br />the 🎲 rolls a whole new song" });
   document.body.appendChild(greet);
   requestAnimationFrame(() => greet.classList.add("in"));
   const dismiss = () => {
