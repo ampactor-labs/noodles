@@ -1048,6 +1048,14 @@
         background: var(--tc);
         flex-shrink: 0;
       }
+      .mx-level {
+        display: flex;
+        gap: 6px;
+        width: 100%;
+        height: 126px;
+        align-items: stretch;
+        justify-content: center;
+      }
       .mx-meter {
         width: 16px;
         height: 72px;
@@ -1056,6 +1064,14 @@
         border-radius: 4px;
         overflow: hidden;
         position: relative;
+      }
+      .mx-level .mx-meter {
+        height: auto;
+        flex: 0 0 15px;
+      }
+      .mx-level .mx-vfader {
+        height: 100%;
+        width: 32px;
       }
       .mx-master .mx-meter {
         width: 20px;

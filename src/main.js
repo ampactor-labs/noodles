@@ -1415,8 +1415,9 @@ function openMixer(focusTrack = null) {
     const strip = el("div", { class: "mx-strip" + (focusTrack === k ? " focus" : ""), style: `--tc:${t.color}`, "data-track": k }, [
       el("div", { class: "mx-name" }, [el("span", { class: "mx-dot" }), el("span", { text: t.name })]),
       el("div", { class: "mx-ms" }, [trackToggleButton(k, "mute"), trackToggleButton(k, "solo")]),
-      meter,
-      volSlider,
+      // Meter beside fader, console-style: both get the full row height
+      // instead of splitting it, and you can watch the meter mid-drag.
+      el("div", { class: "mx-level" }, [meter, volSlider]),
       volLabel,
       panSlider,
       verbSlider,
