@@ -159,11 +159,11 @@ as live playback; project save/load to file and localStorage; GitHub Pages deplo
 
 ## What's next (priority order — from `ROADMAP.md`)
 
-1. **Sound / sample browser** — and it is the home for the **drum-sample loader**. This is the
-   one the builder wants most: real drum one-shots (tight funk / UK-garage kicks, snares,
-   hats, claps) played by the Drum Rack instead of the synth kit. Keep the synth kit as a
-   fallback — it's good — but samples are the goal. The loader must accept user-loaded local
-   WAVs (see the offline constraint below). Browser organized by type/character.
+The drum-sample loader shipped: four bundled sample kits (street/warm/dusty/808, generated
+by `npm run samples` into `public/samples/`, ~410 KB) play by default as morphable corners,
+with per-voice pins and user-loaded local WAVs (session-scoped; a persistence story for user
+samples is an open fork — IndexedDB vs project-file embedding). Remaining browser ideas:
+more bundled kits/characters, and melodic sample sources.
 
 Plus tier-2 performance work listed in `ROADMAP.md` (diff-based cell repaints, precompute
 `color-mix()` into CSS custom properties, snapshot undo only on committed change, lazy meters).

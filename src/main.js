@@ -25,7 +25,7 @@ import {
   snapToScale,
   makeMagicScene,
 } from "./model.js";
-import { createAudio, KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, COLOR_NAMES } from "./audio.js";
+import { createAudio, KIT_NAMES, SAMPLE_KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, COLOR_NAMES, DRUM_BANKS, drumCornerNames } from "./audio.js";
 
 // Pitch range shown in the piano roll, per track.
 const PIANO = { melody: { base: 12, rows: 56 }, bass: { base: 12, rows: 56 } };
@@ -94,11 +94,17 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 // A rolled sound is any point in the track's morph space plus a color, with
 // "none" weighted so a full-song roll doesn't stack four effects at once.
 const COLOR_POOL = ["none", "none", "tape", "crush", "phase", "trem", "wob"];
-function rolledPatch() {
-  return { x: Math.random(), y: Math.random(), color: pick(COLOR_POOL), amount: 0.3 + Math.random() * 0.55, motion: Math.random() };
+function rolledPatch(track) {
+  const p = { x: Math.random(), y: Math.random(), color: pick(COLOR_POOL), amount: 0.3 + Math.random() * 0.55, motion: Math.random() };
+  if (track === "drums") {
+    // The sample bank is the star; the synth kit stays in rotation.
+    p.bank = Math.random() < 0.7 ? "sample" : "synth";
+    p.pins = {};
+  }
+  return p;
 }
 function randomizePresets() {
-  for (const t of ["harmony", "bass", "melody", "drums"]) audio.setPatch(t, rolledPatch());
+  for (const t of ["harmony", "bass", "melody", "drums"]) audio.setPatch(t, rolledPatch(t));
 }
 // The dice must never deal dead air: "deep" is a driveless sine, and a sine
 // in octave 1 (~33 Hz fundamental, no harmonics) is inaudible on phone and
@@ -1365,7 +1371,7 @@ function openMixer(focusTrack = null) {
     const devSection = el("div", { class: "mx-dev-section" });
     if (k === "drums") {
       const sel = el("select", { class: "mx-preset" });
-      KIT_NAMES.forEach((n) => { const o = el("option", { value: n, text: n }); if (n === audio.kit()) o.selected = true; sel.appendChild(o); });
+      [...SAMPLE_KIT_NAMES, ...KIT_NAMES].forEach((n) => { const o = el("option", { value: n, text: n }); if (n === audio.kit()) o.selected = true; sel.appendChild(o); });
       sel.addEventListener("change", () => audio.setKit(sel.value));
       devSection.append(el("div", { class: "mx-devlabel", text: "kit" }), sel);
     } else if (k === "harmony") {
@@ -1474,16 +1480,33 @@ function openSoundSheet(track) {
     text: "🎲",
     "data-action": `sound-dice-${track}`,
     onclick: () => {
-      audio.setPatch(track, rolledPatch());
+      audio.setPatch(track, rolledPatch(track));
       openSoundSheet(track);
     },
   });
   sheet.appendChild(sheetBar("Sound", meta.name, { buttons: [soundDice] }));
+  const body = el("div", { class: "editor-scroll" });
+  sheet.appendChild(body);
+  const patch = audio.patch(track);
+  const isDrums = track === "drums";
+
+  if (isDrums) {
+    const bankChips = el("div", { class: "choicegrid two" });
+    for (const bank of DRUM_BANKS) {
+      bankChips.appendChild(
+        choice(bank === "sample" ? "samples" : "synth", patch.bank === bank, () => {
+          audio.setPatch(track, { bank });
+          openSoundSheet(track);
+        }, { "data-action": `bank-${bank}` })
+      );
+    }
+    body.appendChild(el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "bank" }), bankChips]));
+  }
 
   {
     const padWrap = el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "morph" })]);
     const xy = el("div", { class: "xy-pad", style: `--tc:${meta.color}`, "data-action": `xy-${track}` });
-    const names = CORNERS[track];
+    const names = isDrums ? drumCornerNames(patch) : CORNERS[track];
     const cornerPos = ["tl", "tr", "bl", "br"];
     names.forEach((n, i) => xy.appendChild(el("div", { class: `xy-corner ${cornerPos[i]}`, text: n })));
     const dot = el("div", { class: "xy-dot" });
@@ -1492,7 +1515,7 @@ function openSoundSheet(track) {
       dot.style.left = `${p.x * 100}%`;
       dot.style.top = `${p.y * 100}%`;
     };
-    placeDot(audio.patch(track));
+    placeDot(patch);
     xy.addEventListener("pointerdown", async (e) => {
       e.preventDefault();
       await ensureStarted();
@@ -1515,10 +1538,24 @@ function openSoundSheet(track) {
       xy.addEventListener("pointercancel", up);
     });
     padWrap.appendChild(xy);
-    sheet.appendChild(padWrap);
+    body.appendChild(padWrap);
   }
 
-  const patch = audio.patch(track);
+  if (isDrums && patch.bank === "sample") {
+    const rows = el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "one-shots" })]);
+    for (const v of DRUM_VOICES) {
+      const pin = patch.pins?.[v];
+      const label = pin === "user" ? (audio.userSampleName(v) || "your wav") : pin || "follows the kit";
+      rows.appendChild(
+        el("div", { class: "srow", "data-action": `pick-${v}`, onclick: () => openDrumSamplePicker(v) }, [
+          el("div", { class: "srow-voice", style: `--pc:${padHex(v)}`, text: DRUM_META[v].label }),
+          el("div", { class: "srow-pin" + (pin ? " pinned" : ""), text: label }),
+        ])
+      );
+    }
+    body.appendChild(rows);
+  }
+
   const chips = el("div", { class: "choicegrid three" });
   const chipEls = {};
   for (const c of COLOR_NAMES) {
@@ -1528,10 +1565,10 @@ function openSoundSheet(track) {
     }, { "data-action": `color-${c}` });
     chips.appendChild(chipEls[c]);
   }
-  sheet.appendChild(el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "color" }), chips]));
+  body.appendChild(el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "color" }), chips]));
 
   const pctFmt = (v) => `${Math.round(v * 100)}%`;
-  sheet.appendChild(
+  body.appendChild(
     el("div", { class: "propsection" }, [
       el("div", { class: "proplabel", text: "amount · motion" }),
       el("div", { class: "knobrow" }, [
@@ -1540,6 +1577,50 @@ function openSoundSheet(track) {
       ]),
     ])
   );
+  openSheet();
+}
+
+// Per-voice one-shot picker: the bundled library organized by kit character,
+// plus your own WAV. Every choice auditions immediately.
+function openDrumSamplePicker(voice) {
+  const meta = TRACKS.find((t) => t.key === "drums");
+  resetSheet(meta.color);
+  sheet.appendChild(sheetBar("One-shot", DRUM_META[voice].label, { onDone: () => openSoundSheet("drums") }));
+  const body = el("div", { class: "editor-scroll" });
+  sheet.appendChild(body);
+  const patch = audio.patch("drums");
+  const current = patch.pins?.[voice] || null;
+
+  const setPin = async (pin) => {
+    const pins = { ...audio.patch("drums").pins };
+    if (pin) pins[voice] = pin;
+    else delete pins[voice];
+    audio.setPatch("drums", { pins });
+    await ensureStarted();
+    audio.previewHit(voice);
+    openDrumSamplePicker(voice);
+  };
+
+  const list = el("div", { class: "choicegrid two" });
+  list.appendChild(choice("follows the kit", !current, () => setPin(null), { "data-action": "pin-kit" }));
+  for (const kit of SAMPLE_KIT_NAMES) {
+    const name = `${kit}-${voice}`;
+    list.appendChild(choice(`${kit} ${DRUM_META[voice].label}`, current === name, () => setPin(name), { "data-action": `pin-${name}` }));
+  }
+  const fileInput = el("input", { class: "project-file", type: "file", accept: "audio/wav,audio/*" });
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    try {
+      await audio.loadUserSample(voice, await file.arrayBuffer(), file.name);
+      setPin("user");
+    } catch {
+      openDrumSamplePicker(voice);
+    }
+  });
+  const userLabel = current === "user" && audio.userSampleName(voice) ? audio.userSampleName(voice) : "load a wav…";
+  list.appendChild(choice(userLabel, current === "user", () => fileInput.click(), { "data-action": "pin-user" }));
+  body.appendChild(el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "pick one — it auditions as you tap" }), list, fileInput]));
   openSheet();
 }
 

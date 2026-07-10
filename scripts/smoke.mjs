@@ -270,14 +270,24 @@ try {
     `sound dice rolled out of range: ${JSON.stringify(rolled)}`
   );
   await page.evaluate(() => window.__noodles.audio.setPatch("bass", { x: 0, y: 0, color: "none" }));
-  // Drums morph too: their sound sheet must carry the kit pad. The sound
+  // Drums: kit pad, sample/synth banks, and the one-shot picker. The sound
   // sheet replaced the mixer, so reopen it to reach the drums strip.
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
   await tap(page, ".arr-corner .view-mix");
   await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Mixer");
+  await page.evaluate(() => window.__noodles.audio.setPatch("drums", { bank: "sample" }));
   await clickAction(page, "sound-drums");
   await page.waitForSelector('[data-action="xy-drums"]', { visible: true });
+  await page.waitForSelector('[data-action="pick-kick"]', { visible: true });
+  await clickAction(page, "pick-kick");
+  await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "One-shot");
+  await clickAction(page, "pin-street-kick");
+  await page.waitForFunction(() => window.__noodles.audio.patch("drums").pins.kick === "street-kick");
+  await clickAction(page, "pin-kit");
+  await page.waitForFunction(() => !window.__noodles.audio.patch("drums").pins.kick);
+  const samplesReady = await page.evaluate(() => window.__noodles.audio.samplesReady());
+  assertState(samplesReady, "bundled drum samples did not load");
 
   await tapAt(page, 200, 70);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));

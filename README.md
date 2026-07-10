@@ -38,7 +38,10 @@ velocity lane. A vertical mixer: fader, pan, reverb and echo sends, live
 meters with peak hold, and a device per track that goes deeper than a preset
 list. The four preset names are corners of an XY morph pad (tap "sound" on
 any strip), with a color slot (tape, crush, phase, trem, wob), amount and
-motion knobs, and a per-track sound dice. The whole space is loudness-matched
+motion knobs, and a per-track sound dice. Drums play real one-shots by
+default: four sampled kits (street, warm, dusty, 808) synthesized offline by
+`npm run samples` and bundled, morphable on the same pad, with a per-voice
+picker that also loads your own WAVs; the synth kit remains as a second bank. The whole space is loudness-matched
 by measurement (`npm run calibrate`), so the randomized cold open (key, scale,
 tempo, sounds, one magic scene, rerollable anytime with the 🎲 button) changes
 the flavor of the song without ever moving the balance of the mix.

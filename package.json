@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "smoke": "node scripts/smoke.mjs",
-    "calibrate": "node scripts/calibrate.mjs"
+    "calibrate": "node scripts/calibrate.mjs",
+    "samples": "node scripts/make-samples.mjs"
   },
   "dependencies": {
     "tone": "^14.7.77"

@@ -139,7 +139,7 @@ try {
       harmony: ["pad", "keys", "ambient", "stab"],
       bass: ["deep", "bright", "pluck", "sub"],
       melody: ["lead", "bell", "synth", "pluck"],
-      kits: ["garage", "funk", "clean", "heavy"],
+      kits: ["street", "warm", "dusty", "808", "garage", "funk", "clean", "heavy"],
     };
 
     for (const p of PRESETS.harmony) {
