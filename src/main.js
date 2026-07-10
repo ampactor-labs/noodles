@@ -1123,10 +1123,10 @@ let mixerRAF = 0;
 // tail, the kit gets a whisper of the same room. Bass stays bone dry — reverb
 // or echo down there is mud, not fat. -30 on a send knob is off.
 const MIX_DEFAULTS = {
-  harmony: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -12, echo: -30, mute: false, solo: false },
-  drums: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -20, echo: -30, mute: false, solo: false },
+  harmony: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -18, echo: -30, mute: false, solo: false },
+  drums: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -24, echo: -30, mute: false, solo: false },
   bass: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -30, echo: -30, mute: false, solo: false },
-  melody: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -14, echo: -14, mute: false, solo: false },
+  melody: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -20, echo: -14, mute: false, solo: false },
 };
 const mixState = structuredClone(MIX_DEFAULTS);
 

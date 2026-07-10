@@ -281,8 +281,11 @@ function buildGraph({ meters = false } = {}) {
   g.master = new Tone.Gain(Tone.dbToGain(-3)).connect(g.saturation);
 
   // Sends. Algorithmic (Freeverb) instead of convolution — far cheaper per
-  // sample on a low-end mobile CPU, and fine for a send reverb.
+  // sample on a low-end mobile CPU, and fine for a send reverb. The highpass
+  // on the reverb input keeps kicks and 808 subs out of the tail: reverberant
+  // low end reads as mud, not space.
   g.reverb = new Tone.Freeverb({ roomSize: 0.72, dampening: 2600, wet: 1 }).connect(g.master);
+  g.reverbHP = new Tone.Filter({ type: "highpass", frequency: 200, Q: 0.7 }).connect(g.reverb);
   g.echo = new Tone.FeedbackDelay({ delayTime: "8n", feedback: 0.26, wet: 1 }).connect(g.master);
   g.echoReturn = new Tone.Gain(Tone.dbToGain(-4)).connect(g.echo);
 
@@ -319,7 +322,7 @@ function buildGraph({ meters = false } = {}) {
       g.trims[k].connect(g.channels[k]);
       g.channels[k].connect(g.musicDuck);
     }
-    g.verbSends[k] = new Tone.Gain(0).connect(g.reverb);
+    g.verbSends[k] = new Tone.Gain(0).connect(g.reverbHP);
     g.channels[k].connect(g.verbSends[k]);
     g.echoSends[k] = new Tone.Gain(0).connect(g.echoReturn);
     g.channels[k].connect(g.echoSends[k]);
@@ -700,7 +703,14 @@ function playArrangementStepOn(g, patches, vstate, song, bar, stepInBar, time) {
 export function createAudio(song) {
   // Favor throughput over latency on weak mobile CPUs — a bigger buffer absorbs
   // CPU jitter and prevents xruns. Must be set before any node is created.
-  Tone.setContext(new Tone.Context({ latencyHint: "playback" }));
+  // sampleRate 44100: most Androids default to 48 k, which is ~8% more DSP for
+  // the identical sound plus a resample of our 44.1 k drum one-shots; a 44.1 k
+  // context plays them bit-exact and the OS resamples the output for free.
+  // lookAhead 0.25: scheduling runs on the main thread, and on little cores a
+  // janky frame at 0.1 s of headroom becomes an audible gap — more headroom
+  // costs nothing audible (interactive previews still fire at now).
+  const context = new Tone.Context({ latencyHint: "playback", lookAhead: 0.25 });
+  Tone.setContext(context);
   // setContext swaps the active context, so the clock loop below binds to the
   // NEW context's transport. The deprecated Tone.Transport / Tone.Draw globals
   // still point at the original context — driving playback through them starts a

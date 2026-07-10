@@ -128,7 +128,10 @@ playback, emitting UI events through `Tone.Draw.schedule` → `onVisual`. Public
 `enterArrangement`, `setTempo`/`setSwing`, `preview`/`previewHit`/`previewNote`, mixer
 `setVol`/`setPan`/`setSend`/`setEcho`/`setMute`/`setSolo`/`meter`, preset getters/setters
 per track, `onVisual`, and `renderOffline(soloTrack)`. Context is created with
-`latencyHint:"playback"` for weak devices; keep the default 0.1s lookAhead.
+`latencyHint:"playback"` and `lookAhead: 0.25` — scheduling runs on the main thread, and on
+little cores a janky frame under 0.1 s of headroom becomes an audible gap. Don't wrap a
+custom-sampleRate native AudioContext in Tone.Context: it throws stackless
+InvalidStateErrors somewhere inside Tone (tried for the 48k→44.1k saving, reverted).
 
 **`src/main.js`** — all UI and interaction, vanilla DOM (no framework). It builds: the
 transport (pinned **play + undo + redo** that never scroll and sit above any open editor,
