@@ -1136,8 +1136,9 @@ function knob(label, min, max, step, val, onChange, format = (v) => v) {
   const dial = el("div", { class: "knob-dial" });
   const indicator = el("div", { class: "knob-indicator" });
   const valEl = el("div", { class: "knob-val", text: format(val) });
-  dial.appendChild(indicator);
-  container.append(lbl, dial, valEl);
+  // The value lives inside the dial; the freed row below lets the dial grow.
+  dial.append(indicator, valEl);
+  container.append(lbl, dial);
 
   let currentVal = val;
   const updateVisuals = () => {
