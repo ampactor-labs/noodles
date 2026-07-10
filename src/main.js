@@ -2245,6 +2245,41 @@ function barFromEvent(e) {
   return Math.max(0, Math.round((e.clientX - rect.left) / ppb));
 }
 
+// Content-space bar under a client X, computed FRESH so it stays exact while
+// the view auto-pans underneath the pointer.
+const barFromX = (x) => Math.max(0, Math.round((x - arrContentEl.getBoundingClientRect().left) / ppb));
+
+// Edge auto-pan for horizontal drags: hover near either edge of the
+// arrangement viewport and it scrolls, faster the closer to the edge, calling
+// onFrame so the drag math re-applies under the moving content.
+const PAN_EDGE = 48;
+function makeAutoPan(getClientX, onFrame) {
+  let raf = 0;
+  const tick = () => {
+    raf = 0;
+    const x = getClientX();
+    const vw = arrScroll.getBoundingClientRect();
+    let v = 0;
+    if (x > vw.right - PAN_EDGE) v = Math.min(20, (x - (vw.right - PAN_EDGE)) * 0.4);
+    else if (x < vw.left + PAN_EDGE) v = -Math.min(20, (vw.left + PAN_EDGE - x) * 0.4);
+    if (v !== 0) {
+      const before = arrScroll.scrollLeft;
+      arrScroll.scrollLeft = Math.max(0, before + v);
+      if (arrScroll.scrollLeft !== before) onFrame();
+      raf = requestAnimationFrame(tick);
+    }
+  };
+  return {
+    poke() {
+      if (!raf) raf = requestAnimationFrame(tick);
+    },
+    stop() {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    },
+  };
+}
+
 function onRulerDown(e) {
   arrPlayBar = barFromEvent(e);
   if (audioReady) audio.setArrangePos(arrPlayBar);
@@ -2274,9 +2309,7 @@ async function onClipDown(e, track, idx, cl, rz) {
 
   const clip = song.arrangement[track][idx];
   const resize = e.target === rz;
-  const startX = e.clientX;
-  const origStart = clip.start;
-  const origLen = clip.len;
+  const grabOffset = barFromX(e.clientX) - clip.start;
   const laneRects = resize
     ? []
     : [...arrContentEl.querySelectorAll(".arr-lane")].map((l) => ({ track: l.dataset.track, rect: l.getBoundingClientRect() }));
@@ -2284,17 +2317,19 @@ async function onClipDown(e, track, idx, cl, rz) {
   let targetTrack = track;
   const pre = snapshot();
   let changed = false;
+  let lastX = e.clientX;
+  let lastY = e.clientY;
   capturePointer(cl, e.pointerId);
-  const move = (ev) => {
+  const applyFromXY = (x, y) => {
     changed = true;
-    const dBars = (ev.clientX - startX) / ppb;
+    const bar = barFromX(x);
     if (resize) {
-      clip.len = Math.max(1, Math.round(origLen + dBars));
+      clip.len = Math.max(1, bar - clip.start);
       cl.style.width = clip.len * ppb - 2 + "px";
     } else {
-      clip.start = Math.max(0, Math.round(origStart + dBars));
+      clip.start = Math.max(0, bar - grabOffset);
       cl.style.left = clip.start * ppb + "px";
-      const hit = laneRects.find((L) => ev.clientY >= L.rect.top && ev.clientY < L.rect.bottom);
+      const hit = laneRects.find((L) => y >= L.rect.top && y < L.rect.bottom);
       targetTrack = hit ? hit.track : track;
       cl.style.transform = targetTrack !== track ? `translateY(${laneRects.find((L) => L.track === targetTrack).rect.top - homeTop}px)` : "";
       cl.style.zIndex = 8;
@@ -2302,7 +2337,15 @@ async function onClipDown(e, track, idx, cl, rz) {
     const tools = arrContentEl.querySelector(".arr-tools");
     if (tools) tools.style.left = clip.start * ppb + "px";
   };
+  const pan = makeAutoPan(() => lastX, () => applyFromXY(lastX, lastY));
+  const move = (ev) => {
+    lastX = ev.clientX;
+    lastY = ev.clientY;
+    applyFromXY(ev.clientX, ev.clientY);
+    pan.poke();
+  };
   const up = () => {
+    pan.stop();
     cl.removeEventListener("pointermove", move);
     cl.removeEventListener("pointerup", up);
     if (!resize && targetTrack !== track) {
@@ -2324,9 +2367,7 @@ function onLoopLaneDown(e) {
   const brace = lane.querySelector(".arr-loop");
   const loop = song.loop;
   const pre = snapshot();
-  const rect = arrContentEl.getBoundingClientRect();
-  const barAt = (x) => Math.max(0, Math.round((x - rect.left) / ppb));
-  const downBar = barAt(e.clientX);
+  const downBar = barFromX(e.clientX);
   const mode = e.target.classList.contains("left")
     ? "left"
     : e.target.classList.contains("right")
@@ -2336,13 +2377,14 @@ function onLoopLaneDown(e) {
         : "paint";
   const o = { start: loop.start, end: loop.start + loop.len };
   let changed = false;
+  let lastX = e.clientX;
   capturePointer(lane, e.pointerId);
   const apply = () => {
     brace.style.left = loop.start * ppb + "px";
     brace.style.width = loop.len * ppb + "px";
   };
-  const move = (ev) => {
-    const bar = barAt(ev.clientX);
+  const applyFromX = (x) => {
+    const bar = barFromX(x);
     if (mode === "move") {
       const next = Math.max(0, o.start + (bar - downBar));
       if (next !== loop.start) {
@@ -2371,7 +2413,14 @@ function onLoopLaneDown(e) {
     }
     apply();
   };
+  const pan = makeAutoPan(() => lastX, () => applyFromX(lastX));
+  const move = (ev) => {
+    lastX = ev.clientX;
+    applyFromX(ev.clientX);
+    pan.poke();
+  };
   const up = () => {
+    pan.stop();
     lane.removeEventListener("pointermove", move);
     lane.removeEventListener("pointerup", up);
     lane.removeEventListener("pointercancel", up);

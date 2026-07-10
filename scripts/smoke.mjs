@@ -253,6 +253,20 @@ try {
   });
   const toggled = await page.evaluate(() => window.__noodles.song.loop.on);
   assertState(toggled === false, "brace tap did not toggle the loop off");
+  // Dragging toward the viewport edge must auto-pan the arrangement.
+  await page.evaluate(() => {
+    const brace = document.querySelector(".arr-loop");
+    const r = brace.getBoundingClientRect();
+    const opts = (x) => ({ bubbles: true, cancelable: true, pointerId: 9, pointerType: "touch", clientX: x, clientY: r.top + 8 });
+    brace.dispatchEvent(new PointerEvent("pointerdown", opts(r.left + 10)));
+    document.querySelector(".arr-looplane").dispatchEvent(new PointerEvent("pointermove", opts(innerWidth - 8)));
+  });
+  await wait(500);
+  const panned = await page.evaluate(() => document.querySelector(".arr-scroll").scrollLeft);
+  await page.evaluate(() => {
+    document.querySelector(".arr-looplane").dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 9 }));
+  });
+  assertState(panned > 0, `edge drag did not auto-pan the view (scrollLeft ${panned})`);
 
   await longPress(page, '.arr-thead[data-track="drums"]');
   await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Track Options");
