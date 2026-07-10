@@ -24,6 +24,7 @@ import {
   setScaleContext,
   snapToScale,
   makeMagicScene,
+  stepsFor,
 } from "./model.js";
 import { createAudio, KIT_NAMES, SAMPLE_KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, COLOR_NAMES, DRUM_BANKS, drumCornerNames } from "./audio.js";
 
@@ -1622,13 +1623,22 @@ function openSoundSheet(track) {
   body.appendChild(el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "color" }), chips]));
 
   const pctFmt = (v) => `${Math.round(v * 100)}%`;
+  const knobs = [
+    knob("amount", 0, 1, 0.01, patch.amount, (v) => audio.setPatch(track, { amount: v }), pctFmt),
+    knob("motion", 0, 1, 0.01, patch.motion, (v) => audio.setPatch(track, { motion: v }), pctFmt),
+  ];
+  if (track !== "harmony") {
+    // Per-track pocket: overrides the global GROOV for this track only.
+    knobs.push(
+      knob("groove", 0, 0.6, 0.01, song.trackSwing?.[track] ?? song.swing, (v) => {
+        (song.trackSwing ||= {})[track] = v;
+      }, pctFmt)
+    );
+  }
   body.appendChild(
     el("div", { class: "propsection" }, [
-      el("div", { class: "proplabel", text: "amount · motion" }),
-      el("div", { class: "knobrow" }, [
-        knob("amount", 0, 1, 0.01, patch.amount, (v) => audio.setPatch(track, { amount: v }), pctFmt),
-        knob("motion", 0, 1, 0.01, patch.motion, (v) => audio.setPatch(track, { motion: v }), pctFmt),
-      ]),
+      el("div", { class: "proplabel", text: track === "harmony" ? "amount · motion" : "amount · motion · groove" }),
+      el("div", { class: "knobrow" }, knobs),
     ])
   );
 
@@ -1698,6 +1708,21 @@ function openDrumSamplePicker(voice) {
   openSheet();
 }
 
+// Polymeter control: how many of the 16 steps this clip actually loops.
+function stepLenControl(scene, track) {
+  const set = (d) => {
+    pushUndo();
+    (scene.steps ||= { drums: 16, bass: 16, melody: 16 })[track] = Math.max(2, Math.min(16, stepsFor(scene, track) + d));
+    openEditor(editor.scene, track);
+    refreshClip(editor.scene, track);
+  };
+  return el("div", { class: "steplenctl", title: "Loop length in steps" }, [
+    el("div", { class: "tfbtn", text: "−", onclick: () => set(-1) }),
+    el("div", { class: "numval steplen", text: `${stepsFor(scene, track)}` }),
+    el("div", { class: "tfbtn", text: "+", onclick: () => set(1) }),
+  ]);
+}
+
 function buildDrumEditor(scene) {
   const tfd = el("div", { class: "tfrow" }, [
     el("div", {
@@ -1747,9 +1772,11 @@ function buildDrumEditor(scene) {
         refreshClip(editor.scene, "drums");
       },
     }),
+    stepLenControl(scene, "drums"),
   ]);
   sheet.appendChild(tfd);
 
+  const clipLen = stepsFor(scene, "drums");
   const stepEls = {};
   const scrollContainer = el("div", { class: "editor-scroll" });
   for (const v of DRUM_VOICES) {
@@ -1763,7 +1790,7 @@ function buildDrumEditor(scene) {
     for (let s = 0; s < 16; s++) {
       const on = scene.drums[v][s];
       const cell = el("div", {
-        class: `step ${Math.floor(s / 4) % 2 ? "" : "g"} ${on ? "on" : ""}`,
+        class: `step ${Math.floor(s / 4) % 2 ? "" : "g"} ${on ? "on" : ""}${s >= clipLen ? " off" : ""}`,
         style: `--pc:${padHex(v)}`,
       });
       stepsArr.push(cell);
@@ -1783,6 +1810,7 @@ function buildDrumEditor(scene) {
       await ensureStarted();
       drumDragPre = snapshot();
       const s0 = stepAtX(e.clientX);
+      if (s0 >= clipLen) return;
       drumDragMode = scene.drums[v][s0] > 0 ? "delete" : "add";
       scene.drums[v][s0] = drumDragMode === "add" ? 0.9 : 0;
       stepsArr[s0].classList.toggle("on", scene.drums[v][s0] > 0);
@@ -1794,6 +1822,7 @@ function buildDrumEditor(scene) {
     steps.addEventListener("pointermove", (e) => {
       if (drumDragMode === null) return;
       const s = stepAtX(e.clientX);
+      if (s >= clipLen) return;
       const shouldOn = drumDragMode === "add";
       const isOn = scene.drums[v][s] > 0;
       if (isOn !== shouldOn) {
@@ -1948,8 +1977,10 @@ function buildPianoEditor(sceneIndex, scene, track) {
         }),
     }),
     el("div", { class: "tfbtn", text: "Clear", onclick: () => applyTf(() => { for (let s = 0; s < 16; s++) lane[s] = null; }) }),
+    stepLenControl(scene, track),
   ]);
   sheet.appendChild(tf);
+  const clipLen = stepsFor(scene, track);
 
   const scrollContainer = el("div", { class: "editor-scroll" });
   const grid = el("div", { class: "proll" });
@@ -2009,7 +2040,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
     rows.forEach((midi, ri) => {
       for (let s = 0; s < 16; s++) {
         const hit = noteAt(s, midi);
-        rowCells[ri][s].className = `pcell${Math.floor(s / 4) % 2 ? "" : " g"}${hit ? " on" : ""}${hit && hit.step === s ? " nstart" : ""}`;
+        rowCells[ri][s].className = `pcell${Math.floor(s / 4) % 2 ? "" : " g"}${hit ? " on" : ""}${hit && hit.step === s ? " nstart" : ""}${s >= clipLen ? " off" : ""}`;
       }
     });
     for (let s = 0; s < 16; s++) {
@@ -2035,6 +2066,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
 
   async function onNoteDown(e, s, midi, cell) {
     e.preventDefault();
+    if (s >= clipLen) return;
     await ensureStarted();
     pushUndo();
     const existing = noteAt(s, midi);
@@ -2682,6 +2714,7 @@ function applyProject(rawProject) {
   if (!nextSong.arrangement) nextSong.arrangement = {};
   for (const t of TRACKS) if (!Array.isArray(nextSong.arrangement[t.key])) nextSong.arrangement[t.key] = [];
   if (!nextSong.loop) nextSong.loop = { on: false, start: 0, len: 4 };
+  if (!nextSong.trackSwing || typeof nextSong.trackSwing !== "object") nextSong.trackSwing = {};
   if (!Number.isFinite(Number(nextSong.tempo))) nextSong.tempo = 92;
   if (!Number.isFinite(Number(nextSong.key))) nextSong.key = 0;
   if (!nextSong.scale) nextSong.scale = "major";

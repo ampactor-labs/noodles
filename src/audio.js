@@ -19,14 +19,23 @@
 // point a finger or a dice can reach is already mixed.
 
 import * as Tone from "tone";
-import { CHORDS, DRUM_VOICES, voiceLead, clipAt, arrangeLength, clipLaunch, clipLengthBars, noteSlot } from "./model.js";
+import { CHORDS, DRUM_VOICES, voiceLead, clipAt, arrangeLength, clipLaunch, clipLengthBars, noteSlot, stepsFor } from "./model.js";
+
+// Per-track swing: offbeat lane steps get delayed by up to a third of a 16th
+// (1.0 = full triplet feel). Each track reads its own amount, falling back to
+// the global groove — the transport's built-in swing is retired so drums can
+// sit in a different pocket than the bass.
+const swingOffsetFor = (song, track, laneStep) =>
+  laneStep % 2 === 1 ? ((((song.trackSwing?.[track] ?? song.swing) || 0) * sixteenthCached()) / 3) : 0;
+let _sixteenth = 0.125;
+const sixteenthCached = () => _sixteenth;
 
 // Debug handle for the headless harnesses; lets calibrate/smoke experiments
 // build minimal Tone graphs without reaching into the bundle.
 if (typeof window !== "undefined") window.__noodlesTone = Tone;
 
 const midiToFreq = (m) => Tone.Frequency(m, "midi").toFrequency();
-const sixteenth = () => Tone.Time("16n").toSeconds();
+const sixteenth = () => { _sixteenth = Tone.Time("16n").toSeconds(); return _sixteenth; };
 
 export const TRACK_KEYS = ["harmony", "drums", "bass", "melody"];
 export const MELODIC_TRACKS = ["harmony", "bass", "melody"];
@@ -271,9 +280,23 @@ function buildGraph({ meters = false } = {}) {
   const g = {};
 
   // Master chain: gain → gentle saturation → soft clip → glue comp → makeup →
-  // brickwall. The EDM-forward "always loud, never clipping" spine.
+  // soft-knee ceiling → brickwall. The maximizer-style ceiling (DECISIONS D7):
+  // kick transients used to overshoot the limiter by up to +10 dB and hard-
+  // clip at the DAC; now anything past the -4.4 dBFS knee saturates smoothly
+  // into a 0.98 ceiling instead — transparent below the knee, warm crack
+  // above it. The 0.25 pre-scale maps ±4 of true amplitude into the shaper's
+  // ±1 domain so overshoots land on the curve, not its clamped endpoints.
   g.masterLimiter = new Tone.Limiter(-2).toDestination();
-  g.makeupGain = new Tone.Gain(Tone.dbToGain(8)).connect(g.masterLimiter);
+  const CEIL = 0.98;
+  const KNEE = 0.6;
+  g.ceiling = new Tone.WaveShaper((x) => {
+    const a = x * 4;
+    const mag = Math.abs(a);
+    const out = mag < KNEE ? mag : KNEE + (CEIL - KNEE) * Math.tanh((mag - KNEE) / (CEIL - KNEE));
+    return Math.sign(a) * Math.min(out, CEIL);
+  }, 4096).connect(g.masterLimiter);
+  g.ceilingScale = new Tone.Gain(0.25).connect(g.ceiling);
+  g.makeupGain = new Tone.Gain(Tone.dbToGain(8)).connect(g.ceilingScale);
   g.glue = new Tone.Compressor({ threshold: -20, ratio: 4, attack: 0.03, release: 0.25, knee: 12 }).connect(g.makeupGain);
   g.softClip = new Tone.WaveShaper((x) => Math.tanh(x * 1.2) / Math.tanh(1.2), 2048).connect(g.glue);
   g.saturation = new Tone.Distortion(0.08).connect(g.softClip);
@@ -694,7 +717,7 @@ function applyMotionOn(g, patchesRef, mstate, track, scene, step, time) {
   }
   const eff = { ...patchesRef[track] };
   for (const [param, lane] of Object.entries(lanes)) {
-    if (Array.isArray(lane)) eff[param] = lane[step] ?? eff[param];
+    if (Array.isArray(lane) && lane.length) eff[param] = lane[step % lane.length] ?? eff[param];
   }
   applyPatchTo(g, track, eff, { ramp: true, at: time });
   mstate.motionOn[track] = true;
@@ -707,10 +730,11 @@ function playArrangementStepOn(g, patches, vstate, song, bar, stepInBar, time) {
     const c = clipAt(song, trk, bar);
     if (!c) continue;
     const sc = song.scenes[c.scene];
+    const absStep = (bar - c.start) * 16 + stepInBar;
     // A live recorder (armed track) wins over lane playback; offline renders
     // have no recorder and always play the lanes.
-    if (vstate.recordMotion?.(trk, sc, stepInBar)) continue;
-    applyMotionOn(g, patches, vstate, trk, sc, stepInBar, time);
+    if (vstate.recordMotion?.(trk, sc, absStep)) continue;
+    applyMotionOn(g, patches, vstate, trk, sc, absStep, time);
   }
   let chord = null;
   if (stepInBar === 0) {
@@ -726,11 +750,16 @@ function playArrangementStepOn(g, patches, vstate, song, bar, stepInBar, time) {
   const d = clipAt(song, "drums", bar);
   if (d) {
     const sc = song.scenes[d.scene];
-    for (const v of DRUM_VOICES) if (sc.drums[v][stepInBar] > 0) hitDrumOn(g, patches, v, time, sc.drums[v][stepInBar]);
+    const idx = ((bar - d.start) * 16 + stepInBar) % stepsFor(sc, "drums");
+    const at = time + swingOffsetFor(song, "drums", idx);
+    for (const v of DRUM_VOICES) if (sc.drums[v][idx] > 0) hitDrumOn(g, patches, v, at, sc.drums[v][idx]);
   }
   for (const trk of ["bass", "melody"]) {
     const c = clipAt(song, trk, bar);
-    if (c) playNoteStackOn(g, patches, trk, song.scenes[c.scene][trk][stepInBar], time);
+    if (!c) continue;
+    const sc = song.scenes[c.scene];
+    const idx = ((bar - c.start) * 16 + stepInBar) % stepsFor(sc, trk);
+    playNoteStackOn(g, patches, trk, sc[trk][idx], time + swingOffsetFor(song, trk, idx));
   }
   return chord;
 }
@@ -827,8 +856,10 @@ export function createAudio(song) {
     if (!dirty.size) return;
     const lanes = ((scene.motion ||= {})[track] ||= {});
     for (const param of dirty) {
-      if (!lanes[param]) lanes[param] = new Array(16).fill(patches[track][param]);
-      lanes[param][step] = patches[track][param];
+      // New rides get a 4-bar window; slow sweeps need the room (short loops
+      // simply repeat inside it).
+      if (!lanes[param]) lanes[param] = new Array(64).fill(patches[track][param]);
+      lanes[param][step % lanes[param].length] = patches[track][param];
     }
   }
   const playChord = (ci, time) => playChordOn(live, patches, liveVoice, ci, time);
@@ -844,14 +875,15 @@ export function createAudio(song) {
   let mode = "scene";
   let focusIndex = 0;
   let curScene = 0;
-  const trackState = Object.fromEntries(TRACK_KEYS.map((track) => [track, { scene: 0, step: 0, active: true }]));
+  const trackState = Object.fromEntries(TRACK_KEYS.map((track) => [track, { scene: 0, step: 0, total: 0, active: true }]));
   let arrStep = 0;
   const queuedTracks = Object.fromEntries(TRACK_KEYS.map((track) => [track, -1]));
   let visualCb = () => {};
 
   transport.bpm.value = song.tempo;
-  transport.swingSubdivision = "16n";
-  transport.swing = song.swing ?? 0;
+  // Swing is applied per trigger (swingOffsetFor), never on the transport —
+  // that's what lets each track sit in its own pocket.
+  transport.swing = 0;
 
   function tickArrangement(time) {
     const len = arrangeLength(song);
@@ -898,7 +930,7 @@ export function createAudio(song) {
   }
 
   function resetTrack(track, sceneIndex) {
-    trackState[track] = { scene: sceneIndex, step: 0, active: !!song.scenes[sceneIndex] };
+    trackState[track] = { scene: sceneIndex, step: 0, total: 0, active: !!song.scenes[sceneIndex] };
   }
 
   function targetScene(sceneIndex, follow) {
@@ -926,6 +958,7 @@ export function createAudio(song) {
     const launch = clipLaunch(scene, track);
     const naturalBars = clipLengthBars(scene, track);
     const limitBars = launch.follow !== "none" ? launch.followBars : naturalBars;
+    st.total += 1;
     st.step += 1;
     if (st.step < limitBars * 16) return;
     const nextScene = targetScene(st.scene, launch.follow);
@@ -974,8 +1007,8 @@ export function createAudio(song) {
       const st = trackState[track];
       if (!st.active || !song.scenes[st.scene]) continue;
       const sc = song.scenes[st.scene];
-      if (!liveVoice.recordMotion(track, sc, st.step % 16)) {
-        applyMotionOn(live, patches, liveVoice, track, sc, st.step % 16, time);
+      if (!liveVoice.recordMotion(track, sc, st.total)) {
+        applyMotionOn(live, patches, liveVoice, track, sc, st.total, time);
       }
     }
     const harmonyState = trackState.harmony;
@@ -997,11 +1030,12 @@ export function createAudio(song) {
     const drumState = trackState.drums;
     const drumScene = drumState.active ? song.scenes[drumState.scene] : null;
     if (drumScene) {
-      const stepInBar = drumState.step % 16;
+      const idx = drumState.step % stepsFor(drumScene, "drums");
+      const at = time + swingOffsetFor(song, "drums", idx);
       for (const v of DRUM_VOICES) {
-        if (drumScene.drums[v][stepInBar] > 0) {
-          hitDrum(v, time, drumScene.drums[v][stepInBar]);
-          scheduleVisual(() => visualCb({ type: "hit", scene: drumState.scene, voice: v, step: stepInBar, activeScenes: activeBefore }), time);
+        if (drumScene.drums[v][idx] > 0) {
+          hitDrum(v, at, drumScene.drums[v][idx]);
+          scheduleVisual(() => visualCb({ type: "hit", scene: drumState.scene, voice: v, step: idx, activeScenes: activeBefore }), at);
         }
       }
     }
@@ -1010,8 +1044,8 @@ export function createAudio(song) {
       const st = trackState[track];
       const scene = st.active ? song.scenes[st.scene] : null;
       if (!scene) continue;
-      const stepInBar = st.step % 16;
-      playNoteStack(track, scene[track][stepInBar], time);
+      const idx = st.step % stepsFor(scene, track);
+      playNoteStack(track, scene[track][idx], time + swingOffsetFor(song, track, idx));
     }
 
     const progressCurrent = getTrackProgress();
@@ -1118,8 +1152,8 @@ export function createAudio(song) {
       // Tempo-synced colors (trem/wob) chase the new grid.
       for (const t of TRACK_KEYS) live.colorNodes[t]?.updateColor?.(patches[t].amount, patches[t].motion);
     },
-    setSwing(v) {
-      transport.swing = v;
+    setSwing() {
+      // Global groove lives on song.swing and is read live per trigger.
     },
     preview,
     previewHit(v) {
@@ -1246,8 +1280,6 @@ export function createAudio(song) {
       const patchesCopy = structuredClone(patches);
       const buffer = await Tone.Offline(({ transport: offTr }) => {
         offTr.bpm.value = song.tempo;
-        offTr.swing = song.swing ?? 0;
-        offTr.swingSubdivision = "16n";
         const g = buildGraph({ meters: false });
         for (const t of TRACK_KEYS) applyPatchTo(g, t, patchesCopy[t]);
         const anySolo = TRACK_KEYS.some((track) => channelState[track].solo);

@@ -167,12 +167,27 @@ export function normalizeMotion(motion = null) {
     const t = {};
     for (const [param, lane] of Object.entries(lanes)) {
       if (!Array.isArray(lane)) continue;
-      t[param] = Array.from({ length: 16 }, (_, i) => Math.max(0, Math.min(1, Number(lane[i]) || 0)));
+      // 1 to 4 bars of ride, in whole bars.
+      const len = Math.max(16, Math.min(64, Math.floor(lane.length / 16) * 16));
+      t[param] = Array.from({ length: len }, (_, i) => Math.max(0, Math.min(1, Number(lane[i]) || 0)));
     }
     if (Object.keys(t).length) out[track] = t;
   }
   return out;
 }
+
+// Per-clip step lengths (polymeter): drums/bass/melody lanes can loop early,
+// 2..16 steps, phasing against the other tracks' cycles.
+export const STEPPED_TRACKS = ["drums", "bass", "melody"];
+export function normalizeSteps(steps = null) {
+  const out = {};
+  for (const t of STEPPED_TRACKS) {
+    const n = Math.round(Number(steps?.[t]));
+    out[t] = Number.isFinite(n) ? Math.max(2, Math.min(16, n)) : 16;
+  }
+  return out;
+}
+export const stepsFor = (scene, track) => scene?.steps?.[track] || 16;
 
 export function normalizeScene(scene) {
   scene.melody = normalizeNoteLane(scene.melody);
@@ -180,13 +195,14 @@ export function normalizeScene(scene) {
   const drums = scene.drums || {};
   scene.drums = Object.fromEntries(DRUM_VOICES.map((v) => [v, normalizeDrumLane(drums[v])]));
   scene.motion = normalizeMotion(scene.motion);
+  scene.steps = normalizeSteps(scene.steps);
   return scene;
 }
 
 let sceneSeq = 0;
 const SCENE_TAGS = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
-export function makeScene(harmony, drums, melody = null, bass = null, motion = null) {
+export function makeScene(harmony, drums, melody = null, bass = null, motion = null, steps = null) {
   const tag = SCENE_TAGS[sceneSeq % SCENE_TAGS.length];
   sceneSeq += 1;
   const scene = {
@@ -198,6 +214,7 @@ export function makeScene(harmony, drums, melody = null, bass = null, motion = n
     melody: normalizeNoteLane(melody),
     bass: normalizeNoteLane(bass),
     motion: normalizeMotion(motion),
+    steps: normalizeSteps(steps),
   };
   scene.launch = cloneLaunch();
   return scene;
@@ -278,7 +295,7 @@ export function makeMagicScene() {
 }
 
 export function cloneScene(scene) {
-  const cloned = makeScene(scene.harmony, scene.drums, scene.melody, scene.bass, scene.motion);
+  const cloned = makeScene(scene.harmony, scene.drums, scene.melody, scene.bass, scene.motion, scene.steps);
   cloned.launch = cloneLaunch(scene.launch);
   return cloned;
 }
@@ -358,6 +375,7 @@ export function makeSong() {
     tempo,
     key,
     scale,
+    trackSwing: {},
     scenes: [s],
     // Arrangement: per track, clips placed on the bar timeline. Each references
     // a scene's clip for that track (start + length in bars) — Ableton's model

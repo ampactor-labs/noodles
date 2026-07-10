@@ -662,6 +662,28 @@
         outline: 2px solid rgba(255, 255, 255, 0.5);
         outline-offset: -1px;
       }
+      /* Steps beyond the clip's loop length (polymeter) sit dim and inert. */
+      .step.off,
+      .pcell.off,
+      .vbar.off {
+        opacity: 0.22;
+        pointer-events: none;
+      }
+      .steplenctl {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        margin-left: auto;
+      }
+      .steplenctl .numval {
+        min-height: 34px;
+        min-width: 40px;
+        padding: 0 6px;
+      }
+      .steplenctl .tfbtn {
+        min-width: 34px;
+        text-align: center;
+      }
 
       /* Harmony editor */
       .chordrow {
