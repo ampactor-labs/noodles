@@ -804,6 +804,7 @@ function openSceneOptions(sceneIndex) {
 function renderSession() {
   sessionEl.innerHTML = "";
   sceneEls.length = 0;
+  invalidateGridState();
   const grid = el("div", { class: "grid" });
   grid.style.gridTemplateColumns = `58px repeat(${TRACKS.length}, 1fr)`;
   grid.appendChild(el("div", { class: "head corner" }, [viewMixButton()]));
@@ -870,12 +871,25 @@ function renderSession() {
   updateTrackMixUI();
 }
 
+// The step event arrives every 16th; repainting the whole grid that often
+// costs main-thread time right when beat visuals need to land. Both sweeps
+// below skip when their state hasn't changed since the last paint.
+let lastActiveKey = null;
+let lastQueuedKey = null;
+function invalidateGridState() {
+  lastActiveKey = null;
+  lastQueuedKey = null;
+}
 function setPlaying(i) {
   playingScene = i;
   for (const t of TRACKS) playingTracks[t.key] = i;
+  invalidateGridState();
   applyPlaying();
 }
 function setActiveTracks(activeScenes) {
+  const key = TRACKS.map((t) => activeScenes[t.key] ?? -1).join(",");
+  if (key === lastActiveKey) return;
+  lastActiveKey = key;
   for (const t of TRACKS) playingTracks[t.key] = activeScenes[t.key] ?? -1;
   const first = playingTracks[TRACKS[0].key];
   playingScene = first >= 0 && TRACKS.every((t) => playingTracks[t.key] === first) ? first : -1;
@@ -899,6 +913,9 @@ function applyPlaying() {
 }
 
 function applyQueued(qt) {
+  const key = TRACKS.map((t) => qt?.[t.key] ?? -1).join(",");
+  if (key === lastQueuedKey) return;
+  lastQueuedKey = key;
   for (const t of TRACKS) queuedSceneTracks[t.key] = qt?.[t.key] ?? -1;
   applyPlaying();
 }

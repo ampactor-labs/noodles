@@ -706,13 +706,41 @@ export function createAudio(song) {
   // still point at the original context — driving playback through them starts a
   // transport the loop isn't on (silent, no playhead). Bind to the live context.
   const transport = Tone.getTransport();
-  const draw = Tone.getDraw();
-  // Beat-synced visuals fire on the transport clock, but the sound reaches
-  // the ear an output-latency later (large under latencyHint:"playback",
-  // larger again on Bluetooth). Shift them so the eye and the ear agree.
-  const scheduleDraw = (cb, time) => {
+  // --- The visual clock. Audio scheduled at transport time T is HEARD at
+  // T + baseLatency + outputLatency: baseLatency is the context's own
+  // buffering (large under latencyHint:"playback"), outputLatency the OS and
+  // hardware path (larger again on Bluetooth), and they must be SUMMED —
+  // either alone under-compensates by the other. outputLatency is also a
+  // LIVE value the browser keeps updating, so instead of shifting each event
+  // by a guess frozen at schedule time (what Tone.Draw forces), a rAF pump
+  // computes "the audio time reaching the ear right now" every frame and
+  // fires everything due against that.
+  const visualLatency = () => {
     const raw = Tone.getContext().rawContext;
-    draw.schedule(cb, time + (raw.outputLatency || raw.baseLatency || 0));
+    return (raw.baseLatency || 0) + (raw.outputLatency || 0);
+  };
+  const visualQueue = [];
+  let visualRAF = 0;
+  function pumpVisuals() {
+    visualRAF = 0;
+    // Half a frame of anticipation so a callback lands on the paint closest
+    // to its moment instead of always one frame after it.
+    const heard = Tone.getContext().rawContext.currentTime - visualLatency() + 0.008;
+    for (let i = 0; i < visualQueue.length; ) {
+      const ev = visualQueue[i];
+      if (ev.time <= heard) {
+        visualQueue.splice(i, 1);
+        // Stale events (tab was hidden, rAF paused) get dropped, not replayed.
+        if (heard - ev.time < 1) ev.cb();
+      } else i++;
+    }
+    if (visualQueue.length) visualRAF = requestAnimationFrame(pumpVisuals);
+  }
+  // Beat-synced events pass their transport time; immediate UI feedback
+  // (launch/queue state) passes none and fires on the next frame.
+  const scheduleVisual = (cb, time = 0) => {
+    visualQueue.push({ time, cb });
+    if (!visualRAF) visualRAF = requestAnimationFrame(pumpVisuals);
   };
 
   const live = buildGraph({ meters: true });
@@ -763,8 +791,8 @@ export function createAudio(song) {
     const bar = Math.floor(arrStep / 16);
     const stepInBar = arrStep % 16;
     const chord = playArrangementStepOn(live, patches, liveVoice, song, bar, stepInBar, time);
-    if (chord !== null) scheduleDraw(() => visualCb({ type: "arrchord", bar, chord }), time);
-    scheduleDraw(() => visualCb({ type: "arr", bar, stepInBar, len }), time);
+    if (chord !== null) scheduleVisual(() => visualCb({ type: "arrchord", bar, chord }), time);
+    scheduleVisual(() => visualCb({ type: "arr", bar, stepInBar, len }), time);
     arrStep += 1;
     const loop = song.loop;
     if (loop && loop.on) {
@@ -887,7 +915,7 @@ export function createAudio(song) {
       if (stepInBar === 0) {
         const ci = harmonyScene.harmony[bar];
         playChord(ci, time);
-        scheduleDraw(() => visualCb({ type: "chord", scene: harmonyState.scene, bar, chord: ci, activeScenes: activeBefore }), time);
+        scheduleVisual(() => visualCb({ type: "chord", scene: harmonyState.scene, bar, chord: ci, activeScenes: activeBefore }), time);
       }
     }
 
@@ -898,7 +926,7 @@ export function createAudio(song) {
       for (const v of DRUM_VOICES) {
         if (drumScene.drums[v][stepInBar] > 0) {
           hitDrum(v, time, drumScene.drums[v][stepInBar]);
-          scheduleDraw(() => visualCb({ type: "hit", scene: drumState.scene, voice: v, step: stepInBar, activeScenes: activeBefore }), time);
+          scheduleVisual(() => visualCb({ type: "hit", scene: drumState.scene, voice: v, step: stepInBar, activeScenes: activeBefore }), time);
         }
       }
     }
@@ -913,7 +941,7 @@ export function createAudio(song) {
 
     const progressCurrent = getTrackProgress();
     const queuedCurrent = getQueuedTracks();
-    scheduleDraw(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeBefore, queuedTracks: queuedCurrent, progress: progressCurrent }), time);
+    scheduleVisual(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeBefore, queuedTracks: queuedCurrent, progress: progressCurrent }), time);
     for (const track of TRACK_KEYS) advanceSceneTrack(track);
   }, "16n");
 
@@ -961,7 +989,7 @@ export function createAudio(song) {
       try { live.sub.triggerRelease(Tone.now()); } catch {}
       liveVoice.prev = null;
       for (const track of TRACK_KEYS) queuedTracks[track] = -1; // clear queues on stop
-      draw.schedule(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }), Tone.now());
+      scheduleVisual(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }));
     },
     get playing() {
       return playing;
@@ -973,12 +1001,12 @@ export function createAudio(song) {
         curScene = index;
         for (const track of TRACK_KEYS) resetTrack(track, index);
         for (const track of TRACK_KEYS) queuedTracks[track] = -1;
-        draw.schedule(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }), Tone.now());
+        scheduleVisual(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }));
         this.play();
       } else {
         curScene = index;
         for (const track of TRACK_KEYS) queuedTracks[track] = index;
-        draw.schedule(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }), Tone.now());
+        scheduleVisual(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }));
       }
     },
     launchClip(index, track) {
@@ -989,11 +1017,11 @@ export function createAudio(song) {
         for (const key of TRACK_KEYS) trackState[key].active = false;
         for (const key of TRACK_KEYS) queuedTracks[key] = -1;
         resetTrack(track, index);
-        draw.schedule(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }), Tone.now());
+        scheduleVisual(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }));
         this.play();
       } else {
         queuedTracks[track] = index;
-        draw.schedule(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }), Tone.now());
+        scheduleVisual(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }));
       }
     },
     playArrangement(fromBar = 0) {
@@ -1093,6 +1121,7 @@ export function createAudio(song) {
       this.setPatch("drums", { bank, x: i % 2, y: Math.floor(i / 2) });
     },
     samplesReady: () => samplesReady,
+    visualLatency,
     userSampleName: (voice) => userSamples[voice]?.name || null,
     async loadUserSample(voice, arrayBuffer, name) {
       const audioBuf = await Tone.getContext().rawContext.decodeAudioData(arrayBuffer);
