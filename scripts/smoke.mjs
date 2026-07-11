@@ -153,13 +153,7 @@ try {
   assertState(initial.clips >= 4, `expected at least 4 filled clips, got ${initial.clips}`);
   assertState(initial.drums, "drum clip missing");
   assertState(initial.sceneTag.includes("✨"), `default scene was not magic-generated: ${initial.sceneTag}`);
-  // Fresh profile = first visit: the greeting pill is up, and it must die on
-  // the first touch (the tempo tap below) and never block input.
-  const greeted = await page.$eval(".greet", (el) => getComputedStyle(el).pointerEvents === "none");
-  assertState(greeted, "first-open greeting missing or intercepting input");
-
   await tap(page, "#bpm");
-  await page.waitForFunction(() => !document.querySelector(".greet"));
   await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Tempo");
   await page.$eval(".tempo-input", (el) => { el.value = "104"; });
   await closeSheet(page);
@@ -393,11 +387,21 @@ try {
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
 
-  // The ? opens the about sheet — the pull-based "what is this".
+  // The ? opens the guide — with the greet pill gone, this is the whole
+  // onboarding, so it must actually be comprehensive: every surface gets a
+  // section, and the sheet hints that it scrolls.
   await tap(page, "#about-btn");
   await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "noodles");
-  const aboutText = await page.$eval("#sheet", (el) => el.textContent);
-  assertState(aboutText.includes("instrument"), "about sheet missing its one job");
+  const about = await page.evaluate(() => ({
+    text: document.querySelector("#sheet").textContent,
+    sections: [...document.querySelectorAll("#sheet .about-label")].map((el) => el.textContent),
+    hint: !!document.querySelector("#sheet .scroll-hint"),
+  }));
+  assertState(about.text.includes("instrument"), "about sheet missing its one job");
+  for (const section of ["start here", "the grid", "sound", "mix", "arrange", "keep it"]) {
+    assertState(about.sections.includes(section), `about guide missing the "${section}" section`);
+  }
+  assertState(about.hint, "about guide scroll hint missing (or the guide stopped overflowing)");
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
 

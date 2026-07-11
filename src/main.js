@@ -334,41 +334,47 @@ function openAboutSheet() {
   resetSheet("#e8b84b");
   sheet.appendChild(sheetBar("noodles", "a pocket instrument"));
   const p = (text) => el("div", { class: "about-p", text });
-  sheet.appendChild(
-    el("div", { class: "editor-scroll" }, [
-      p("This is an instrument. The song playing right now was rolled on the spot, just for you, and every bit of it is yours to change."),
-      el("div", { class: "about-label", text: "the three moves" }),
-      p("▶ plays. Scene rows launch. Tap any clip (chords, drums, notes) and draw."),
-      p("🎲 rolls a whole new song: a new key, tempo, sounds, and groove."),
-      p("You can't break it. Everything stays in key and every roll comes out mixed. Undo is always right there."),
-      el("div", { class: "about-label", text: "when you want more" }),
-      p("Mix opens the mixer; ✦ sound morphs a track between its four sounds and adds color. Arm ● ride in a sound sheet and your knob moves loop with the clip. In the drum picker, 🎙 records your own mouth as a drum. Long-press clips, scenes, and track names for more."),
-      p("View is the song timeline, and if you arm ● your jam records into it. File saves projects and exports WAV."),
-      p("Made for couches and phone speakers. Tell your friends."),
-    ])
-  );
+  const label = (text) => el("div", { class: "about-label", text });
+  const body = el("div", { class: "editor-scroll" }, [
+    p("This is an instrument. The song playing right now was rolled on the spot, just for you, and every bit of it is yours to change. You can't break it: everything stays in key, every roll comes out mixed, and undo sits in the top bar."),
+
+    label("start here"),
+    p("▶ plays, ⏹ stops. Tap a scene row's ▶ to launch that whole row. Tap any clip to open it and draw. 🎲 rolls a fresh song: new key, tempo, sounds, groove."),
+
+    label("the grid"),
+    p("Each row is a scene — a loop and a song section in one. + adds another: blank, a copy, or a fresh magic one. The corner pie on a playing clip shows where it is in its loop. Long-press a clip for launch modes and follow actions, a scene's ▶ for scene moves, a track name for track moves."),
+
+    label("editors"),
+    p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key. Chords: pick from the seven that fit, colored by their job. − / + shortens a clip's loop; a 12-step line against 16-step drums drifts in and out of phase on purpose. ◧ zooms the note grid when your thumbs need bigger targets."),
+
+    label("sound"),
+    p("✦ on a mixer strip opens the morph pad: four sounds in the corners, everything between them yours to find. Add one color — tape, crush, phase, trem, wob — with its own amount and motion. Pocket swings that one track against the global GROOVE. Drums come in two banks, sampled kits and a synth kit, and every drum can pin a one-shot, load a WAV, or 🎙 record your own mouth."),
+
+    label("ride"),
+    p("Arm ● ride in a sound sheet, hit play, and perform: your moves on the pad and knobs are captured to the beat and loop with the clip from then on. Rides live in the scene, save with the project, and play in exports. A clip wearing ∿ has one."),
+
+    label("mix"),
+    p("Mix opens the mixer. The fader is the meter: drag the handle to set level, the body glows with loudness, the bright bar is the peak, the tick holds the recent maximum. Verb and echo are sends into a shared room; bass stays dry on purpose."),
+
+    label("arrange"),
+    p("View flips to the timeline. Drag clips around, pull a right edge to resize, sweep the strip under the bar numbers to set a loop — tap the loop to switch it on and off. Arm ● in the top bar while you jam scenes and the performance writes itself into the timeline."),
+
+    label("keep it"),
+    p("File saves the project to a file or keeps it on this device, and exports a WAV — master or four stems — through the exact chain you're hearing. Mic recordings last until the tab closes; save the project to keep everything else."),
+
+    p("Made for couches and phone speakers. Tell your friends."),
+  ]);
+  sheet.appendChild(body);
   openSheet();
+  requestAnimationFrame(() => {
+    if (body.scrollHeight > body.clientHeight + 8) {
+      const hint = el("div", { class: "scroll-hint", text: "⌄" });
+      sheet.appendChild(hint);
+      body.addEventListener("scroll", () => hint.remove(), { once: true });
+    }
+  });
 }
 
-// First visit only: one line that corrects the one fatal misread — "this is
-// someone's loop" — then dies on the first touch, forever. pointer-events is
-// none, so it cannot block or intercept anything.
-const GREETED_KEY = "noodles:greeted";
-function maybeGreet() {
-  let greeted = null;
-  try { greeted = localStorage.getItem(GREETED_KEY); } catch {}
-  if (greeted) return;
-  const greet = el("div", { class: "greet", html: "this is an <b>instrument</b>, tap anything<br />the 🎲 rolls a whole new song" });
-  document.body.appendChild(greet);
-  requestAnimationFrame(() => greet.classList.add("in"));
-  const dismiss = () => {
-    document.removeEventListener("pointerdown", dismiss, true);
-    try { localStorage.setItem(GREETED_KEY, "1"); } catch {}
-    greet.classList.remove("in");
-    setTimeout(() => greet.remove(), 500);
-  };
-  document.addEventListener("pointerdown", dismiss, true);
-}
 
 function emptyScene() {
   return makeScene(
@@ -1209,9 +1215,11 @@ function knob(label, min, max, step, val, onChange, format = (v) => v) {
     const up = () => {
       document.removeEventListener("pointermove", move);
       document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", up);
     };
     document.addEventListener("pointermove", move);
     document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", up);
   });
   
   return container;
@@ -1992,10 +2000,12 @@ function buildDrumEditor(scene) {
     const up = () => {
       bar.removeEventListener("pointermove", move);
       bar.removeEventListener("pointerup", up);
+      bar.removeEventListener("pointercancel", up);
       refreshClip(editor.scene, "drums");
     };
     bar.addEventListener("pointermove", move);
     bar.addEventListener("pointerup", up);
+    bar.addEventListener("pointercancel", up);
   }
 
   paintDrums();
@@ -2195,6 +2205,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
     const up = () => {
       cell.removeEventListener("pointermove", move);
       cell.removeEventListener("pointerup", up);
+      cell.removeEventListener("pointercancel", up);
       if (!moved && existing) {
         removeNoteFromSlot(lane, existing.step, existing.index);
         paint();
@@ -2203,6 +2214,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
     };
     cell.addEventListener("pointermove", move);
     cell.addEventListener("pointerup", up);
+    cell.addEventListener("pointercancel", up);
   }
 
   async function onVelDown(e, s, bar) {
@@ -2222,10 +2234,12 @@ function buildPianoEditor(sceneIndex, scene, track) {
     const up = () => {
       bar.removeEventListener("pointermove", move);
       bar.removeEventListener("pointerup", up);
+      bar.removeEventListener("pointercancel", up);
       refreshClip(sceneIndex, track);
     };
     bar.addEventListener("pointermove", move);
     bar.addEventListener("pointerup", up);
+    bar.addEventListener("pointercancel", up);
   }
 
   paint();
@@ -3015,7 +3029,6 @@ applyMixState();
 applyStepDur();
 renderTransport();
 renderSession();
-maybeGreet();
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden && audio.playing) {
