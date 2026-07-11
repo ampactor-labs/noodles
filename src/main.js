@@ -167,6 +167,9 @@ let view = "session"; // 'session' | 'arrangement'
 let sessionRecord = false;
 let ppb = 37; // arrangement pixels-per-bar; default zoomed out so bar 8 fills screen
 let arrPlayBar = 0; // arrangement playhead position in bars
+let arrPinching = false; // two-finger zoom in progress — don't scroll under it
+let arrFollowResumeAt = 0; // brief hold-off after a manual scroll, so follow doesn't yank back
+let arrLastFollowLeft = -1; // scrollLeft follow last set, to tell its own scroll from the user's
 let selClip = null; // { track, idx }
 
 // --- Undo / redo (whole-song snapshots; simple and covers every edit) ---
@@ -2378,10 +2381,13 @@ function buildArrClip(track, idx, clip, color) {
 function renderArrangement() {
   ensureArrShell();
   const totalBars = arrangeLength(song) + 4;
-  const content = el("div", { class: "arr-content", style: `width:${totalBars * ppb}px; --ppb:${ppb}px` });
+  // Adaptive grid: reveal beats, then 16ths, as the bar gets wide enough to
+  // read them; keep ruler numbers from crowding at the same time.
+  const grid = ppb / 16 >= 7 ? "g-16" : ppb / 4 >= 13 ? "g-beats" : "g-bars";
+  const content = el("div", { class: `arr-content ${grid}`, style: `width:${totalBars * ppb}px; --ppb:${ppb}px` });
 
   const ruler = el("div", { class: "arr-ruler" });
-  const every = ppb >= 46 ? 1 : 4;
+  const every = ppb >= 60 ? 1 : ppb >= 30 ? 2 : 4;
   for (let b = 0; b < totalBars; b++) {
     if (b % every === 0)
       ruler.appendChild(el("div", { class: "arr-tick", style: `left:${b * ppb}px`, text: String(b + 1) }));
@@ -2701,7 +2707,7 @@ function attachArrGestures(scroll) {
 
   scroll.addEventListener("touchstart", (e) => {
     if (e.touches.length === 2) {
-      pinching = true;
+      pinching = true; arrPinching = true;
       const [a, b] = e.touches;
       startDist = Math.max(1, Math.abs(a.clientX - b.clientX));
       startPpb = ppb;
@@ -2726,7 +2732,7 @@ function attachArrGestures(scroll) {
 
   const endPinch = (e) => {
     if (!pinching || e.touches.length >= 2) return;
-    pinching = false;
+    pinching = false; arrPinching = false;
     ppb = Math.max(ARR_MIN_PPB, Math.min(ARR_MAX_PPB, startPpb * lastScale));
     renderArrangement(); // real layout at the new ppb; the transform dies with the old content
     const max = Math.max(0, scroll.scrollWidth - scroll.clientWidth);
@@ -2757,6 +2763,12 @@ function attachArrGestures(scroll) {
     clearTap();
   });
   scroll.addEventListener("pointercancel", clearTap);
+
+  // A scroll we didn't cause — a manual flick or its momentum — briefly holds
+  // off follow so it doesn't yank the view back off what you're reading.
+  scroll.addEventListener("scroll", () => {
+    if (Math.abs(scroll.scrollLeft - arrLastFollowLeft) > 2) arrFollowResumeAt = Date.now() + 1200;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -3016,11 +3028,15 @@ audio.onVisual((e) => {
     const frac = e.bar + e.stepInBar / 16;
     arrPlayBar = e.bar;
     if (arrPlayhead) arrPlayhead.style.transform = `translateX(${frac * ppb}px)`;
-    if (arrScroll) {
+    // Follow the playhead by paging, but yield during a pinch and for a moment
+    // after a manual scroll, so a look-ahead isn't yanked back under you.
+    if (arrScroll && !arrPinching && Date.now() > arrFollowResumeAt) {
       const x = frac * ppb;
       const left = arrScroll.scrollLeft;
-      if (x < left + 24 || x > left + arrScroll.clientWidth - 48)
-        arrScroll.scrollLeft = Math.max(0, x - arrScroll.clientWidth * 0.3);
+      if (x < left + 24 || x > left + arrScroll.clientWidth - 48) {
+        arrLastFollowLeft = Math.max(0, x - arrScroll.clientWidth * 0.3);
+        arrScroll.scrollLeft = arrLastFollowLeft;
+      }
     }
     return;
   }
