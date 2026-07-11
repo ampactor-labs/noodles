@@ -354,7 +354,7 @@ function openAboutSheet() {
     p("Arm ● ride in a sound sheet, hit play, and perform: your moves on the pad and knobs are captured to the beat and loop with the clip from then on. Rides live in the scene, save with the project, and play in exports. A clip wearing ∿ has one."),
 
     label("mix"),
-    p("Mix opens the mixer. The fader is the meter: drag the handle to set level, the body glows with loudness, the bright bar is the peak, the tick holds the recent maximum. Verb and echo are sends into a shared room; bass stays dry on purpose."),
+    p("Mix opens the mixer. The fader is the meter: drag the handle to set level, the body glows with loudness, the bright bar is the peak, the tick holds the recent maximum. Verb and echo are sends into a shared room, off by default — turn a knob up to send a track into it."),
 
     label("arrange"),
     p("View flips to the timeline. Drag clips around, pull a right edge to resize, sweep the strip under the bar numbers to set a loop — tap the loop to switch it on and off. Arm ● in the top bar while you jam scenes and the performance writes itself into the timeline."),
@@ -1162,14 +1162,15 @@ function openClipProps(sceneIndex, track) {
 // Mixer + devices
 // ---------------------------------------------------------------------------
 let mixerRAF = 0;
-// Wet by default: pads sit in a room, the lead carries a tempo-synced echo
-// tail, the kit gets a whisper of the same room. Bass stays bone dry — reverb
-// or echo down there is mud, not fat. -30 on a send knob is off.
+// Dry by default: every send parks at the knob floor (-30 is off). The dry mix
+// is the meaty one — the master chain does the gluing, and reverb/echo are
+// there to be dialed in per track, not baked into the cold open. Reset Sends
+// returns here, i.e. to silence.
 const MIX_DEFAULTS = {
-  harmony: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -18, echo: -30, mute: false, solo: false },
-  drums: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -24, echo: -30, mute: false, solo: false },
+  harmony: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -30, echo: -30, mute: false, solo: false },
+  drums: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -30, echo: -30, mute: false, solo: false },
   bass: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -30, echo: -30, mute: false, solo: false },
-  melody: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -20, echo: -14, mute: false, solo: false },
+  melody: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -30, echo: -30, mute: false, solo: false },
 };
 const mixState = structuredClone(MIX_DEFAULTS);
 
