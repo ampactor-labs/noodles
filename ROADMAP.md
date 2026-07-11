@@ -30,15 +30,21 @@ Adversarial investigation verdict (high confidence): **the stack is not the bott
 the implementation is**, and the Vite dev server is a big confound. BandLab/Soundtrap run
 smoothly on the same Web Audio API on this device class. So: optimize, don't switch stacks.
 
-Done (two passes): convolution reverb → Freeverb; pad 24-voice fatsaw → 4-voice single saw,
-short tail; deleted the inaudible halo PolySynth (now mono); MetalSynth hat → filtered
-noise burst; `latencyHint: "playback"`. Render: pinch no longer rebuilds ~100×/s (coalesced
-to ≤1/frame + static CSS bar-grid via `--ppb`); mixer meters use `transform: scaleX` not
-`width`; dropped blurred box-shadows on high-frequency step/note cells.
+Done: convolution reverb → Freeverb; pad 24-voice fatsaw → 4-voice single saw; MetalSynth
+hat → filtered noise burst; `latencyHint: "playback"` with `lookAhead 0.25` (scheduling
+survives main-thread jank); pinch rebuilds coalesced to ≤1/frame; meters transform-only and
+only while the mixer is open; morph voices capped at the top-2 corners (2x a single synth,
+never 4x); colors pay-per-roll; sample drums cost buffer playback instead of synthesis;
+grid class sweeps dirty-checked per 16th; **idle park** — the context suspends ~6 s after
+stop (past the longest tails) and wakes on any trigger, so a stopped app costs zero audio
+CPU. Sound-neutral only, per the standing rule: no quality or capability trades.
 
-Remaining (tier-2): diff-based `paint()` / `refreshClip` (touch only changed cells);
-precompute `color-mix()` into CSS custom properties; snapshot-undo only on committed change
-(avoid whole-song `structuredClone` per pointerdown); lazy/visible-only mixer meters.
+Remaining, in honesty: the always-on chain while PLAYING (Freeverb combs, chorus, five
+compressors, master stack) is the floor and it IS the sound — shrinking it means a measured
+device tier that makes weak phones sound different from the export, a fork the builder must
+call. Tier-2 render items still open: diff-based `paint()`/`refreshClip`, `color-mix()`
+precompute, snapshot-undo only on committed change. A 44.1 kHz context (~8% on 48 k phones)
+was tried and reverted — Tone throws wrapping custom-rate contexts (see AGENTS.md).
 
 **On-device: run the production build, not the dev server** — `npm run build && npm run
 preview -- --host`. The dev server ships unbundled ESM + unminified Tone.js; on the A55

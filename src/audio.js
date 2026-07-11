@@ -1098,6 +1098,28 @@ export function createAudio(song) {
   let playing = false;
   let inited = false;
 
+  // Idle park: stopped, the chain still costs near-playback CPU (feedback
+  // loops and LFOs defeat the browser's silence-skipping), so the context
+  // suspends once the longest tails have rung out and resumes on any
+  // trigger. Suspended = bit-identical silence; nothing about the sound can
+  // change. Resume-before-init is guarded — pre-gesture the browser owns
+  // the suspended state.
+  const IDLE_PARK_MS = 6000;
+  let idleTimer = 0;
+  function wakeContext() {
+    clearTimeout(idleTimer);
+    idleTimer = 0;
+    const raw = Tone.getContext().rawContext;
+    if (inited && raw.state === "suspended") raw.resume();
+  }
+  function parkContextSoon() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      const raw = Tone.getContext().rawContext;
+      if (!playing && raw.state === "running") raw.suspend();
+    }, IDLE_PARK_MS);
+  }
+
   return {
     async init() {
       if (inited) return;
@@ -1123,6 +1145,7 @@ export function createAudio(song) {
       clock.start(0);
     },
     play() {
+      wakeContext();
       transport.start(PLAY_START_LEAD_TIME);
       playing = true;
     },
@@ -1138,6 +1161,7 @@ export function createAudio(song) {
       try { live.halo.triggerRelease(Tone.now()); } catch {}
       try { live.sub.triggerRelease(Tone.now()); } catch {}
       liveVoice.prev = null;
+      parkContextSoon();
       for (const track of TRACK_KEYS) queuedTracks[track] = -1; // clear queues on stop
       scheduleVisual(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }));
     },
@@ -1196,11 +1220,16 @@ export function createAudio(song) {
     setSwing() {
       // Global groove lives on song.swing and is read live per trigger.
     },
-    preview,
+    preview(ci) {
+      wakeContext();
+      preview(ci);
+    },
     previewHit(v) {
+      wakeContext();
       hitDrum(v, Tone.now());
     },
     previewNote(track, midi) {
+      wakeContext();
       playNoteStack(track, [{ midi, len: 1, vel: 0.9 }], Tone.now());
     },
     // --- mixer ---
