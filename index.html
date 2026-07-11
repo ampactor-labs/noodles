@@ -135,7 +135,8 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        flex: 0 0 auto;
+        flex: 1 1 160px;
+        min-width: 0;
       }
       .swlabel {
         font-size: 10px;
@@ -152,7 +153,9 @@
         color: var(--text);
       }
       .swingslider {
-        width: 74px;
+        flex: 1 1 auto;
+        width: auto;
+        min-width: 60px;
         height: 28px;
         accent-color: #e8b84b;
       }
@@ -202,21 +205,23 @@
         position: relative;
         z-index: 6;
       }
+      /* One row when it fits, GROOVE drops to its own full-width line when it
+         doesn't. The slider flexes to fill whatever line it lands on, so it's
+         never clipped — narrow phone or wide screen. */
       .frow {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: flex-start;
+        flex-wrap: wrap;
         width: 100%;
         gap: 8px;
+        row-gap: 6px;
         min-width: 0;
       }
       .frow .tbtn {
         height: 40px;
         min-width: 46px;
         padding: 0 10px;
-      }
-      .fspacer {
-        flex: 1;
       }
 
       /* Session grid */
@@ -1517,12 +1522,6 @@
           display: flex;
           justify-content: flex-start;
           align-items: center;
-        }
-        .frow {
-          justify-content: flex-start;
-        }
-        .fspacer {
-          flex: 0 0 12px;
         }
         .swingctl {
           margin-left: 4px;

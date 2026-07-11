@@ -322,7 +322,7 @@ function renderFooter() {
   const diceBtn = el("div", { class: "tbtn accent", text: "🎲", id: "dice-btn", title: "New song: random key, tempo, sounds", onclick: rerollSong });
   const aboutBtn = el("div", { class: "tbtn", text: "?", id: "about-btn", title: "What is this?", onclick: openAboutSheet });
   footer.append(
-    el("div", { class: "frow" }, [keyctl, diceBtn, aboutBtn, el("div", { class: "fspacer" }), groove])
+    el("div", { class: "frow" }, [keyctl, diceBtn, aboutBtn, groove])
   );
 }
 
