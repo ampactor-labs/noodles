@@ -977,7 +977,13 @@ export function createAudio(song) {
     return Object.fromEntries(TRACK_KEYS.map((track) => [track, queuedTracks[track]]));
   }
 
-  function getTrackProgress() {
+  // Per-track loop anchor for the pie timers: the AudioContext time at which
+  // the current cycle's step 0 sounds, and the cycle's duration in seconds. The
+  // visual side reads these against the live audio clock every frame, so the
+  // pie is a direct function of playback position — no second clock to drift
+  // against, no dependence on each frame's event landing on time.
+  function trackLoopAnchors(time) {
+    const stepDur = 15 / song.tempo; // seconds per 16th note
     const res = {};
     for (const track of TRACK_KEYS) {
       const st = trackState[track];
@@ -986,10 +992,9 @@ export function createAudio(song) {
         const launch = clipLaunch(scene, track);
         const naturalBars = clipLengthBars(scene, track);
         const limitBars = launch.follow !== "none" ? launch.followBars : naturalBars;
-        // Completion of the sounding step, not elapsed-at-its-start: the UI
-        // sweeps toward this value, so the pie reaches 100% exactly when the
-        // loop wraps instead of resetting from 15/16ths full.
-        res[track] = (st.step + 1) / (limitBars * 16);
+        const loopSteps = limitBars * 16;
+        const posInLoop = ((st.step % loopSteps) + loopSteps) % loopSteps;
+        res[track] = { start: time - posInLoop * stepDur, dur: loopSteps * stepDur };
       }
     }
     return res;
@@ -1114,9 +1119,9 @@ export function createAudio(song) {
       playNoteStack(track, scene[track][idx], time + swingOffsetFor(song, track, idx));
     }
 
-    const progressCurrent = getTrackProgress();
+    const anchorsCurrent = trackLoopAnchors(time);
     const queuedCurrent = getQueuedTracks();
-    scheduleVisual(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeBefore, queuedTracks: queuedCurrent, progress: progressCurrent }), time);
+    scheduleVisual(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeBefore, queuedTracks: queuedCurrent, anchors: anchorsCurrent }), time);
     for (const track of TRACK_KEYS) advanceSceneTrack(track);
   }, "16n");
 
@@ -1338,6 +1343,10 @@ export function createAudio(song) {
     },
     samplesReady: () => samplesReady,
     visualLatency,
+    // The audio-clock position being HEARD right now (context time minus the
+    // output/acoustic latency, plus a half-frame of anticipation). The pie pump
+    // samples this every frame so the pie sits where the sound is.
+    heardNow: () => Tone.getContext().rawContext.currentTime - visualLatency() + 0.008,
     // --- motion capture ---
     armMotion(track, on) {
       motionArmed[track] = !!on;

@@ -191,7 +191,6 @@ function refreshAll() {
   setScaleContext(song.key, song.scale);
   audio.setTempo(song.tempo);
   audio.setSwing(song.swing);
-  applyStepDur();
   closeEditor();
   renderTransport();
   renderSession();
@@ -473,17 +472,12 @@ function updateTempoUI() {
   if (!bpmEl) return;
   bpmEl.innerHTML = `${song.tempo}<small>BPM</small>`;
 }
-// One 16th note in seconds — the sweep duration for the clip pie timers.
-function applyStepDur() {
-  document.documentElement.style.setProperty("--stepdur", (15 / song.tempo).toFixed(4) + "s");
-}
 function applyTempo(v) {
   const next = clampTempo(v);
   if (!Number.isFinite(next) || next === song.tempo) return false;
   song.tempo = next;
   updateTempoUI();
   audio.setTempo(song.tempo);
-  applyStepDur();
   return true;
 }
 function bindTempoControl(node) {
@@ -940,6 +934,30 @@ function setActiveTracks(activeScenes) {
   playingScene = first >= 0 && TRACKS.every((t) => playingTracks[t.key] === first) ? first : -1;
   applyPlaying();
 }
+// Pie timers, pinned to the audio clock. Each frame, read the position being
+// HEARD right now (audio.heardNow) and set every playing clip's pie to the
+// exact fraction through its loop: prog = (now - cycleStart) / cycleDur. No CSS
+// transition interpolating on a second clock, no dependence on a discrete event
+// landing on this frame — the pie is a direct function of playback, re-derived
+// every frame, so it can't drift. Residual limits: one display frame of
+// granularity, and the platform's output-latency estimate (see audio.heardNow).
+let pieAnchors = {}; // track -> { start, dur } in AudioContext seconds
+let piePumpRAF = 0;
+function piePump() {
+  piePumpRAF = 0;
+  const now = audio.heardNow();
+  for (const t of TRACKS) {
+    const a = pieAnchors[t.key];
+    const sceneIdx = playingTracks[t.key];
+    if (!a || sceneIdx < 0) continue;
+    const clipEl = sceneEls[sceneIdx]?.clips[t.key];
+    if (!clipEl) continue;
+    const prog = a.dur > 0 ? Math.min(1, Math.max(0, (now - a.start) / a.dur)) : 0;
+    clipEl.style.setProperty("--pct", (prog * 100).toFixed(2));
+  }
+  if (audio.playing) piePumpRAF = requestAnimationFrame(piePump);
+}
+
 function applyPlaying() {
   sceneEls.forEach((r, i) => {
     const rowOn = i === playingScene;
@@ -3093,24 +3111,9 @@ audio.onVisual((e) => {
       arrPlayBar++;
     }
 
-    if (e.progress) {
-      for (const t of TRACKS) {
-        const p = e.progress[t.key];
-        const sceneIdx = playingTracks[t.key];
-        if (p !== undefined && sceneIdx >= 0) {
-          const row = sceneEls[sceneIdx];
-          if (row) {
-            const clipEl = row.clips[t.key];
-            if (clipEl) {
-              const pct = p * 100;
-              // Wrap = new value below the old one: jump, don't sweep back.
-              clipEl.classList.toggle("pie-snap", pct < (clipEl._pct ?? 0));
-              clipEl._pct = pct;
-              clipEl.style.setProperty("--pct", pct);
-            }
-          }
-        }
-      }
+    if (e.anchors) {
+      pieAnchors = e.anchors;
+      if (!piePumpRAF) piePumpRAF = requestAnimationFrame(piePump);
     }
 
     if (editor && editor.cursorCols) {
@@ -3122,7 +3125,6 @@ audio.onVisual((e) => {
 });
 
 applyMixState();
-applyStepDur();
 renderTransport();
 renderSession();
 

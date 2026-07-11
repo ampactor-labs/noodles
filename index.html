@@ -447,11 +447,8 @@
         background: conic-gradient(color-mix(in srgb, var(--tc) 85%, #fff) calc(var(--pct, 0) * 1%), rgba(0,0,0,0.3) 0);
         opacity: 0;
         pointer-events: none;
-        /* one 16th per update; --stepdur tracks the tempo */
-        transition: --pct var(--stepdur, 0.12s) linear;
-      }
-      .clip.pie-snap::after {
-        transition: none; /* loop wrap: jump back, don't sweep backwards */
+        /* --pct is driven per-frame by the pie pump against the audio clock —
+           no CSS transition, so the pie never interpolates on a second clock. */
       }
       .clip.playing::after {
         opacity: 1;
