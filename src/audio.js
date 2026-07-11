@@ -42,7 +42,6 @@ export const MELODIC_TRACKS = ["harmony", "bass", "melody"];
 
 const DEFAULT_TRACK_VOLUME_DB = -6;
 const SEND_OFF_DB = -60;
-const FIRST_PLAY_WARMUP_MS = 400;
 const PLAY_START_LEAD_TIME = "+0.18";
 const SOURCE_LEVEL_DB = {
   harmonyPad: -9,
@@ -1165,7 +1164,8 @@ export function createAudio(song) {
       primer.stop();
       primer.disconnect();
       primerGain.disconnect();
-      await wait(FIRST_PLAY_WARMUP_MS);
+      // Samples preload at page build (loadSamples runs there); by first play
+      // they're almost always in, so this awaits a settled promise, not a fetch.
       if (live.reverb.ready) await live.reverb.ready;
       await loadSamples();
       clock.start(0);
