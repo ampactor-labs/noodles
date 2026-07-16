@@ -350,13 +350,13 @@ function openAboutSheet() {
     p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key. Chords: pick from the seven that fit, colored by their job. − / + shortens a clip's loop; a 12-step line against 16-step drums drifts in and out of phase on purpose. ◧ zooms the note grid when your thumbs need bigger targets."),
 
     label("sound"),
-    p("✦ on a mixer strip opens the morph pad: four sounds in the corners, everything between them yours to find. Add one color — tape, crush, phase, trem, wob — with its own amount and motion. Pocket swings that one track against the global GROOVE. Drums come in two banks, sampled kits and a synth kit, and every drum can pin a one-shot, load a WAV, or 🎙 record your own mouth."),
+    p("Tap a track's name — or ✦ on its mixer strip — to open its sound: a morph pad with four sounds in the corners, everything between them yours to find. Add one color — tape, crush, phase, trem, wob — with its own amount and motion. Pocket swings that one track against the global GROOVE. Drums come in two banks, sampled kits and a synth kit, and every drum can pin a one-shot, load a WAV, or 🎙 record your own mouth."),
 
     label("ride"),
     p("Arm ● ride in a sound sheet, hit play, and perform: your moves on the pad and knobs are captured to the beat and loop with the clip from then on. Rides live in the scene, save with the project, and play in exports. A clip wearing ∿ has one."),
 
     label("mix"),
-    p("Mix — or a tap on any track name — opens the mixer on that track's strip. The fader is the meter: drag the handle to set level, the body glows with loudness, the bright bar is the peak, the tick holds the recent maximum. Verb and echo are sends into a shared room, off by default — turn a knob up to send a track into it."),
+    p("Mix opens the mixer. The fader is the meter: drag the handle to set level, the body glows with loudness, the bright bar is the peak, the tick holds the recent maximum. Verb and echo are sends into a shared room, off by default — turn a knob up to send a track into it."),
 
     label("arrange"),
     p("View flips to the timeline. Drag clips around, pull a right edge to resize, sweep the strip under the bar numbers to set a loop — tap the loop to switch it on and off. Arm ● in the top bar while you jam: scene changes and your mute moves both write into the timeline, and the hatched bars play silent everywhere, exports included."),
@@ -1056,6 +1056,7 @@ function resetSheet(color) {
   cancelAnimationFrame(mixerRAF);
   mixerRAF = 0;
   sheet.innerHTML = "";
+  sheet.classList.remove("snd"); // sound-sheet sizing mode, set by openSoundSheet
   sheet.style.setProperty("--tc", color);
 }
 
@@ -1430,16 +1431,17 @@ function bindTrackHeader(node, track) {
   });
   node.addEventListener("pointerup", clear);
   node.addEventListener("pointercancel", clear);
-  // Tap = this track's mixer strip, long-press = Track Options. The M/S
-  // buttons keep their own gesture (guarded here because their pointerdown
-  // stopPropagation doesn't reach the separately-dispatched click).
+  // Tap = this track's Sound page (the play surface), long-press = Track
+  // Options. The M/S buttons keep their own gesture (guarded here because
+  // their pointerdown stopPropagation doesn't reach the separately-
+  // dispatched click).
   node.addEventListener("click", (e) => {
     if (longPressed) {
       longPressed = false;
       return;
     }
     if (e.target.closest("[data-track-toggle]")) return;
-    openMixer(track);
+    openSoundSheet(track);
   });
 }
 function openTrackOptions(track) {
@@ -1602,7 +1604,12 @@ function openSoundSheet(track) {
     },
   });
   sheet.appendChild(sheetBar("Sound", meta.name, { buttons: [recBtn, soundDice] }));
-  const body = el("div", { class: "editor-scroll" });
+  // The Sound page is the play surface: it takes the full height it can get
+  // and every control stays on screen — the morph pad is the flexible element
+  // and absorbs whatever the fixed rows leave over (overflow scroll remains
+  // only as a small-viewport safety net).
+  sheet.classList.add("snd");
+  const body = el("div", { class: "editor-scroll sound-body" });
   sheet.appendChild(body);
   const patch = audio.patch(track);
   const isDrums = track === "drums";
@@ -1621,7 +1628,7 @@ function openSoundSheet(track) {
   }
 
   {
-    const padWrap = el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "morph" })]);
+    const padWrap = el("div", { class: "propsection pad-section" }, [el("div", { class: "proplabel", text: "morph" })]);
     const xy = el("div", { class: "xy-pad", style: `--tc:${meta.color}`, "data-action": `xy-${track}` });
     const names = isDrums ? drumCornerNames(patch) : CORNERS[track];
     const cornerPos = ["tl", "tr", "bl", "br"];
@@ -1658,7 +1665,7 @@ function openSoundSheet(track) {
     body.appendChild(padWrap);
   }
 
-  const chips = el("div", { class: "choicegrid three" });
+  const chips = el("div", { class: "choicegrid six" });
   const chipEls = {};
   for (const c of COLOR_NAMES) {
     chipEls[c] = choice(c, patch.color === c, () => {
@@ -1690,18 +1697,20 @@ function openSoundSheet(track) {
   );
 
   if (isDrums && patch.bank === "sample") {
-    const rows = el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "one-shots" })]);
+    // 2×2, not four full rows: the drum Sound page is the tallest and this
+    // is what keeps it under the fold with the pad still worth touching.
+    const grid = el("div", { class: "oneshot-grid" });
     for (const v of DRUM_VOICES) {
       const pin = patch.pins?.[v];
       const label = pin === "user" ? (audio.userSampleName(v) || "your wav") : pin || "follows the kit";
-      rows.appendChild(
+      grid.appendChild(
         el("div", { class: "srow", "data-action": `pick-${v}`, onclick: () => openDrumSamplePicker(v) }, [
           el("div", { class: "srow-voice", style: `--pc:${padHex(v)}`, text: DRUM_META[v].label }),
           el("div", { class: "srow-pin" + (pin ? " pinned" : ""), text: label }),
         ])
       );
     }
-    body.appendChild(rows);
+    body.appendChild(el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "one-shots" }), grid]));
   }
 
   // A recorded ride lives in the playing scene; offer the way out.
@@ -3170,6 +3179,43 @@ function openExport() {
 // ---------------------------------------------------------------------------
 // Playback → UI sync
 // ---------------------------------------------------------------------------
+// Pull-only perf receipts: load with ?perf to overlay frame and audio-clock
+// health. The A16 gate needs numbers from the couch, not adjectives — pure
+// diagnostics, invisible unless the URL asks.
+if (new URLSearchParams(location.search).has("perf")) {
+  const hud = el("div", { id: "perf-hud", text: "perf…" });
+  document.body.appendChild(hud);
+  let frames = 0;
+  let jank = 0;
+  let worst = 0;
+  let last = performance.now();
+  let winStart = last;
+  let audioLast = 0;
+  const tick = (now) => {
+    const gap = now - last;
+    last = now;
+    frames += 1;
+    if (gap > 50) jank += 1;
+    if (gap > worst) worst = gap;
+    if (now - winStart >= 1000) {
+      const raw = window.__noodlesTone?.getContext()?.rawContext;
+      const dt = (now - winStart) / 1000;
+      // Audio clock vs wall clock: a running context below 1.00× is the
+      // audio thread starving (underruns) — the stutter, quantified.
+      const aud = raw ? (raw.currentTime - audioLast) / dt : 0;
+      if (raw) audioLast = raw.currentTime;
+      const lat = raw ? Math.round(((raw.baseLatency || 0) + (raw.outputLatency || 0)) * 1000) : 0;
+      hud.textContent = `${Math.round(frames / dt)}fps jank${jank} worst${Math.round(worst)}ms · aud×${aud.toFixed(2)} lat${lat}ms ${raw?.state ?? "?"}`;
+      frames = 0;
+      jank = 0;
+      worst = 0;
+      winStart = now;
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 audio.onVisual((e) => {
   if (e.type === "arr") {
     const frac = e.bar + e.stepInBar / 16;

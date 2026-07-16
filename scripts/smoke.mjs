@@ -249,13 +249,16 @@ try {
   await tap(page, '.arr-thead[data-track="drums"] [data-track-toggle="mute"]');
   await tap(page, '.arr-thead[data-track="drums"] [data-track-toggle="solo"]');
 
-  // Tap a track header (outside M/S) → the mixer opens focused on that strip.
+  // Tap a track header (outside M/S) → that track's Sound page opens, and it
+  // fits the phone viewport without scrolling (the pad flexes to fill).
   await page.evaluate(() => {
     document.querySelector('.arr-thead[data-track="bass"]').dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
   });
-  await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Mixer");
-  const focusedStrip = await page.$eval(".mx-strip.focus", (el) => el.dataset.track);
-  assertState(focusedStrip === "bass", `header tap focused strip "${focusedStrip}", wanted bass`);
+  await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Sound");
+  const soundSub = await page.$eval(".sheet-bar .sub", (el) => el.textContent);
+  assertState(soundSub === "Bass", `header tap opened Sound for "${soundSub}", wanted Bass`);
+  const soundFit = await page.$eval(".sound-body", (el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+  assertState(soundFit.scroll <= soundFit.client + 2, `sound sheet scrolls: ${JSON.stringify(soundFit)}`);
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
 
