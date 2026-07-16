@@ -289,6 +289,10 @@
         align-items: center;
         justify-content: center;
         position: relative;
+        /* Same height as a clip row (.clip min-height): the header is a tap
+           target now — it opens the track's Sound page — and fingers need
+           clip-sized targets. */
+        min-height: 62px;
       }
       .more {
         color: #46464c;

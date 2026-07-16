@@ -937,6 +937,44 @@ export function createAudio(song) {
     mute: false,
     solo: false,
   }]));
+
+  // Dry park: with every send off — the default, and most dice rolls —
+  // Freeverb's comb bank and the feedback delay process silence full-time,
+  // the priciest always-on cost on a weak phone. A parked return is
+  // disconnected from the duck bus, which takes its whole subtree out of
+  // the rendered graph; it wakes BEFORE a send opens and parks again once
+  // the tail has rung out. Sound-neutral by construction: a parked return
+  // only ever carried silence.
+  const RETURN_TAIL_MS = 6000;
+  const returns = {
+    verb: { key: "verb", node: live.reverb, parked: false, timer: 0 },
+    echo: { key: "echo", node: live.echo, parked: false, timer: 0 },
+  };
+  const anySendOn = (kind) => TRACK_KEYS.some((t) => sendGain(channelState[t][kind]) > 0);
+  function wakeReturn(kind) {
+    const r = returns[kind];
+    clearTimeout(r.timer);
+    r.timer = 0;
+    if (r.parked) {
+      r.node.connect(live.musicDuck);
+      r.parked = false;
+    }
+  }
+  function parkReturnSoon(kind) {
+    const r = returns[kind];
+    clearTimeout(r.timer);
+    r.timer = setTimeout(() => {
+      if (!anySendOn(kind) && !r.parked) {
+        r.node.disconnect(live.musicDuck);
+        r.parked = true;
+      }
+    }, RETURN_TAIL_MS);
+  }
+  // Boot state is all-dry and nothing has played: park immediately, no tail.
+  for (const kind of ["verb", "echo"]) {
+    returns[kind].node.disconnect(live.musicDuck);
+    returns[kind].parked = true;
+  }
   function applyTrackGates() {
     const anySolo = TRACK_KEYS.some((track) => channelState[track].solo);
     for (const track of TRACK_KEYS) {
@@ -1332,11 +1370,15 @@ export function createAudio(song) {
     },
     setSend(track, db) {
       channelState[track].verb = db;
+      if (sendGain(db) > 0) wakeReturn("verb"); // reconnect BEFORE the gain opens
       live.verbSends[track].gain.rampTo(sendGain(db), 0.02);
+      if (!anySendOn("verb")) parkReturnSoon("verb");
     },
     setEcho(track, db) {
       channelState[track].echo = db;
+      if (sendGain(db) > 0) wakeReturn("echo");
       live.echoSends[track].gain.rampTo(sendGain(db), 0.02);
+      if (!anySendOn("echo")) parkReturnSoon("echo");
     },
     setMute(track, on) {
       if (!channelState[track]) return;
@@ -1496,6 +1538,10 @@ export function createAudio(song) {
             g.verbSends[k].gain.value = sendGain(st.verb);
             g.echoSends[k].gain.value = sendGain(st.echo);
           }
+          // The same dry park, statically: sends are fixed for the whole
+          // render, so an all-off return never joins the graph at all.
+          if (!TRACK_KEYS.some((k) => g.verbSends[k].gain.value > 0)) g.reverb.disconnect(g.musicDuck);
+          if (!TRACK_KEYS.some((k) => g.echoSends[k].gain.value > 0)) g.echo.disconnect(g.musicDuck);
           const vstate = { prev: null };
           let step = 0;
           new Tone.Loop((time) => {

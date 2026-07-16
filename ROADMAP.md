@@ -40,7 +40,11 @@ only while the mixer is open; morph voices capped at the top-2 corners (2x a sin
 never 4x); colors pay-per-roll; sample drums cost buffer playback instead of synthesis;
 grid class sweeps dirty-checked per 16th; **idle park** — the context suspends ~6 s after
 stop (past the longest tails) and wakes on any trigger, so a stopped app costs zero audio
-CPU. Sound-neutral only, per the standing rule: no quality or capability trades.
+CPU; **dry park** — with every send off (the default and most dice rolls) the reverb and
+echo returns disconnect from the graph entirely (~10% of a master render measured) and
+wake before a send opens; clock-pump writes quantized (0.5% pies, ¼-px playhead) and
+skipped when unchanged, so pies repaint every frame or two instead of sixty times a
+second. Sound-neutral only, per the standing rule: no quality or capability trades.
 
 Remaining, in honesty: the always-on chain while PLAYING (Freeverb combs, chorus, five
 compressors, master stack) is the floor and it IS the sound — shrinking it means a measured
