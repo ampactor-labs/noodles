@@ -891,9 +891,14 @@ export function createAudio(song) {
   // by a guess frozen at schedule time (what Tone.Draw forces), a rAF pump
   // computes "the audio time reaching the ear right now" every frame and
   // fires everything due against that.
+  // Manual trim on top of the estimate: Android's outputLatency can be flat
+  // wrong (0 on some builds, stale over Bluetooth), and every audio-clock
+  // visual — pies, playhead, cursors — flows through visualLatency, so one
+  // nudge corrects them all together. Positive = visuals later.
+  let syncNudge = 0;
   const visualLatency = () => {
     const raw = Tone.getContext().rawContext;
-    return (raw.baseLatency || 0) + (raw.outputLatency || 0);
+    return (raw.baseLatency || 0) + (raw.outputLatency || 0) + syncNudge;
   };
   const visualQueue = [];
   let visualRAF = 0;
@@ -1395,6 +1400,9 @@ export function createAudio(song) {
       this.setPatch("drums", { bank, x: i % 2, y: Math.floor(i / 2) });
     },
     samplesReady: () => samplesReady,
+    setSyncNudge(ms) {
+      syncNudge = Math.max(-0.25, Math.min(0.25, (Number(ms) || 0) / 1000));
+    },
     visualLatency,
     // The audio-clock position being HEARD right now (context time minus the
     // output/acoustic latency, plus a half-frame of anticipation). The pie pump

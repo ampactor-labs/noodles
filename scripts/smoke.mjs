@@ -465,6 +465,11 @@ try {
   await clickAction(page, "perf-toggle");
   const hudGone = await page.evaluate(() => !document.querySelector("#perf-hud") && !localStorage.getItem("noodles:perf-hud"));
   assertState(hudGone, "perf overlay did not toggle back off");
+  // The visual-sync nudge persists and steps by 10 ms.
+  await clickAction(page, "sync-nudge-up");
+  const nudged = await page.evaluate(() => localStorage.getItem("noodles:sync-nudge"));
+  assertState(nudged === "10", `sync nudge did not persist (${nudged})`);
+  await clickAction(page, "sync-nudge-down");
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
 

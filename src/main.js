@@ -91,6 +91,11 @@ function chordMarkup(ci, { notes = false } = {}) {
 const song = makeSong();
 setScaleContext(song.key, song.scale);
 const audio = createAudio(song);
+// Visual-sync trim, persisted: corrects the platform's output-latency
+// estimate for every audio-clock visual at once (set from the ? page).
+const SYNC_NUDGE_KEY = "noodles:sync-nudge";
+let syncNudgeMs = Math.max(-250, Math.min(250, Number(localStorage.getItem(SYNC_NUDGE_KEY)) || 0));
+audio.setSyncNudge(syncNudgeMs);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 // A rolled sound is any point in the track's morph space plus a color, with
 // "none" weighted so a full-song roll doesn't stack four effects at once.
@@ -387,6 +392,23 @@ function openAboutSheet() {
         },
       }),
     ]),
+
+    p("If the moving parts run ahead of or behind what you hear (Bluetooth loves doing this), nudge the visuals until they sit on the sound:"),
+    (() => {
+      const label = () => `sync ${syncNudgeMs > 0 ? "+" : ""}${syncNudgeMs} ms`;
+      const val = el("div", { class: "numval", text: label() });
+      const nudge = (d) => {
+        syncNudgeMs = Math.max(-250, Math.min(250, syncNudgeMs + d));
+        localStorage.setItem(SYNC_NUDGE_KEY, String(syncNudgeMs));
+        audio.setSyncNudge(syncNudgeMs);
+        val.textContent = label();
+      };
+      return el("div", { class: "tfrow" }, [
+        el("div", { class: "tfbtn", text: "− earlier", "data-action": "sync-nudge-down", onclick: () => nudge(-10) }),
+        val,
+        el("div", { class: "tfbtn", text: "later +", "data-action": "sync-nudge-up", onclick: () => nudge(10) }),
+      ]);
+    })(),
   ]);
   sheet.appendChild(body);
   openSheet();
@@ -978,14 +1000,26 @@ function clockPump() {
     const clipEl = sceneEls[sceneIdx]?.clips[t.key];
     if (!clipEl) continue;
     const prog = a.dur > 0 ? Math.min(1, Math.max(0, (now - a.start) / a.dur)) : 0;
-    clipEl.style.setProperty("--pct", (prog * 100).toFixed(2));
+    // Quantize to half-percent steps and skip unchanged writes: a pie on a
+    // long loop moves well under 0.5%/frame, and every skipped write is a
+    // conic-gradient repaint the A16 doesn't pay for. Still the audio clock —
+    // each write that does land is exact.
+    const pct = Math.round(prog * 200) / 2;
+    if (clipEl.__pct !== pct) {
+      clipEl.__pct = pct;
+      clipEl.style.setProperty("--pct", String(pct));
+    }
   }
   if (arrAnchor && arrPlayhead) {
     let barF = (now - arrAnchor.start) / arrAnchor.barSec;
     const lp = arrAnchor.loop;
     if (lp && barF >= lp.end) barF = lp.start + ((barF - lp.start) % (lp.end - lp.start));
     barF = Math.max(0, Math.min(barF, arrAnchor.len));
-    arrPlayhead.style.transform = `translateX(${barF * ppb}px)`;
+    const x = Math.round(barF * ppb * 4) / 4; // quarter-pixel steps, skip no-op writes
+    if (arrPlayhead.__x !== x) {
+      arrPlayhead.__x = x;
+      arrPlayhead.style.transform = `translateX(${x}px)`;
+    }
   }
   if (audio.playing) clockPumpRAF = requestAnimationFrame(clockPump);
 }
