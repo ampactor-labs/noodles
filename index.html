@@ -762,9 +762,21 @@
       .step.on {
         background: var(--pc);
       }
-      .step.cursor {
+      /* The playing-column marker is ONE absolutely-positioned overlay moved
+         by transform — the old per-cell .cursor class sweep cost ~900 class
+         ops/s at 120 BPM with a piano editor open. */
+      .step-cursor {
+        position: absolute;
+        display: none;
+        border-radius: 3px;
         outline: 2px solid rgba(255, 255, 255, 0.5);
         outline-offset: -1px;
+        pointer-events: none;
+        will-change: transform;
+      }
+      .editor-scroll,
+      .proll {
+        position: relative;
       }
       /* Steps beyond the clip's loop length (polymeter) sit dim and inert. */
       .step.off,
@@ -1146,10 +1158,6 @@
       }
       .pcell.on {
         background: var(--tc);
-      }
-      .pcell.cursor {
-        outline: 2px solid rgba(255, 255, 255, 0.5);
-        outline-offset: -1px;
       }
       .pcell.nstart {
         box-shadow: inset 3px 0 0 rgba(255, 255, 255, 0.55);

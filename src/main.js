@@ -990,10 +990,15 @@ function setActiveTracks(activeScenes) {
 let pieAnchors = {}; // track -> { start, dur } in AudioContext seconds
 let arrAnchor = null; // { start, barSec, len, loop } for the arrangement playhead
 let clockPumpRAF = 0;
+let pieFrame = false;
 function clockPump() {
   clockPumpRAF = 0;
   const now = audio.heardNow();
-  for (const t of TRACKS) {
+  // Pies paint every OTHER frame: a radial fill at 30 Hz is indistinguishable
+  // and short loops otherwise land a conic-gradient repaint per clip per
+  // frame (quantization can't help a 2 s loop that moves >0.5% per frame).
+  pieFrame = !pieFrame;
+  if (pieFrame) for (const t of TRACKS) {
     const a = pieAnchors[t.key];
     const sceneIdx = playingTracks[t.key];
     if (!a || sceneIdx < 0) continue;
@@ -1080,7 +1085,7 @@ document.addEventListener("click", (e) => {
 function openEditor(sceneIndex, track) {
   const scene = song.scenes[sceneIndex];
   resetSheet(trackColor(track));
-  editor = { scene: sceneIndex, track, cursorCols: null, cursor: -1 };
+  editor = { scene: sceneIndex, track, moveCursor: null };
 
   const title = track === "drums" ? "Drum Rack" : track === "harmony" ? "Chords" : "Piano Roll";
   sheet.appendChild(
@@ -1465,14 +1470,22 @@ function advanceMeter(state, levels, now) {
   } else if (now > state.holdUntil) {
     state.holdDb -= 0.6;
   }
-  state.rmsEl.style.transform = `scaleY(${meterLevel(state.rmsDb)})`;
+  // Dirty-check every write: idle meters used to issue ~30 unconditional
+  // style/text writes per frame across the five strips.
+  const write = (key, node, prop, value) => {
+    if (state[key] === value) return;
+    state[key] = value;
+    if (prop === "text") node.textContent = value;
+    else node.style[prop] = value;
+  };
+  write("_rms", state.rmsEl, "transform", `scaleY(${meterLevel(state.rmsDb).toFixed(3)})`);
   const showPeak = Number.isFinite(state.peakDb) && state.peakDb > METER_MIN_DB;
-  state.peakEl.style.display = showPeak ? "block" : "none";
-  if (showPeak) state.peakEl.style.top = `${(1 - meterLevel(state.peakDb)) * 100}%`;
+  write("_peakShow", state.peakEl, "display", showPeak ? "block" : "none");
+  if (showPeak) write("_peakTop", state.peakEl, "top", `${((1 - meterLevel(state.peakDb)) * 100).toFixed(1)}%`);
   const showHold = Number.isFinite(state.holdDb) && state.holdDb > METER_MIN_DB;
-  state.holdEl.style.display = showHold ? "block" : "none";
-  state.labelEl.textContent = showHold ? Math.round(state.holdDb) : "";
-  if (showHold) state.holdEl.style.top = `${(1 - meterLevel(state.holdDb)) * 100}%`;
+  write("_holdShow", state.holdEl, "display", showHold ? "block" : "none");
+  write("_label", state.labelEl, "text", showHold ? String(Math.round(state.holdDb)) : "");
+  if (showHold) write("_holdTop", state.holdEl, "top", `${((1 - meterLevel(state.holdDb)) * 100).toFixed(1)}%`);
 }
 
 const volToPct = (db) => (1 - (db - TRACK_VOLUME_MIN_DB) / (TRACK_VOLUME_MAX_DB - TRACK_VOLUME_MIN_DB)) * 100;
@@ -2131,7 +2144,46 @@ function buildDrumEditor(scene) {
   paintDrums();
 
   editor.stepEls = stepEls;
-  editor.cursorCols = Array.from({ length: 16 }, (_, s) => DRUM_VOICES.map((v) => stepEls[v][s]));
+  editor.moveCursor = makeStepCursor(scrollContainer, (i) => stepEls.kick[i], 0, 16, (i) => stepEls.clap[i]);
+}
+
+// One transform-moved overlay instead of class sweeps across every cell in a
+// column: the sweep measured ~900 class ops/s at 120 BPM with a piano editor
+// open. Geometry is read once per editor build, never per 16th.
+function makeStepCursor(container, cellFor, first, count, lastCellFor = cellFor) {
+  const cursor = el("div", { class: "step-cursor" });
+  container.appendChild(cursor);
+  let geo = null;
+  let shown = false;
+  return (s) => {
+    if (s < first || s >= first + count) {
+      if (shown) {
+        cursor.style.display = "none";
+        shown = false;
+      }
+      return;
+    }
+    if (!geo) {
+      geo = {};
+      for (let i = first; i < first + count; i++) {
+        const c = cellFor(i);
+        if (c) geo[i] = { x: c.offsetLeft, w: c.offsetWidth };
+      }
+      const top = cellFor(s);
+      const bottom = lastCellFor(s);
+      if (top && bottom) {
+        cursor.style.top = `${top.offsetTop}px`;
+        cursor.style.height = `${bottom.offsetTop + bottom.offsetHeight - top.offsetTop}px`;
+      }
+      cursor.style.width = `${geo[s]?.w || 0}px`;
+    }
+    if (!geo[s]) return;
+    if (!shown) {
+      cursor.style.display = "block";
+      shown = true;
+    }
+    cursor.style.transform = `translateX(${geo[s].x}px)`;
+  };
 }
 
 function buildPianoEditor(sceneIndex, scene, track) {
@@ -2221,7 +2273,6 @@ function buildPianoEditor(sceneIndex, scene, track) {
   const scrollContainer = el("div", { class: "editor-scroll" });
   const grid = el("div", { class: "proll" });
   const rowCells = []; // [rowIndex][step]
-  const cursorCols = Array.from({ length: 16 }, () => []);
 
   const noteAt = (step, midi = null) => {
     for (let st = 0; st < 16; st++) {
@@ -2243,7 +2294,6 @@ function buildPianoEditor(sceneIndex, scene, track) {
       const cell = el("div", { class: "pcell", style: `--tc:${tc}` });
       cell.addEventListener("pointerdown", (e) => onNoteDown(e, s, midi, cell));
       cells[s] = cell;
-      cursorCols[s].push(cell);
       rowSteps.appendChild(cell);
     }
     rowCells.push(cells);
@@ -2374,7 +2424,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
 
   paint();
   setTimeout(scrollToNotes, 20); // wait for layout to settle
-  editor.cursorCols = cursorCols;
+  editor.moveCursor = makeStepCursor(grid, (i) => rowCells[0]?.[i], viewOff, viewCount, (i) => rowCells[rowCells.length - 1]?.[i]);
 }
 
 function buildHarmonyEditor(sceneIndex, scene) {
@@ -3378,11 +3428,7 @@ audio.onVisual((e) => {
       if (!clockPumpRAF) clockPumpRAF = requestAnimationFrame(clockPump);
     }
 
-    if (editor && editor.cursorCols) {
-      if (editor.cursor >= 0) editor.cursorCols[editor.cursor]?.forEach((c) => c.classList.remove("cursor"));
-      editor.cursor = e.stepInBar;
-      editor.cursorCols[e.stepInBar]?.forEach((c) => c.classList.add("cursor"));
-    }
+    editor?.moveCursor?.(e.stepInBar);
   }
 });
 

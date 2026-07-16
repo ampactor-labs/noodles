@@ -345,7 +345,12 @@ function bassVelocityBoost(preset, midi) {
 // measurably lacks (aud×0.92 on wet rolls); the EXPORT graph renders the
 // full chain. Everything that carries the feel — master stack, comps, duck,
 // morphing, levels — is identical in both. ---
-function buildGraph({ meters = false, exportGrade = false } = {}) {
+// withVerb/withEcho: offline renders pass false to SKIP CONSTRUCTING a return
+// no audible track sends to — Freeverb's worklet combs burn render time from
+// the moment they exist, connected or not (measured ~21x on a minimal graph),
+// so a dry export must never build them. Live always constructs (native
+// nodes; the dry park makes them free).
+function buildGraph({ meters = false, exportGrade = false, withVerb = true, withEcho = true } = {}) {
   const g = {};
   g.exportGrade = exportGrade;
 
@@ -410,8 +415,10 @@ function buildGraph({ meters = false, exportGrade = false } = {}) {
   // reverbOut is whatever node feeds the duck bus — the edge the dry park
   // cuts, in either grade.
   if (exportGrade) {
-    g.reverb = new Tone.Freeverb({ roomSize: 0.72, dampening: 2600, wet: 1 }).connect(g.musicDuck);
-    g.reverbOut = g.reverb;
+    if (withVerb) {
+      g.reverb = new Tone.Freeverb({ roomSize: 0.72, dampening: 2600, wet: 1 }).connect(g.musicDuck);
+      g.reverbOut = g.reverb;
+    }
   } else {
     // Half a Freeverb for the live grade: four of its eight combs (same
     // Schroeder tunings, same dampening register, resonance a touch up to
@@ -440,9 +447,15 @@ function buildGraph({ meters = false, exportGrade = false } = {}) {
       damp.connect(pan);
     });
   }
-  g.reverbHP = new Tone.Filter({ type: "highpass", frequency: 200, Q: 0.7 }).connect(g.reverb);
-  g.echo = new Tone.FeedbackDelay({ delayTime: "8n", feedback: 0.26, wet: 1 }).connect(g.musicDuck);
-  g.echoHP = new Tone.Filter({ type: "highpass", frequency: 160, Q: 0.7 }).connect(g.echo);
+  // The HPs and send taps always exist (playback code sets their gains); a
+  // skipped return just leaves them feeding a dangling — unrendered — edge.
+  g.reverbHP = new Tone.Filter({ type: "highpass", frequency: 200, Q: 0.7 });
+  if (g.reverb) g.reverbHP.connect(g.reverb);
+  if (!exportGrade || withEcho) {
+    g.echo = new Tone.FeedbackDelay({ delayTime: "8n", feedback: 0.26, wet: 1 }).connect(g.musicDuck);
+  }
+  g.echoHP = new Tone.Filter({ type: "highpass", frequency: 160, Q: 0.7 });
+  if (g.echo) g.echoHP.connect(g.echo);
   g.echoReturn = new Tone.Gain(Tone.dbToGain(-4)).connect(g.echoHP);
 
   // Mixer strips. Melodic tracks run through a per-track compressor into the
@@ -1342,6 +1355,11 @@ export function createAudio(song) {
     idleTimer = 0;
     const raw = Tone.getContext().rawContext;
     if (inited && raw.state === "suspended") raw.resume();
+    // Re-arm the park when this wake wasn't the start of playback: without
+    // it, one pad audition while stopped left the whole graph burning CPU
+    // until the next play/stop cycle. The timer's own !playing check makes
+    // this a no-op when play() follows immediately.
+    if (!playing) parkContextSoon();
   }
   function parkContextSoon() {
     clearTimeout(idleTimer);
@@ -1637,9 +1655,19 @@ export function createAudio(song) {
         const patchesCopy = structuredClone(patches);
         return Tone.Offline(({ transport: offTr }) => {
           offTr.bpm.value = song.tempo;
+          // Which returns does this pass need? Only sends on AUDIBLE tracks
+          // count — a muted stem's send carries silence, and an export-grade
+          // return that isn't built costs nothing (see buildGraph).
+          const anySoloed = TRACK_KEYS.some((track) => channelState[track].solo);
+          const audible = (k) => !(soloTrack ? k !== soloTrack : channelState[k].mute || (anySoloed && !channelState[k].solo));
           // Exports render the full chain; opts.graph = "live" exists only
           // for the measurement probes to cost the live grade offline.
-          const g = buildGraph({ meters: false, exportGrade: opts.graph !== "live" });
+          const g = buildGraph({
+            meters: false,
+            exportGrade: opts.graph !== "live",
+            withVerb: TRACK_KEYS.some((k) => audible(k) && sendGain(channelState[k].verb) > 0),
+            withEcho: TRACK_KEYS.some((k) => audible(k) && sendGain(channelState[k].echo) > 0),
+          });
           for (const t of TRACK_KEYS) applyPatchTo(g, t, patchesCopy[t]);
           const anySolo = TRACK_KEYS.some((track) => channelState[track].solo);
           for (const k of TRACK_KEYS) {
@@ -1653,10 +1681,8 @@ export function createAudio(song) {
             // a stems pass renders one track's DSP, not four.
             if (muted) g.trackOut[k].disconnect(g.colorDest[k]);
           }
-          // The same dry park, statically: sends are fixed for the whole
-          // render, so an all-off return never joins the graph at all.
-          if (!TRACK_KEYS.some((k) => g.verbSends[k].gain.value > 0)) g.reverbOut.disconnect(g.musicDuck);
-          if (!TRACK_KEYS.some((k) => g.echoSends[k].gain.value > 0)) g.echo.disconnect(g.musicDuck);
+          // (Return parking is decided at construction now — see withVerb/
+          // withEcho above: a return this pass doesn't need was never built.)
           const vstate = { prev: null };
           let step = 0;
           new Tone.Loop((time) => {
