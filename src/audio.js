@@ -449,14 +449,19 @@ function buildGraph({ meters = false } = {}) {
 
   // Color insert points: everything a track makes flows through colorIn, and
   // applyColorTo splices the selected effect between colorIn and colorDest.
+  // trackOut is whichever node currently feeds colorDest (colorIn, or the
+  // color chain's last node) — the one edge the track park cuts to take the
+  // whole source side out of the rendered graph.
   g.colorIn = {};
   g.colorDest = {};
   g.colorNodes = {};
   g.colorTypes = {};
+  g.trackOut = {};
   for (const k of TRACK_KEYS) {
     g.colorIn[k] = new Tone.Gain(1);
     g.colorDest[k] = k === "drums" ? g.channels.drums : g.inputs[k];
     g.colorIn[k].connect(g.colorDest[k]);
+    g.trackOut[k] = g.colorIn[k];
     g.colorNodes[k] = null;
     g.colorTypes[k] = "none";
   }
@@ -667,6 +672,7 @@ function applyColorTo(g, track, patch) {
   }
   if (type === "none" || !COLOR_MAKERS[type]) {
     g.colorIn[track].connect(g.colorDest[track]);
+    g.trackOut[track] = g.colorIn[track];
     g.colorTypes[track] = "none";
     return;
   }
@@ -677,6 +683,7 @@ function applyColorTo(g, track, patch) {
     prev = n;
   }
   prev.connect(g.colorDest[track]);
+  g.trackOut[track] = prev;
   g.colorNodes[track] = made;
   g.colorTypes[track] = type;
 }
@@ -837,6 +844,8 @@ function playArrangementStepOn(g, patches, vstate, song, bar, stepInBar, time) {
     if (vstate.recordMotion?.(trk, sc, absStep)) continue;
     applyMotionOn(g, patches, vstate, trk, sc, absStep, time);
   }
+  // vstate.wake is the live transport's track-park waker (absent offline);
+  // it must fire on every path that makes a sound, and only those.
   let chord = null;
   if (stepInBar === 0 && !gated("harmony")) {
     const h = clipAt(song, "harmony", bar);
@@ -844,6 +853,7 @@ function playArrangementStepOn(g, patches, vstate, song, bar, stepInBar, time) {
       const sc = song.scenes[h.scene];
       if (sc?.harmony?.length) {
         chord = sc.harmony[(bar - h.start) % sc.harmony.length];
+        vstate.wake?.("harmony");
         playChordOn(g, patches, vstate, chord, time, sc.harmonyOct || 0);
       }
     }
@@ -853,7 +863,12 @@ function playArrangementStepOn(g, patches, vstate, song, bar, stepInBar, time) {
     const sc = song.scenes[d.scene];
     const idx = ((bar - d.start) * 16 + stepInBar) % stepsFor(sc, "drums");
     const at = time + swingOffsetFor(song, "drums", idx);
-    for (const v of DRUM_VOICES) if (sc.drums[v][idx] > 0) hitDrumOn(g, patches, v, at, sc.drums[v][idx]);
+    for (const v of DRUM_VOICES) {
+      if (sc.drums[v][idx] > 0) {
+        vstate.wake?.("drums");
+        hitDrumOn(g, patches, v, at, sc.drums[v][idx]);
+      }
+    }
   }
   for (const trk of ["bass", "melody"]) {
     if (gated(trk)) continue;
@@ -861,7 +876,11 @@ function playArrangementStepOn(g, patches, vstate, song, bar, stepInBar, time) {
     if (!c) continue;
     const sc = song.scenes[c.scene];
     const idx = ((bar - c.start) * 16 + stepInBar) % stepsFor(sc, trk);
-    playNoteStackOn(g, patches, trk, sc[trk][idx], time + swingOffsetFor(song, trk, idx));
+    const slot = sc[trk][idx];
+    if (noteSlot(slot).length) {
+      vstate.wake?.(trk);
+      playNoteStackOn(g, patches, trk, slot, time + swingOffsetFor(song, trk, idx));
+    }
   }
   return chord;
 }
@@ -975,6 +994,34 @@ export function createAudio(song) {
     returns[kind].node.disconnect(live.musicDuck);
     returns[kind].parked = true;
   }
+
+  // Track park, same principle one level up: a track that hasn't been asked
+  // to sound for a while takes its whole source side — synth layers, lane
+  // filters, the chorus, the color insert — out of the rendered graph with
+  // one cut at the color junction. Triggers wake it synchronously before
+  // they schedule, so the first note back is already connected; empty lanes
+  // never trigger, so a scene without a melody parks the melody chain. The
+  // strip below the cut (comp/trim/channel) stays wired — cheap, and the
+  // meters keep reading truthful silence.
+  const TRACK_PARK_SEC = 6;
+  const lastTrigger = Object.fromEntries(TRACK_KEYS.map((t) => [t, 0]));
+  const trackParked = Object.fromEntries(TRACK_KEYS.map((t) => [t, false]));
+  function wakeTrack(t) {
+    lastTrigger[t] = Tone.now();
+    if (trackParked[t]) {
+      live.trackOut[t].connect(live.colorDest[t]);
+      trackParked[t] = false;
+    }
+  }
+  function sweepTrackPark() {
+    const cutoff = Tone.now() - TRACK_PARK_SEC;
+    for (const t of TRACK_KEYS) {
+      if (!trackParked[t] && lastTrigger[t] < cutoff) {
+        live.trackOut[t].disconnect(live.colorDest[t]);
+        trackParked[t] = true;
+      }
+    }
+  }
   function applyTrackGates() {
     const anySolo = TRACK_KEYS.some((track) => channelState[track].solo);
     for (const track of TRACK_KEYS) {
@@ -983,6 +1030,7 @@ export function createAudio(song) {
   }
 
   const liveVoice = { prev: null };
+  liveVoice.wake = wakeTrack;
   liveVoice.recordMotion = (track, scene, step) => {
     if (!motionArmed[track]) return false;
     recordMotionTick(track, scene, step);
@@ -1007,10 +1055,21 @@ export function createAudio(song) {
       lanes[param][step % lanes[param].length] = patches[track][param];
     }
   }
-  const playChord = (ci, time, oct) => playChordOn(live, patches, liveVoice, ci, time, oct);
-  const playNoteStack = (track, slot, time) => playNoteStackOn(live, patches, track, slot, time);
-  const hitDrum = (v, time, vel) => hitDrumOn(live, patches, v, time, vel);
+  const playChord = (ci, time, oct) => {
+    wakeTrack("harmony");
+    playChordOn(live, patches, liveVoice, ci, time, oct);
+  };
+  const playNoteStack = (track, slot, time) => {
+    if (!noteSlot(slot).length) return; // empty step: no sound, no wake
+    wakeTrack(track);
+    playNoteStackOn(live, patches, track, slot, time);
+  };
+  const hitDrum = (v, time, vel) => {
+    wakeTrack("drums");
+    hitDrumOn(live, patches, v, time, vel);
+  };
   function preview(ci, oct = 0) {
+    wakeTrack("harmony");
     const voiced = voiceLead(CHORDS[ci].pcs, liveVoice.prev);
     const shift = 12 * oct;
     eachActiveLayer(live, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(voiced.map((m) => midiToFreq(m + shift)), "2n", Tone.now()));
@@ -1141,6 +1200,7 @@ export function createAudio(song) {
   }
 
   const clock = new Tone.Loop((time) => {
+    sweepTrackPark();
     if (mode === "arrangement") return tickArrangement(time);
 
     let maxLimitBars = 1;
@@ -1420,6 +1480,9 @@ export function createAudio(song) {
         junction.rampTo(0, 0.012);
         setTimeout(() => {
           applyPatchTo(live, track, patches[track], { ramp: true });
+          // The rewire reconnected the junction — keep the park flag honest
+          // or the sweep would never re-park (and wake would double-connect).
+          trackParked[track] = false;
           junction.rampTo(1, 0.03);
         }, 18);
       } else {
@@ -1537,6 +1600,10 @@ export function createAudio(song) {
             g.channels[k].set({ volume: muted ? -Infinity : st.vol, pan: st.pan, mute: muted });
             g.verbSends[k].gain.value = sendGain(st.verb);
             g.echoSends[k].gain.value = sendGain(st.echo);
+            // A muted track still gets scheduled (the kick keeps the duck
+            // pumping on stems) but its source side never joins the graph —
+            // a stems pass renders one track's DSP, not four.
+            if (muted) g.trackOut[k].disconnect(g.colorDest[k]);
           }
           // The same dry park, statically: sends are fixed for the whole
           // render, so an all-off return never joins the graph at all.

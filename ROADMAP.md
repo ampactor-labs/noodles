@@ -42,9 +42,13 @@ grid class sweeps dirty-checked per 16th; **idle park** — the context suspends
 stop (past the longest tails) and wakes on any trigger, so a stopped app costs zero audio
 CPU; **dry park** — with every send off (the default and most dice rolls) the reverb and
 echo returns disconnect from the graph entirely (~10% of a master render measured) and
-wake before a send opens; clock-pump writes quantized (0.5% pies, ¼-px playhead) and
-skipped when unchanged, so pies repaint every frame or two instead of sixty times a
-second. Sound-neutral only, per the standing rule: no quality or capability trades.
+wake before a send opens; **track park** — a track untriggered for 6 s (an empty lane, a
+muted stem) drops its whole source side (layers, filters, chorus, color) out of the graph
+with one cut at the color junction and wakes synchronously on any trigger — stems export
+measured ~40% faster since a solo pass renders one track's DSP, not four; clock-pump
+writes quantized (0.5% pies, ¼-px playhead) and skipped when unchanged, so pies repaint
+every frame or two instead of sixty times a second. Sound-neutral only, per the standing
+rule: no quality or capability trades.
 
 Remaining, in honesty: the always-on chain while PLAYING (Freeverb combs, chorus, five
 compressors, master stack) is the floor and it IS the sound — shrinking it means a measured
