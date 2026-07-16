@@ -172,6 +172,28 @@ try {
     if (stackedNotes >= 2) break;
   }
   assertState(stackedNotes >= 2, `expected layered notes in one step, got ${stackedNotes}`);
+  // One gesture: press an empty cell and drag right — the note must grow under
+  // the finger (regression: the drag mutated an orphaned clone, so a new
+  // note's length always snapped back to 1 and only a second press worked).
+  const dragLen = await page.evaluate(async () => {
+    const tick = () => new Promise((r) => setTimeout(r, 60));
+    const row = [...document.querySelectorAll(".prow")].find((r) =>
+      [4, 5, 6, 7].every((s) => !r.querySelectorAll(".pcell")[s]?.classList.contains("on"))
+    );
+    const cells = row.querySelectorAll(".pcell");
+    const at = (cell) => {
+      const r = cell.getBoundingClientRect();
+      return { bubbles: true, cancelable: true, pointerId: 3, pointerType: "touch", clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+    };
+    cells[4].dispatchEvent(new PointerEvent("pointerdown", at(cells[4])));
+    await tick();
+    cells[4].dispatchEvent(new PointerEvent("pointermove", at(cells[7])));
+    await tick();
+    cells[4].dispatchEvent(new PointerEvent("pointerup", at(cells[7])));
+    await tick();
+    return Math.max(...(window.__noodles.song.scenes[0].melody[4] || []).map((n) => n.len), 0);
+  });
+  assertState(dragLen === 4, `press-drag did not stretch the new note to 4 steps (got len ${dragLen})`);
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
 

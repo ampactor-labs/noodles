@@ -2206,17 +2206,22 @@ function buildPianoEditor(sceneIndex, scene, track) {
     }
   };
 
-  async function onNoteDown(e, s, midi, cell) {
+  function onNoteDown(e, s, midi, cell) {
     e.preventDefault();
     if (s >= clipLen) return;
-    await ensureStarted();
     pushUndo();
     const existing = noteAt(s, midi);
     const start = existing?.step ?? s;
-    const note = existing?.note ?? { midi, len: 1, vel: slotPeakVel(lane[s]) || 0.9 };
-    if (!existing) {
-      setNoteSlot(lane, s, [...noteSlot(lane[s]), note]);
-      audio.previewNote(track, midi);
+    let note = existing?.note;
+    if (!note) {
+      // setNoteSlot stores normalized clones — the drag below must mutate the
+      // note the lane holds, or the length snaps back to 1 on repaint.
+      setNoteSlot(lane, s, [...noteSlot(lane[s]), { midi, len: 1, vel: slotPeakVel(lane[s]) || 0.9 }]);
+      note = noteAt(s, midi).note;
+      // Only the preview needs audio. Awaiting init before wiring the gesture
+      // dropped the whole drag on a session's first press (150 ms+ of primer),
+      // which read as "you must press twice to stretch a note".
+      ensureStarted().then(() => audio.previewNote(track, midi));
     }
     paint();
     let moved = false;
@@ -2248,10 +2253,10 @@ function buildPianoEditor(sceneIndex, scene, track) {
     cell.addEventListener("pointercancel", up);
   }
 
-  async function onVelDown(e, s, bar) {
+  function onVelDown(e, s, bar) {
     e.preventDefault();
     if (!noteSlot(lane[s]).length) return;
-    await ensureStarted();
+    ensureStarted(); // warm the context; the drag itself makes no sound
     pushUndo();
     const rect = bar.getBoundingClientRect();
     const set = (ev) => {
@@ -3048,6 +3053,9 @@ function renderExportOffers() {
 function offerSave(blob, name, label) {
   exportOffers.push({ url: URL.createObjectURL(blob), blob, name, label });
   renderExportOffers();
+  // Offers land at the bottom of a sheet that now scrolls — walk each fresh
+  // render into view so "ready" never points at something off-screen.
+  if (expLinksEl?.isConnected) expLinksEl.lastElementChild?.scrollIntoView({ block: "nearest" });
 }
 
 async function doExport(mode) {
@@ -3088,7 +3096,10 @@ function openExport() {
   fileInput.addEventListener("change", () => loadProjectFile(fileInput.files?.[0], status));
 
   sheet.appendChild(sheetBar("Export", "project · WAV"));
-  sheet.appendChild(
+  // Four stem offers plus both sections outgrow the sheet's 78% cap on a
+  // phone — the body scrolls like the editors do, or the offers are cut off.
+  const body = el("div", { class: "editor-scroll" });
+  body.appendChild(
     el("div", { class: "propsection" }, [
       el("div", { class: "proplabel", text: "project" }),
       el("div", { class: "exp-grid" }, [
@@ -3115,9 +3126,10 @@ function openExport() {
     el("div", { class: "exp-btn", text: "\uD83C\uDFB5  Master WAV", "data-action": "export-master-wav", onclick: () => doExport("master") }),
     el("div", { class: "exp-btn", text: "\uD83C\uDFDA  Stems (4\u00d7)", "data-action": "export-stems", onclick: () => doExport("stems") }),
   ]));
-  sheet.appendChild(el("div", { class: "propsection" }, audioSection));
-  sheet.appendChild(status);
-  sheet.appendChild(links);
+  body.appendChild(el("div", { class: "propsection" }, audioSection));
+  body.appendChild(status);
+  body.appendChild(links);
+  sheet.appendChild(body);
   renderExportOffers(); // finished renders from an earlier open are still here
   openSheet();
 }
