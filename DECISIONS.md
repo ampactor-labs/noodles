@@ -69,6 +69,21 @@ and mutes stay the player's. Wet rolls are safe because the returns are highpass
 ride the kick duck (D8). The design lesson applied: selection beats processing — roll
 from curated archetypes with noise inside, not uniform noise over everything.
 
+### D10 — Two grades, one chain: live plays lighter, exports render full — uniformly
+
+The A16's perf overlay measured the audio thread starving on dense rolls (aud×0.92-0.99
+while the main thread held 65-83 fps): the DSP floor, not the UI. Rather than a device
+tier (breaks export-matches-app only on weak phones, needs measurement machinery and
+mid-play switching), the builder chose a UNIFORM split: buildGraph gains an exportGrade
+flag — the live graph runs half a Freeverb (four of its eight combs, same tunings and
+dampening, level-matched makeup) and a 4-stage phaser instead of 10, while offline
+renders keep the full chain. Everything feel-bearing — master stack, comps, duck,
+morphing, levels — is identical in both grades. Measured: dry renders identical to
+0.0 dB (a parked return is in neither graph), wet level-matched to 0.3 dB, phase level-
+identical, with the live grade ~14% cheaper wet and ~20% cheaper under the phase color.
+The invariant softens from "export sounds like the app" to "export sounds like the app,
+plus mastering polish" — the same honest sentence on every device, which is the point.
+
 ## Provisional (my recommendation, argue against it)
 
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone

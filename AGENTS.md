@@ -106,8 +106,10 @@ the drum-voice metadata, and `makeSong` / `makeScene` / `cloneScene` / `arrangeL
 
 **`src/audio.js`** — `createAudio(song)` builds the Tone.js graph and returns the transport
 API. The one rule that matters: **`buildGraph()` is the only place the signal chain exists.**
-The live context and `renderOffline` (WAV export) both call it, so export-matches-app holds
-by construction; never fork the chain. Topology: per track a preset **trim** Gain and
+The live context and `renderOffline` (WAV export) both call it — never fork the chain. One
+sanctioned flag, not a fork: `exportGrade` (DECISIONS D10) — live runs a level-matched
+half-Freeverb and a 4-stage phaser for audio-thread headroom, exports render the full
+chain, uniformly on every device; everything feel-bearing is identical in both grades. Topology: per track a preset **trim** Gain and
 `Tone.Channel` (drums skip the per-track input compressor; they already get parallel
 compression), reverb + echo sends whose returns ride the kick-sidechain duck along with
 everything melodic (a wet tail must pump with the dry mix, not fill the pocket), a drum bus

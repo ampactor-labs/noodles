@@ -339,9 +339,15 @@ function bassVelocityBoost(preset, midi) {
 }
 
 // --- The signal chain, built once for live playback and once per offline
-// render. Nodes bind to whichever Tone context is active at call time. ---
-function buildGraph({ meters = false } = {}) {
+// render. Nodes bind to whichever Tone context is active at call time.
+// Two grades, uniform across devices (DECISIONS D10): the LIVE graph trades
+// polish the ear can't hold onto mid-jam for audio-thread headroom the A16
+// measurably lacks (aud×0.92 on wet rolls); the EXPORT graph renders the
+// full chain. Everything that carries the feel — master stack, comps, duck,
+// morphing, levels — is identical in both. ---
+function buildGraph({ meters = false, exportGrade = false } = {}) {
   const g = {};
+  g.exportGrade = exportGrade;
 
   // Master chain: gain → rumble HP → low shelf → saturation → soft clip →
   // glue comp → makeup → soft-knee ceiling → brickwall. The goal is
@@ -401,7 +407,27 @@ function buildGraph({ meters = false } = {}) {
   // touch lower, so its repeats don't pile low-end into the feedback loop.
   // Both returns land on the duck bus, not the master: a wet tail that skips
   // the sidechain fills the exact pocket the kick just carved.
-  g.reverb = new Tone.Freeverb({ roomSize: 0.72, dampening: 2600, wet: 1 }).connect(g.musicDuck);
+  // reverbOut is whatever node feeds the duck bus — the edge the dry park
+  // cuts, in either grade.
+  if (exportGrade) {
+    g.reverb = new Tone.Freeverb({ roomSize: 0.72, dampening: 2600, wet: 1 }).connect(g.musicDuck);
+    g.reverbOut = g.reverb;
+  } else {
+    // Half a Freeverb for the live grade: four of its eight combs (same
+    // Schroeder tunings, same dampening register, resonance a touch up to
+    // hold tail length), split two-per-side for width. The +4.5 dB makeup is
+    // measured against the full Freeverb on the wet reference (.tmp probe)
+    // so a send level chosen live translates to the export.
+    g.reverb = new Tone.Gain(1);
+    g.reverbOut = new Tone.Gain(Tone.dbToGain(4.5)).connect(g.musicDuck);
+    const tunings = [0.0253, 0.02896, 0.03224, 0.03667];
+    tunings.forEach((delayTime, i) => {
+      const comb = new Tone.LowpassCombFilter({ delayTime, resonance: 0.78, dampening: 2600 });
+      const pan = new Tone.Panner(i % 2 === 0 ? -0.6 : 0.6).connect(g.reverbOut);
+      g.reverb.connect(comb);
+      comb.connect(pan);
+    });
+  }
   g.reverbHP = new Tone.Filter({ type: "highpass", frequency: 200, Q: 0.7 }).connect(g.reverb);
   g.echo = new Tone.FeedbackDelay({ delayTime: "8n", feedback: 0.26, wet: 1 }).connect(g.musicDuck);
   g.echoHP = new Tone.Filter({ type: "highpass", frequency: 160, Q: 0.7 }).connect(g.echo);
@@ -615,8 +641,10 @@ const COLOR_MAKERS = {
     const shaper = new Tone.WaveShaper(curve(8 - amount * 5), 1024);
     return { nodes: [shaper], updateColor: (a) => shaper.setMap(curve(8 - a * 5), 1024) };
   },
-  phase(amount, motion) {
-    const phaser = new Tone.Phaser({ frequency: 0.1 + motion * 1.9, octaves: 2 + amount * 3, baseFrequency: 300 });
+  phase(amount, motion, exportGrade) {
+    // Ten allpass stages per channel is mastering-grade sweep density; four
+    // keeps the character live at a fraction of the audio-thread bill.
+    const phaser = new Tone.Phaser({ frequency: 0.1 + motion * 1.9, octaves: 2 + amount * 3, baseFrequency: 300, stages: exportGrade ? 10 : 4 });
     phaser.wet.value = Math.min(1, 0.3 + amount * 0.7);
     return {
       nodes: [phaser],
@@ -676,7 +704,7 @@ function applyColorTo(g, track, patch) {
     g.colorTypes[track] = "none";
     return;
   }
-  const made = COLOR_MAKERS[type](patch.amount, patch.motion);
+  const made = COLOR_MAKERS[type](patch.amount, patch.motion, g.exportGrade);
   let prev = g.colorIn[track];
   for (const n of made.nodes) {
     prev.connect(n);
@@ -972,7 +1000,7 @@ export function createAudio(song) {
   // only ever carried silence.
   const RETURN_TAIL_MS = 6000;
   const returns = {
-    verb: { key: "verb", node: live.reverb, parked: false, timer: 0 },
+    verb: { key: "verb", node: live.reverbOut, parked: false, timer: 0 },
     echo: { key: "echo", node: live.echo, parked: false, timer: 0 },
   };
   const anySendOn = (kind) => TRACK_KEYS.some((t) => sendGain(channelState[t][kind]) > 0);
@@ -1597,7 +1625,9 @@ export function createAudio(song) {
         const patchesCopy = structuredClone(patches);
         return Tone.Offline(({ transport: offTr }) => {
           offTr.bpm.value = song.tempo;
-          const g = buildGraph({ meters: false });
+          // Exports render the full chain; opts.graph = "live" exists only
+          // for the measurement probes to cost the live grade offline.
+          const g = buildGraph({ meters: false, exportGrade: opts.graph !== "live" });
           for (const t of TRACK_KEYS) applyPatchTo(g, t, patchesCopy[t]);
           const anySolo = TRACK_KEYS.some((track) => channelState[track].solo);
           for (const k of TRACK_KEYS) {
@@ -1613,7 +1643,7 @@ export function createAudio(song) {
           }
           // The same dry park, statically: sends are fixed for the whole
           // render, so an all-off return never joins the graph at all.
-          if (!TRACK_KEYS.some((k) => g.verbSends[k].gain.value > 0)) g.reverb.disconnect(g.musicDuck);
+          if (!TRACK_KEYS.some((k) => g.verbSends[k].gain.value > 0)) g.reverbOut.disconnect(g.musicDuck);
           if (!TRACK_KEYS.some((k) => g.echoSends[k].gain.value > 0)) g.echo.disconnect(g.musicDuck);
           const vstate = { prev: null };
           let step = 0;
