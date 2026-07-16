@@ -459,6 +459,12 @@ try {
     assertState(about.sections.includes(section), `about guide missing the "${section}" section`);
   }
   assertState(about.hint, "about guide scroll hint missing (or the guide stopped overflowing)");
+  // The buried perf overlay: toggling it in the guide shows and hides the HUD.
+  await clickAction(page, "perf-toggle");
+  await page.waitForSelector("#perf-hud");
+  await clickAction(page, "perf-toggle");
+  const hudGone = await page.evaluate(() => !document.querySelector("#perf-hud") && !localStorage.getItem("noodles:perf-hud"));
+  assertState(hudGone, "perf overlay did not toggle back off");
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
 

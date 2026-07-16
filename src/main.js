@@ -365,6 +365,24 @@ function openAboutSheet() {
     p("File saves the project to a file or keeps it on this device, and exports a WAV — master or four stems — through the exact chain you're hearing. Mic recordings last until the tab closes; save the project to keep everything else."),
 
     p("Made for couches and phone speakers. Tell your friends."),
+
+    el("div", { class: "tfrow" }, [
+      el("div", {
+        class: "tfbtn",
+        text: `perf overlay · ${perfHudOn() ? "on" : "off"}`,
+        "data-action": "perf-toggle",
+        onclick: (e) => {
+          if (perfHudOn()) {
+            stopPerfHud();
+            localStorage.removeItem(PERF_HUD_KEY);
+          } else {
+            startPerfHud();
+            localStorage.setItem(PERF_HUD_KEY, "1");
+          }
+          e.target.textContent = `perf overlay · ${perfHudOn() ? "on" : "off"}`;
+        },
+      }),
+    ]),
   ]);
   sheet.appendChild(body);
   openSheet();
@@ -3179,12 +3197,27 @@ function openExport() {
 // ---------------------------------------------------------------------------
 // Playback → UI sync
 // ---------------------------------------------------------------------------
-// Pull-only perf receipts: load with ?perf to overlay frame and audio-clock
-// health. The A16 gate needs numbers from the couch, not adjectives — pure
-// diagnostics, invisible unless the URL asks.
-if (new URLSearchParams(location.search).has("perf")) {
-  const hud = el("div", { id: "perf-hud", text: "perf…" });
-  document.body.appendChild(hud);
+// Pull-only perf receipts: a bottom-edge overlay with frame and audio-clock
+// health, toggled from the ? page (or forced with ?perf in the URL). The A16
+// gate needs numbers from the couch, not adjectives — pure diagnostics,
+// invisible unless asked for. The toggle persists so it survives reloads
+// mid-investigation.
+const PERF_HUD_KEY = "noodles:perf-hud";
+let perfHudEl = null;
+let perfHudRAF = 0;
+function perfHudOn() {
+  return !!perfHudEl;
+}
+function stopPerfHud() {
+  cancelAnimationFrame(perfHudRAF);
+  perfHudRAF = 0;
+  perfHudEl?.remove();
+  perfHudEl = null;
+}
+function startPerfHud() {
+  if (perfHudEl) return;
+  perfHudEl = el("div", { id: "perf-hud", text: "perf…" });
+  document.body.appendChild(perfHudEl);
   let frames = 0;
   let jank = 0;
   let worst = 0;
@@ -3205,16 +3238,17 @@ if (new URLSearchParams(location.search).has("perf")) {
       const aud = raw ? (raw.currentTime - audioLast) / dt : 0;
       if (raw) audioLast = raw.currentTime;
       const lat = raw ? Math.round(((raw.baseLatency || 0) + (raw.outputLatency || 0)) * 1000) : 0;
-      hud.textContent = `${Math.round(frames / dt)}fps jank${jank} worst${Math.round(worst)}ms · aud×${aud.toFixed(2)} lat${lat}ms ${raw?.state ?? "?"}`;
+      perfHudEl.textContent = `${Math.round(frames / dt)}fps jank${jank} worst${Math.round(worst)}ms · aud×${aud.toFixed(2)} lat${lat}ms ${raw?.state ?? "?"}`;
       frames = 0;
       jank = 0;
       worst = 0;
       winStart = now;
     }
-    requestAnimationFrame(tick);
+    perfHudRAF = requestAnimationFrame(tick);
   };
-  requestAnimationFrame(tick);
+  perfHudRAF = requestAnimationFrame(tick);
 }
+if (new URLSearchParams(location.search).has("perf") || localStorage.getItem(PERF_HUD_KEY) === "1") startPerfHud();
 
 audio.onVisual((e) => {
   if (e.type === "arr") {
