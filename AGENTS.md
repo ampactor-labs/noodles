@@ -98,7 +98,8 @@ Clip = { scene: sceneIndex, start: bar, len: bars }   // references a scene's cl
 Scale-awareness lives here: `CHORDS` is an exported **live binding** (a `let`, not a `const`)
 rebuilt by `setScaleContext(key, scaleName)` — the seven diatonic triads are derived from the
 key + scale, with correct roman-numeral case and names. Harmony is stored as **scale-degree
-indices**, so it follows a key/scale change for free. `scaleNotes(base, rows)` and
+indices**, so it follows a key/scale change for free (plus a per-scene `harmonyOct`, ±1,
+applied at playback after voice leading so chord continuity stays register-independent). `scaleNotes(base, rows)` and
 `snapToScale(midi)` drive the piano roll. `SCALES` has major/minor/dorian/phrygian/lydian/
 mixolydian (all 7-note, so 7 chords each). Also here: `voiceLead`, `sharedTones`, `euclid`,
 the drum-voice metadata, and `makeSong` / `makeScene` / `cloneScene` / `arrangeLength` / `clipAt`.

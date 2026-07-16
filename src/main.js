@@ -356,7 +356,7 @@ function openAboutSheet() {
     p("Arm ● ride in a sound sheet, hit play, and perform: your moves on the pad and knobs are captured to the beat and loop with the clip from then on. Rides live in the scene, save with the project, and play in exports. A clip wearing ∿ has one."),
 
     label("mix"),
-    p("Mix opens the mixer. The fader is the meter: drag the handle to set level, the body glows with loudness, the bright bar is the peak, the tick holds the recent maximum. Verb and echo are sends into a shared room, off by default — turn a knob up to send a track into it."),
+    p("Mix — or a tap on any track name — opens the mixer on that track's strip. The fader is the meter: drag the handle to set level, the body glows with loudness, the bright bar is the peak, the tick holds the recent maximum. Verb and echo are sends into a shared room, off by default — turn a knob up to send a track into it."),
 
     label("arrange"),
     p("View flips to the timeline. Drag clips around, pull a right edge to resize, sweep the strip under the bar numbers to set a loop — tap the loop to switch it on and off. Arm ● in the top bar while you jam: scene changes and your mute moves both write into the timeline, and the hatched bars play silent everywhere, exports included."),
@@ -1430,8 +1430,16 @@ function bindTrackHeader(node, track) {
   });
   node.addEventListener("pointerup", clear);
   node.addEventListener("pointercancel", clear);
-  node.addEventListener("click", () => {
-    if (longPressed) longPressed = false;
+  // Tap = this track's mixer strip, long-press = Track Options. The M/S
+  // buttons keep their own gesture (guarded here because their pointerdown
+  // stopPropagation doesn't reach the separately-dispatched click).
+  node.addEventListener("click", (e) => {
+    if (longPressed) {
+      longPressed = false;
+      return;
+    }
+    if (e.target.closest("[data-track-toggle]")) return;
+    openMixer(track);
   });
 }
 function openTrackOptions(track) {
@@ -1852,7 +1860,7 @@ function buildDrumEditor(scene) {
   const tfd = el("div", { class: "tfrow" }, [
     el("div", {
       class: "tfbtn",
-      text: "Random",
+      text: "🎲",
       onclick: () => {
         pushUndo();
         const dens = { kick: 0.32, snare: 0.14, hat: 0.5, clap: 0.12 };
@@ -2089,10 +2097,15 @@ function buildPianoEditor(sceneIndex, scene, track) {
     }),
     el("div", {
       class: "tfbtn",
-      text: "Random",
+      text: "🎲",
       onclick: () =>
         applyTf(() => {
-          const ns = scaleNotes(cfg.base, cfg.rows);
+          // Roll inside one 2-octave in-scale window (14 notes = base..B+2oct),
+          // placed low for bass and mid for melody — the full cfg.rows range
+          // scattered notes across eight octaves, which never sounded like a
+          // line. Windows sit between octave 2 and octave 5.
+          const base = pick(track === "bass" ? [36, 48] : [48, 60]);
+          const ns = scaleNotes(base, 14);
           for (let s = 0; s < 16; s++) {
             if (Math.random() >= 0.5) {
               lane[s] = null;
@@ -2286,6 +2299,26 @@ function buildPianoEditor(sceneIndex, scene, track) {
 function buildHarmonyEditor(sceneIndex, scene) {
   if (!scene.harmony || scene.harmony.length === 0) scene.harmony = [0, 0, 0, 0];
   let selected = 0;
+  // Whole-clip octave, like the piano editors' Oct buttons but on the scene:
+  // chords are stored as degrees, so the shift lives in playback, not the data.
+  const octLabel = () => `oct ${scene.harmonyOct > 0 ? "+" : ""}${scene.harmonyOct || 0}`;
+  const octVal = el("div", { class: "numval", text: octLabel() });
+  const setOct = async (d) => {
+    const next = Math.max(-1, Math.min(1, (scene.harmonyOct || 0) + d));
+    if (next === scene.harmonyOct) return;
+    pushUndo();
+    scene.harmonyOct = next;
+    octVal.textContent = octLabel();
+    await ensureStarted();
+    audio.preview(scene.harmony[selected], scene.harmonyOct);
+  };
+  sheet.appendChild(
+    el("div", { class: "tfrow" }, [
+      el("div", { class: "tfbtn", text: "Oct−", onclick: () => setOct(-1) }),
+      octVal,
+      el("div", { class: "tfbtn", text: "Oct+", onclick: () => setOct(1) }),
+    ])
+  );
   const scrollContainer = el("div", { class: "editor-scroll" });
   const row = el("div", { class: "chordrow" });
   const slots = scene.harmony.map((ci, idx) => {

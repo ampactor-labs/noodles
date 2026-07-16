@@ -194,6 +194,11 @@ try {
     return Math.max(...(window.__noodles.song.scenes[0].melody[4] || []).map((n) => n.len), 0);
   });
   assertState(dragLen === 4, `press-drag did not stretch the new note to 4 steps (got len ${dragLen})`);
+  // Editor dice: rolled melody notes stay inside a 2-octave in-scale window
+  // between octave 2 and octave 5 (the old roll scattered across ~8 octaves).
+  await page.evaluate(() => [...document.querySelectorAll(".tfbtn")].find((b) => b.textContent === "🎲")?.click());
+  const rolledMidis = await page.evaluate(() => window.__noodles.song.scenes[0].melody.flatMap((slot) => (slot || []).map((n) => n.midi)));
+  assertState(rolledMidis.length > 0 && rolledMidis.every((m) => m >= 36 && m <= 83), `melody dice rolled out of range: ${JSON.stringify(rolledMidis)}`);
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
 
@@ -243,6 +248,16 @@ try {
   assertState(soloed, "arrangement solo button did not toggle");
   await tap(page, '.arr-thead[data-track="drums"] [data-track-toggle="mute"]');
   await tap(page, '.arr-thead[data-track="drums"] [data-track-toggle="solo"]');
+
+  // Tap a track header (outside M/S) → the mixer opens focused on that strip.
+  await page.evaluate(() => {
+    document.querySelector('.arr-thead[data-track="bass"]').dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  });
+  await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Mixer");
+  const focusedStrip = await page.$eval(".mx-strip.focus", (el) => el.dataset.track);
+  assertState(focusedStrip === "bass", `header tap focused strip "${focusedStrip}", wanted bass`);
+  await closeSheet(page);
+  await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
 
   // Loop lane: drag across empty lane space paints a new loop and enables it;
   // a tap on the brace toggles it back off.

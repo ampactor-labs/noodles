@@ -196,6 +196,9 @@ export function normalizeScene(scene) {
   scene.drums = Object.fromEntries(DRUM_VOICES.map((v) => [v, normalizeDrumLane(drums[v])]));
   scene.motion = normalizeMotion(scene.motion);
   scene.steps = normalizeSteps(scene.steps);
+  // ±1 only: at -2 the pad highpass (170 Hz) eats the voicings near-silent,
+  // and a control whose extreme sounds broken is a hard wall in disguise.
+  scene.harmonyOct = Math.max(-1, Math.min(1, Math.round(Number(scene.harmonyOct) || 0)));
   return scene;
 }
 
@@ -215,6 +218,7 @@ export function makeScene(harmony, drums, melody = null, bass = null, motion = n
     bass: normalizeNoteLane(bass),
     motion: normalizeMotion(motion),
     steps: normalizeSteps(steps),
+    harmonyOct: 0, // whole-clip octave for the chord track (piano lanes shift per note instead)
   };
   scene.launch = cloneLaunch();
   return scene;
@@ -297,6 +301,7 @@ export function makeMagicScene() {
 export function cloneScene(scene) {
   const cloned = makeScene(scene.harmony, scene.drums, scene.melody, scene.bass, scene.motion, scene.steps);
   cloned.launch = cloneLaunch(scene.launch);
+  cloned.harmonyOct = scene.harmonyOct || 0;
   return cloned;
 }
 

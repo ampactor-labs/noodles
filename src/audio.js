@@ -717,11 +717,16 @@ function eachActiveLayer(g, track, patch, fn) {
   for (const { i } of activeLayerWeights(patch)) fn(g.layers[track][i]);
 }
 
-function playChordOn(g, patches, vstate, ci, time) {
+// oct is the clip's whole-octave shift. It lands AFTER voice leading (prev
+// stays register-independent) and moves the pad and its halo together; the
+// low root hint stays anchored — it is the harmonic glue under the chord,
+// and bass owns the register it would otherwise wander into.
+function playChordOn(g, patches, vstate, ci, time, oct = 0) {
   const voiced = voiceLead(CHORDS[ci].pcs, vstate.prev);
   vstate.prev = voiced;
-  eachActiveLayer(g, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(voiced.map(midiToFreq), "1n", time));
-  g.halo.triggerAttackRelease(midiToFreq(Math.max(...voiced) + 12), "1n", time);
+  const shift = 12 * oct;
+  eachActiveLayer(g, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(voiced.map((m) => midiToFreq(m + shift)), "1n", time));
+  g.halo.triggerAttackRelease(midiToFreq(Math.max(...voiced) + 12 + shift), "1n", time);
   g.sub.triggerAttackRelease(midiToFreq(48 + CHORDS[ci].pcs[0]), "1n", time);
 }
 
@@ -839,7 +844,7 @@ function playArrangementStepOn(g, patches, vstate, song, bar, stepInBar, time) {
       const sc = song.scenes[h.scene];
       if (sc?.harmony?.length) {
         chord = sc.harmony[(bar - h.start) % sc.harmony.length];
-        playChordOn(g, patches, vstate, chord, time);
+        playChordOn(g, patches, vstate, chord, time, sc.harmonyOct || 0);
       }
     }
   }
@@ -959,12 +964,13 @@ export function createAudio(song) {
       lanes[param][step % lanes[param].length] = patches[track][param];
     }
   }
-  const playChord = (ci, time) => playChordOn(live, patches, liveVoice, ci, time);
+  const playChord = (ci, time, oct) => playChordOn(live, patches, liveVoice, ci, time, oct);
   const playNoteStack = (track, slot, time) => playNoteStackOn(live, patches, track, slot, time);
   const hitDrum = (v, time, vel) => hitDrumOn(live, patches, v, time, vel);
-  function preview(ci) {
+  function preview(ci, oct = 0) {
     const voiced = voiceLead(CHORDS[ci].pcs, liveVoice.prev);
-    eachActiveLayer(live, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(voiced.map(midiToFreq), "2n", Tone.now()));
+    const shift = 12 * oct;
+    eachActiveLayer(live, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(voiced.map((m) => midiToFreq(m + shift)), "2n", Tone.now()));
     live.sub.triggerAttackRelease(midiToFreq(48 + CHORDS[ci].pcs[0]), "2n", Tone.now());
   }
 
@@ -1139,7 +1145,7 @@ export function createAudio(song) {
       visualBar = bar;
       if (stepInBar === 0) {
         const ci = harmonyScene.harmony[bar];
-        playChord(ci, time);
+        playChord(ci, time, harmonyScene.harmonyOct || 0);
         scheduleVisual(() => visualCb({ type: "chord", scene: harmonyState.scene, bar, chord: ci, activeScenes: activeBefore }), time);
       }
     }
@@ -1298,9 +1304,9 @@ export function createAudio(song) {
     setSwing() {
       // Global groove lives on song.swing and is read live per trigger.
     },
-    preview(ci) {
+    preview(ci, oct = 0) {
       wakeContext();
-      preview(ci);
+      preview(ci, oct);
     },
     previewHit(v) {
       wakeContext();
