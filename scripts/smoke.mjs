@@ -312,8 +312,14 @@ try {
     brace.dispatchEvent(new PointerEvent("pointerdown", opts(r.left + 10)));
     document.querySelector(".arr-looplane").dispatchEvent(new PointerEvent("pointermove", opts(innerWidth - 8)));
   });
-  await wait(500);
-  const panned = await page.evaluate(() => document.querySelector(".arr-scroll").scrollLeft);
+  // The pan is rAF-driven, and on a loaded box headless frames can stall past
+  // any fixed sleep (a 500 ms wait here flaked). Poll for the first moved
+  // pixel instead — the assertion still demands the auto-pan actually pans.
+  let panned = 0;
+  for (let i = 0; i < 30 && panned === 0; i++) {
+    await wait(150);
+    panned = await page.evaluate(() => document.querySelector(".arr-scroll").scrollLeft);
+  }
   await page.evaluate(() => {
     document.querySelector(".arr-looplane").dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 9 }));
   });
