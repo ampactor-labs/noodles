@@ -238,7 +238,6 @@ try {
       { label: "center", x: 0.5, y: 0.5, color: "none" },
       { label: "edge-right", x: 1, y: 0.5, color: "none" },
       { label: "edge-bottom", x: 0.5, y: 1, color: "none" },
-      { label: "tape", x: 0.5, y: 0.5, color: "tape", amount: 0.7, motion: 0.4 },
       { label: "crush", x: 0.5, y: 0.5, color: "crush", amount: 0.6, motion: 0.5 },
       { label: "phase", x: 0.25, y: 0.75, color: "phase", amount: 0.7, motion: 0.5 },
       { label: "trem", x: 0.75, y: 0.25, color: "trem", amount: 0.7, motion: 0.6 },
@@ -248,7 +247,10 @@ try {
     for (const t of ["harmony", "bass", "melody", "drums"]) {
       const rows = {};
       for (const spec of SPACE_SPECS) {
-        audio.setPatch(t, { x: spec.x, y: spec.y, color: spec.color, amount: spec.amount ?? 0.5, motion: spec.motion ?? 0.5 });
+        // Color sets are per track now; the engine coerces a color a track
+        // refuses to "none", so measure only what actually applied.
+        const applied = audio.setPatch(t, { x: spec.x, y: spec.y, color: spec.color, amount: spec.amount ?? 0.5, motion: spec.motion ?? 0.5 });
+        if (applied.color !== spec.color) continue;
         rows[spec.label] = await render(t);
       }
       audio.setPatch(t, { x: 0, y: 0, color: "none", amount: 0.5, motion: 0.5 });

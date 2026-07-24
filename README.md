@@ -37,7 +37,8 @@ editors (a chord picker, a drum rack, and two piano rolls), each with a
 velocity lane. A vertical mixer: fader, pan, reverb and echo sends, live
 meters with peak hold, and a device per track that goes deeper than a preset
 list. The four preset names are corners of an XY morph pad (tap "sound" on
-any strip), with a color slot (tape, crush, phase, trem, wob), amount and
+any strip), with a color slot (crush, phase, trem, wob; drums take crush
+only — tape saturation lives on the master bus), amount and
 motion knobs, and a per-track sound dice. Drums play real one-shots by
 default: four sampled kits (street, warm, dusty, 808) synthesized offline by
 `npm run samples` and bundled, morphable on the same pad, with a per-voice

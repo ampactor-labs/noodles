@@ -12,8 +12,12 @@
 // one per preset corner, each keeping its own oscillator and envelope. A patch
 // is a point {x, y} between the corners — bilinear weights set layer levels
 // (equal-power) and blend the shared tone controls (filter, drive, chorus).
-// On top sits one color insert (tape/crush/phase/trem/wob) with amount +
-// motion, motion rates quantized to tempo divisions. Corners are loudness-
+// On top sits one color insert (crush/phase/trem/wob; drums allow crush
+// only) with amount + motion, motion rates quantized to tempo divisions.
+// Tape saturation is the master bus's job (the SAT stage below) — a per-track
+// copy paid a full-time Vibrato per track for character the bus already
+// supplies, so it was retired and the headroom spent on the bus itself.
+// Corners are loudness-
 // matched by measurement (npm run calibrate), the space between inherits it,
 // and the per-track lane filters stay outside the explorable space — so any
 // point a finger or a dice can reach is already mixed.
@@ -198,7 +202,19 @@ const MELODY_PRESETS = {
 export const MELODY_PRESET_NAMES = Object.keys(MELODY_PRESETS);
 
 const PRESET_TABLES = { harmony: HARMONY_PRESETS, bass: BASS_PRESETS, melody: MELODY_PRESETS };
-export const COLOR_NAMES = ["none", "tape", "crush", "phase", "trem", "wob"];
+// Per-track color sets. Drums keep crush only: pitch/filter modulation (wob,
+// trem, phase) smears transients that ARE the drum, and "tape" is gone
+// everywhere (see the header note — the master saturator owns that job).
+// normalizePatch coerces anything outside a track's set to "none", which is
+// also how old saved projects with retired colors load clean.
+export const COLOR_NAMES = ["none", "crush", "phase", "trem", "wob"];
+export const TRACK_COLORS = {
+  harmony: COLOR_NAMES,
+  drums: ["none", "crush"],
+  bass: COLOR_NAMES,
+  melody: COLOR_NAMES,
+};
+export const colorNamesFor = (track) => TRACK_COLORS[track] || COLOR_NAMES;
 
 // Tight, dead kits — funk / UK garage register (short decays, damped).
 const KITS = {
@@ -362,7 +378,7 @@ const clamp01 = (v) => Math.max(0, Math.min(1, Number(v) || 0));
 
 function normalizePatch(track, raw = {}) {
   const p = { ...defaultPatch(track), ...raw };
-  p.color = COLOR_NAMES.includes(p.color) ? p.color : "none";
+  p.color = colorNamesFor(track).includes(p.color) ? p.color : "none";
   p.amount = clamp01(p.amount);
   p.motion = clamp01(p.motion);
   p.x = clamp01(p.x);
@@ -904,16 +920,6 @@ const motionHz = (motion) => {
 // export must stay identical to the live app. Each maker returns
 // { nodes: [...serial chain...], updateColor(amount, motion) }.
 const COLOR_MAKERS = {
-  tape(amount, motion) {
-    const vib = new Tone.Vibrato({ frequency: 0.4 + motion * 4.6, depth: 0.03 + amount * 0.22 });
-    return {
-      nodes: [vib],
-      updateColor: (a, m) => {
-        vib.frequency.value = 0.4 + m * 4.6;
-        vib.depth.value = 0.03 + a * 0.22;
-      },
-    };
-  },
   crush(amount) {
     // Waveshaper quantizer: bit depth from amount (8 -> 3 bits). No sample-
     // rate reduction, but cheap, deterministic, and offline-safe.
@@ -970,10 +976,22 @@ const COLOR_MAKERS = {
   },
 };
 
+// Crush bites half as deep outside the drum track: a full sweep (8 → 3 bits)
+// erases pitched material long before it erases a drum hit, so drums keep the
+// whole range and the melodic tracks stop at 5.5 bits — the knob still sweeps
+// 0..1, the range underneath it is halved.
+const colorAmount = (track, type, amount) => (type === "crush" && track !== "drums" ? amount * 0.5 : amount);
+
+// The one path to a live color node's knobs — both appliers and the tempo
+// re-sync go through here so the per-track crush depth can't be skipped.
+function updateColorNode(g, track, patch) {
+  g.colorNodes[track]?.updateColor(colorAmount(track, g.colorTypes[track], patch.amount), patch.motion);
+}
+
 function applyColorTo(g, track, patch) {
   const type = patch.color;
   if (g.colorTypes[track] === type) {
-    g.colorNodes[track]?.updateColor(patch.amount, patch.motion);
+    updateColorNode(g, track, patch);
     return;
   }
   g.colorIn[track].disconnect();
@@ -987,7 +1005,7 @@ function applyColorTo(g, track, patch) {
     g.colorTypes[track] = "none";
     return;
   }
-  const made = COLOR_MAKERS[type](patch.amount, patch.motion, g.exportGrade);
+  const made = COLOR_MAKERS[type](colorAmount(track, type, patch.amount), patch.motion, g.exportGrade);
   let prev = g.colorIn[track];
   for (const n of made.nodes) {
     prev.connect(n);
@@ -1783,7 +1801,7 @@ export function createAudio(song) {
       transport.bpm.rampTo(bpm, 0.1);
       syncEcho(bpm);
       // Tempo-synced colors (trem/wob) chase the new grid.
-      for (const t of TRACK_KEYS) live.colorNodes[t]?.updateColor?.(patches[t].amount, patches[t].motion);
+      for (const t of TRACK_KEYS) updateColorNode(live, t, patches[t]);
     },
     setSwing() {
       // Global groove lives on song.swing and is read live per trigger.

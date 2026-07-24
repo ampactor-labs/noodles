@@ -360,9 +360,9 @@ try {
   await wait(200);
   const morphed = await page.evaluate(() => window.__noodles.audio.patch("bass"));
   assertState(Math.abs(morphed.x - 0.5) < 0.1 && Math.abs(morphed.y - 0.5) < 0.1, `xy pad tap did not morph to center: ${JSON.stringify(morphed)}`);
-  await clickAction(page, "color-tape");
+  await clickAction(page, "color-phase");
   const colored = await page.evaluate(() => window.__noodles.audio.patch("bass").color);
-  assertState(colored === "tape", `color chip did not apply (got ${colored})`);
+  assertState(colored === "phase", `color chip did not apply (got ${colored})`);
   await clickAction(page, "sound-dice-bass");
   const rolled = await page.evaluate(() => window.__noodles.audio.patch("bass"));
   assertState(
@@ -370,6 +370,20 @@ try {
     `sound dice rolled out of range: ${JSON.stringify(rolled)}`
   );
   await page.evaluate(() => window.__noodles.audio.setPatch("bass", { x: 0, y: 0, color: "none" }));
+  // Per-track color sets: the drum sound page offers none + crush only, and
+  // the engine coerces a retired color instead of taking it.
+  await closeSheet(page);
+  await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
+  await tap(page, '.arr-thead[data-track="drums"]');
+  await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Sound");
+  const drumColors = await page.$$eval("[data-action^='color-']", (els) => els.map((e) => e.dataset.action.slice(6)));
+  assertState(drumColors.join(",") === "none,crush", `drum color set is ${drumColors.join(",")}`);
+  const drumWob = await page.evaluate(() => window.__noodles.audio.setPatch("drums", { color: "wob" }).color);
+  assertState(drumWob === "none", `drums accepted a retired color (got ${drumWob})`);
+  await closeSheet(page);
+  await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
+  await tap(page, '.arr-thead[data-track="bass"]');
+  await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Sound");
   // Motion capture: arm the bass, play, ride the pad via setPatch, and some
   // playing scene must grow an x lane with real variety in it.
   await page.evaluate(() => window.__noodles.audio.armMotion("bass", true));

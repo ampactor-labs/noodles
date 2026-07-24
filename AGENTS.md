@@ -139,7 +139,8 @@ kit is MembraneSynth kick + filtered-noise snare/hat/clap. Each track's device i
 **morph**: four synth layers (one per preset corner, oscillator + envelope fixed) crossfaded
 by a patch `{x, y}` with equal-power bilinear weights, shared tone controls blended; drums
 morph by blending kit scalars directly. Plus one **color** insert per track
-(tape/crush/phase/trem/wob) with amount + motion, motion rates tempo-synced. Preset *names*
+(crush/phase/trem/wob; drums allow crush only, and crush runs at half depth on the melodic
+tracks) with amount + motion, motion rates tempo-synced. Preset *names*
 are the corners, and the old preset API snaps to them and reads back the dominant one. The
 corner tables carry **measured** gain trims and the morph space inherits them. Run
 `npm run calibrate` before and after changing corners, colors, or the chain; per-track

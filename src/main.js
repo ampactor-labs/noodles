@@ -26,7 +26,7 @@ import {
   makeMagicScene,
   stepsFor,
 } from "./model.js";
-import { createAudio, KIT_NAMES, SAMPLE_KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, COLOR_NAMES, DRUM_BANKS, drumCornerNames } from "./audio.js";
+import { createAudio, KIT_NAMES, SAMPLE_KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, colorNamesFor, DRUM_BANKS, drumCornerNames } from "./audio.js";
 
 // Pitch range shown in the piano roll, per track.
 const PIANO = { melody: { base: 12, rows: 56 }, bass: { base: 12, rows: 56 } };
@@ -97,11 +97,12 @@ const SYNC_NUDGE_KEY = "noodles:sync-nudge";
 let syncNudgeMs = Math.max(-250, Math.min(250, Number(localStorage.getItem(SYNC_NUDGE_KEY)) || 0));
 audio.setSyncNudge(syncNudgeMs);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-// A rolled sound is any point in the track's morph space plus a color, with
-// "none" weighted so a full-song roll doesn't stack four effects at once.
-const COLOR_POOL = ["none", "none", "tape", "crush", "phase", "trem", "wob"];
+// A rolled sound is any point in the track's morph space plus a color drawn
+// from that track's own set, with "none" weighted double so a full-song roll
+// doesn't stack four effects at once.
+const colorPool = (track) => ["none", ...colorNamesFor(track)];
 function rolledPatch(track) {
-  const p = { x: Math.random(), y: Math.random(), color: pick(COLOR_POOL), amount: 0.3 + Math.random() * 0.55, motion: Math.random() };
+  const p = { x: Math.random(), y: Math.random(), color: pick(colorPool(track)), amount: 0.3 + Math.random() * 0.55, motion: Math.random() };
   if (track === "drums") {
     // The sample bank is the star; the synth kit stays in rotation.
     p.bank = Math.random() < 0.7 ? "sample" : "synth";
@@ -370,7 +371,7 @@ function openAboutSheet() {
     p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key. Chords: pick from the seven that fit, colored by their job. − / + shortens a clip's loop; a 12-step line against 16-step drums drifts in and out of phase on purpose. ◧ zooms the note grid when your thumbs need bigger targets."),
 
     label("sound"),
-    p("Tap a track's name — or ✦ on its mixer strip — to open its sound: a morph pad with four sounds in the corners, everything between them yours to find. Add one color — tape, crush, phase, trem, wob — with its own amount and motion. Pocket swings that one track against the global GROOVE. Drums come in two banks, sampled kits and a synth kit, and every drum can pin a one-shot, load a WAV, or 🎙 record your own mouth."),
+    p("Tap a track's name — or ✦ on its mixer strip — to open its sound: a morph pad with four sounds in the corners, everything between them yours to find. Add one color — crush, phase, trem, wob; drums take crush — with its own amount and motion. Pocket swings that one track against the global GROOVE. Drums come in two banks, sampled kits and a synth kit, and every drum can pin a one-shot, load a WAV, or 🎙 record your own mouth."),
 
     label("ride"),
     p("Arm ● ride in a sound sheet, hit play, and perform: your moves on the pad and knobs are captured to the beat and loop with the clip from then on. Rides live in the scene, save with the project, and play in exports. A clip wearing ∿ has one."),
@@ -1814,7 +1815,7 @@ function openSoundSheet(track) {
 
   const chips = el("div", { class: "choicegrid six" });
   const chipEls = {};
-  for (const c of COLOR_NAMES) {
+  for (const c of colorNamesFor(track)) {
     chipEls[c] = choice(c, patch.color === c, () => {
       const next = audio.setPatch(track, { color: c });
       for (const [name, elc] of Object.entries(chipEls)) elc.classList.toggle("on", name === next.color);
