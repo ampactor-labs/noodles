@@ -1084,7 +1084,10 @@ function clockPump() {
     let barF = (now - arrAnchor.start) / arrAnchor.barSec;
     const lp = arrAnchor.loop;
     if (lp && barF >= lp.end) barF = lp.start + ((barF - lp.start) % (lp.end - lp.start));
-    barF = Math.max(0, Math.min(barF, arrAnchor.len));
+    // The clamp bounds runaway extrapolation, not the loop: a loop dragged
+    // past the last clip ends in empty grid the transport still traverses,
+    // so the ceiling is whichever is further — content or loop end.
+    barF = Math.max(0, Math.min(barF, lp ? Math.max(arrAnchor.len, lp.end) : arrAnchor.len));
     const x = Math.round(barF * ppb * 4) / 4; // quarter-pixel steps, skip no-op writes
     if (arrPlayhead.__x !== x) {
       arrPlayhead.__x = x;
@@ -2708,7 +2711,9 @@ function buildArrClip(track, idx, clip, color) {
 
 function renderArrangement() {
   ensureArrShell();
-  const totalBars = arrangeLength(song) + 4;
+  // The grid covers the loop even when it reaches past the last clip — the
+  // transport plays that empty space, so the ruler and lanes must exist there.
+  const totalBars = Math.max(arrangeLength(song), song.loop ? song.loop.start + song.loop.len : 0) + 4;
   // Adaptive grid: reveal beats, then 16ths, as the bar gets wide enough to
   // read them; keep ruler numbers from crowding at the same time.
   const grid = ppb / 16 >= 7 ? "g-16" : ppb / 4 >= 13 ? "g-beats" : "g-bars";
