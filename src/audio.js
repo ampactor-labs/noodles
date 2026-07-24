@@ -1346,7 +1346,11 @@ export function createAudio(song) {
       if (ev.time <= heard) {
         visualQueue.splice(i, 1);
         // Stale events (tab was hidden, rAF paused) get dropped, not replayed.
-        if (heard - ev.time < 1) ev.cb();
+        // Time 0 is exempt: it means "immediate UI feedback, next frame" —
+        // the launch/queue/stop paints — and the stale test read every one of
+        // them as a second-old event once the clock passed 1 s, which is why
+        // a queued tap only showed up when the next step event repeated it.
+        if (ev.time === 0 || heard - ev.time < 1) ev.cb();
       } else i++;
     }
     if (visualQueue.length) visualRAF = requestAnimationFrame(pumpVisuals);
@@ -1528,6 +1532,12 @@ export function createAudio(song) {
   const trackState = Object.fromEntries(TRACK_KEYS.map((track) => [track, { scene: 0, step: 0, total: 0, active: true }]));
   let arrStep = 0;
   const queuedTracks = Object.fromEntries(TRACK_KEYS.map((track) => [track, -1]));
+  // Queue-state generation. Visual events carry the epoch their queuedTracks
+  // snapshot was taken at, and the UI drops older-epoch snapshots: an
+  // immediate queue paint fires next frame, while step events scheduled
+  // BEFORE the tap are still in flight behind the 0.25 s lookahead — without
+  // the epoch they land after it and flicker the fresh state back off.
+  let queueEpoch = 0;
   let visualCb = () => {};
 
   transport.bpm.value = song.tempo;
@@ -1665,12 +1675,15 @@ export function createAudio(song) {
     }
 
     if (!anyActive || maxStep === 0) {
+      let consumed = false;
       for (const track of TRACK_KEYS) {
         if (queuedTracks[track] >= 0) {
           resetTrack(track, queuedTracks[track]);
           queuedTracks[track] = -1;
+          consumed = true;
         }
       }
+      if (consumed) queueEpoch += 1;
     }
 
     const activeBefore = activeScenes();
@@ -1721,7 +1734,8 @@ export function createAudio(song) {
 
     const anchorsCurrent = trackLoopAnchors(time);
     const queuedCurrent = getQueuedTracks();
-    scheduleVisual(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeBefore, queuedTracks: queuedCurrent, anchors: anchorsCurrent }), time);
+    const epochCurrent = queueEpoch;
+    scheduleVisual(() => visualCb({ type: "step", scene: curScene, localStep: visualBar * 16 + visualStep, stepInBar: visualStep, bar: visualBar, activeScenes: activeBefore, queuedTracks: queuedCurrent, queueEpoch: epochCurrent, anchors: anchorsCurrent }), time);
     for (const track of TRACK_KEYS) advanceSceneTrack(track);
   }, "16n");
 
@@ -1803,7 +1817,8 @@ export function createAudio(song) {
       liveVoice.prev = null;
       parkContextSoon();
       for (const track of TRACK_KEYS) queuedTracks[track] = -1; // clear queues on stop
-      scheduleVisual(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }));
+      queueEpoch += 1;
+      scheduleVisual(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks(), queueEpoch }));
     },
     get playing() {
       return playing;
@@ -1815,12 +1830,14 @@ export function createAudio(song) {
         curScene = index;
         for (const track of TRACK_KEYS) resetTrack(track, index);
         for (const track of TRACK_KEYS) queuedTracks[track] = -1;
-        scheduleVisual(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }));
+        queueEpoch += 1;
+        scheduleVisual(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes(), queuedTracks: getQueuedTracks(), queueEpoch }));
         this.play();
       } else {
         curScene = index;
         for (const track of TRACK_KEYS) queuedTracks[track] = index;
-        scheduleVisual(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }));
+        queueEpoch += 1;
+        scheduleVisual(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks(), queueEpoch }));
       }
     },
     launchClip(index, track) {
@@ -1831,11 +1848,13 @@ export function createAudio(song) {
         for (const key of TRACK_KEYS) trackState[key].active = false;
         for (const key of TRACK_KEYS) queuedTracks[key] = -1;
         resetTrack(track, index);
-        scheduleVisual(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }));
+        queueEpoch += 1;
+        scheduleVisual(() => visualCb({ type: "step", scene: index, localStep: 0, stepInBar: 0, bar: 0, activeScenes: activeScenes(), queuedTracks: getQueuedTracks(), queueEpoch }));
         this.play();
       } else {
         queuedTracks[track] = index;
-        scheduleVisual(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks() }));
+        queueEpoch += 1;
+        scheduleVisual(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks(), queueEpoch }));
       }
     },
     playArrangement(fromBar = 0) {

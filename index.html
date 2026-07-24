@@ -409,13 +409,30 @@
         0%, 100% { opacity: 0.65; }
         50%       { opacity: 0.25; }
       }
+      /* Queued = a steady amber ring + triangle; the PULSE is the clock's,
+         not CSS's: the step events toggle .qblink on #session at the quarter
+         note (pinned to the heard beat), so the blink sits on the grid and
+         lands exactly until the launch boundary flips queued to playing.
+         The old free-running 0.9s opacity animation dimmed the whole clip,
+         repainted it every frame, and restarted mid-phase on any re-render. */
       .scenecell.queued .tri {
         color: #e8b84b;
-        animation: queued-pulse 0.9s ease-in-out infinite;
+        transition: opacity 0.09s ease;
       }
       .clip.queued {
         box-shadow: 0 0 0 2px #e8b84b inset;
-        animation: queued-pulse 0.9s ease-in-out infinite;
+        transition: box-shadow 0.09s ease;
+      }
+      .clip.queued .tri {
+        color: #e8b84b;
+        transition: opacity 0.09s ease;
+      }
+      #session.qblink .clip.queued {
+        box-shadow: 0 0 0 2px rgba(232, 184, 75, 0.35) inset;
+      }
+      #session.qblink .scenecell.queued .tri,
+      #session.qblink .clip.queued .tri {
+        opacity: 0.35;
       }
       .clip {
         position: relative;

@@ -888,8 +888,13 @@ function bindSceneCell(launch, sceneIndex) {
   launch.addEventListener("click", async () => {
     if (longPress) return;
     await ensureStarted();
+    // While playing, a launch only QUEUES — the engine's queue event paints
+    // the queued state next frame and the boundary tick flips it to playing.
+    // Marking it playing here painted the new scene green a bar early, then
+    // the next step event snapped it back: the launch-flash bug.
+    const wasPlaying = audio.playing;
     audio.launchScene(sceneIndex);
-    setPlaying(sceneIndex);
+    if (!wasPlaying) setPlaying(sceneIndex);
     updatePlayBtn(true);
   });
 }
@@ -1106,7 +1111,12 @@ function applyPlaying() {
   });
 }
 
-function applyQueued(qt) {
+let lastQueueEpoch = -1;
+function applyQueued(qt, epoch = Infinity) {
+  // Snapshots still in flight behind the visual lookahead arrive AFTER a
+  // fresher immediate event; the epoch keeps old data from flickering it off.
+  if (epoch < lastQueueEpoch) return;
+  lastQueueEpoch = epoch === Infinity ? lastQueueEpoch : epoch;
   const key = TRACKS.map((t) => qt?.[t.key] ?? -1).join(",");
   if (key === lastQueuedKey) return;
   lastQueuedKey = key;
@@ -1272,10 +1282,14 @@ function openClipProps(sceneIndex, track) {
           await ensureStarted();
           const wasPlaying = audio.playing;
           audio.launchClip(sceneIndex, track);
-          if (!wasPlaying) for (const t of TRACKS) playingTracks[t.key] = -1;
-          playingTracks[track] = sceneIndex;
+          // Same rule as a scene launch: playing means QUEUED — the engine's
+          // queue event paints it, and the boundary flips it to playing.
+          if (!wasPlaying) {
+            for (const t of TRACKS) playingTracks[t.key] = -1;
+            playingTracks[track] = sceneIndex;
+            applyPlaying();
+          }
           updatePlayBtn(true);
-          applyPlaying();
         },
       }),
       el("div", { class: "tfbtn", text: "Edit", onclick: () => openEditor(sceneIndex, track) }),
@@ -3544,7 +3558,7 @@ audio.onVisual((e) => {
   if (e.activeScenes) setActiveTracks(e.activeScenes);
   else if (e.scene !== undefined && e.scene !== playingScene) setPlaying(e.scene);
   // Always sync queued state from audio engine
-  if (e.queuedTracks !== undefined) applyQueued(e.queuedTracks);
+  if (e.queuedTracks !== undefined) applyQueued(e.queuedTracks, e.queueEpoch);
   
   if (e.type === "step") {
     if (sessionRecord && audio.playing && e.stepInBar === 0 && view === "session") {
@@ -3593,6 +3607,12 @@ audio.onVisual((e) => {
       arrAnchor = null; // scene mode owns the pump; don't crawl a stale playhead
       if (!clockPumpRAF) clockPumpRAF = requestAnimationFrame(clockPump);
     }
+
+    // The queued pulse blinks ON the grid: this event is pinned to the heard
+    // beat (scheduleVisual), so toggling here puts the blink at the quarter-
+    // note boundary instead of a free-running CSS animation that restarts
+    // wherever a repaint catches it.
+    sessionEl.classList.toggle("qblink", e.stepInBar % 4 < 2);
 
     editor?.moveCursor?.(e.stepInBar);
   }
