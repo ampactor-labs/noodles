@@ -245,23 +245,28 @@ try {
     return t && t.width > 0 && s && s.width > 0 && w && w.width > 0;
   });
   // The wheel is the palette: a strum across it paints bars in a row. Slots
-  // are pre-set to the dim degree, which no OUTER wedge can write — so the
-  // strum's writes can never all no-op into a false failure.
+  // pre-set to the dim degree (no outer wedge writes it), and the strum runs
+  // stations H+3..H+5 — always outside the sector, and never near the door
+  // knob, whose 15 px zone caught a station-0 strum whenever the rolled key
+  // put an inner-ring home there (A minor, E dorian: three flakes' worth).
   const strummed = await page.evaluate(() => {
-    const dim = window.__noodlesTone && window.__noodles.song.scenes[0].harmony.map(() => 6);
-    window.__noodles.song.scenes[0].harmony = dim || [6, 6, 6, 6];
+    window.__noodles.song.scenes[0].harmony = window.__noodles.song.scenes[0].harmony.map(() => 6);
     const canvas = document.querySelector("#sheet .circle-canvas");
     const r = canvas.getBoundingClientRect();
     const before = JSON.stringify(window.__noodles.song.scenes[0].harmony);
-    const pt = (deg) => ({
-      x: r.left + r.width / 2 + Math.cos((deg * Math.PI) / 180) * (r.width / 2) * 0.62,
-      y: r.top + r.height / 2 + Math.sin((deg * Math.PI) / 180) * (r.height / 2) * 0.62,
-    });
+    const H = window.__noodlesCircle.home();
+    const at = (station) => {
+      const a = (station * Math.PI) / 6 - Math.PI / 2;
+      return {
+        x: r.left + r.width / 2 + Math.cos(a) * (r.width / 2) * 0.66,
+        y: r.top + r.height / 2 + Math.sin(a) * (r.height / 2) * 0.66,
+      };
+    };
     const o = (p, id) => ({ bubbles: true, cancelable: true, pointerId: id, pointerType: "touch", clientX: p.x, clientY: p.y });
-    canvas.dispatchEvent(new PointerEvent("pointerdown", o(pt(-90), 81)));
-    canvas.dispatchEvent(new PointerEvent("pointermove", o(pt(-60), 81)));
-    canvas.dispatchEvent(new PointerEvent("pointermove", o(pt(-30), 81)));
-    canvas.dispatchEvent(new PointerEvent("pointerup", o(pt(-30), 81)));
+    canvas.dispatchEvent(new PointerEvent("pointerdown", o(at(H + 3), 81)));
+    canvas.dispatchEvent(new PointerEvent("pointermove", o(at(H + 4), 81)));
+    canvas.dispatchEvent(new PointerEvent("pointermove", o(at(H + 5), 81)));
+    canvas.dispatchEvent(new PointerEvent("pointerup", o(at(H + 5), 81)));
     return before !== JSON.stringify(window.__noodles.song.scenes[0].harmony);
   });
   assertState(strummed, "the editor wheel's strum wrote no bars");
