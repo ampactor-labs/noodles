@@ -426,15 +426,6 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
       const p = polar(angleOf(station) + STEP * 0.3, ring === "outer" ? R_OUT - 0.05 : R_MID - 0.05);
       sctx.fillText(EXT_PADS[sel].id, p.x, p.y);
     }
-
-    // Grab dots on the sector's rim span.
-    sctx.fillStyle = "rgba(232,184,75,0.8)";
-    for (const off of [-0.3, 0, 0.3]) {
-      const p = polar(angleOf(H) + off * STEP, (R_OUT + R_RIM) / 2 + 0.06);
-      sctx.beginPath();
-      sctx.arc(p.x, p.y, size * 0.006, 0, TAU);
-      sctx.fill();
-    }
   }
 
   // --- Dynamic layer ---
@@ -1056,6 +1047,12 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
 
   function refreshStatic() {
     rebuildWedges();
+    // The trail is a memory of what was just played; every caller of this
+    // is a harmonic-context rewrite (key/scale/mode commit, dice, undo,
+    // project load, sheet reopen), after which the old line connects wedges
+    // that no longer mean what they meant. Forget it; playback regrows it
+    // within a bar.
+    trail.length = 0;
     if (size) paintStatic();
     if (open) {
       if (raf) cancelAnimationFrame(raf);

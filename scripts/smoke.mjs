@@ -347,24 +347,58 @@ try {
     return { left: r.left, top: r.top, a: C.point("outer", H), b: C.point("outer", (H + 1) % 12), c: C.point("outer", (H + 3) % 12), rim: C.rimPoint(H), rim2: C.rimPoint((H + 1) % 12) };
   });
   const cPoint = (p) => [circleGeom.left + p.x, circleGeom.top + p.y];
-  const readHarmony = () => page.evaluate(() => JSON.stringify(window.__noodles.song.scenes[0].harmony));
+  // Pre-set every scene's harmony to a nonsense BORROWED entry no diatonic
+  // tap can ever equal. A degree pre-set can tie: in every minor key the
+  // outer H+1 wedge IS degree 6, so 6s let tap-b write the pre-set value
+  // straight back over tap-a's slot — net zero, three "flakes" of it. A
+  // {pcs} sentinel never equals a degree write, so two sector taps always
+  // leave a visible change, in whichever scene is playing.
+  const readHarmony = () => page.evaluate(() => window.__noodles.song.scenes.map((sc) => JSON.stringify(sc.harmony)).join("|"));
+  await page.evaluate(() => {
+    for (const sc of window.__noodles.song.scenes) if (sc.harmony?.length) sc.harmony = sc.harmony.map(() => ({ pcs: [1, 2, 3] }));
+  });
   const harmonyBefore = await readHarmony();
+  // Armed taps write into the PLAYING clip, and the cold open rolls launch
+  // modes per clip — a one-shot harmony clip plays once and its track goes
+  // silent while the transport runs on (forensics: taps hit the wheel
+  // dead-on, armed, with nowhere to land). Pin scene 0 to loop/none, then
+  // relaunch it (quantized) and wait for its playing badge.
+  await page.evaluate(() => {
+    const sc = window.__noodles.song.scenes[0];
+    sc.launch ||= {};
+    for (const t of ["harmony", "drums", "bass", "melody"]) {
+      sc.launch[t] = { ...(sc.launch[t] || {}), mode: "loop", follow: "none" };
+    }
+    window.__noodles.audio.launchScene(0);
+  });
+  await page.waitForFunction(() => document.querySelector('.clip.playing[data-track="harmony"]'), { timeout: 15000 });
+  await wait(250); // the badge leads the audible bar by a hair; let the write clock settle
   await clickAction(page, "circle-arm");
-  // Two taps on different degrees always net a change — unless the slot's
-  // original chord equals the second degree, in which case the pair writes
-  // and then bounces back to the starting value. A third tap on the first
-  // degree breaks the tie (its degree now differs from the slot for sure).
   await page.touchscreen.tap(...cPoint(circleGeom.a));
   await wait(150);
   await page.touchscreen.tap(...cPoint(circleGeom.b));
   await wait(250);
-  let harmonyAfter = await readHarmony();
+  const harmonyAfter = await readHarmony();
   if (harmonyAfter === harmonyBefore) {
-    await page.touchscreen.tap(...cPoint(circleGeom.a));
-    await wait(250);
-    harmonyAfter = await readHarmony();
-  }
-  assertState(harmonyAfter !== harmonyBefore, "armed circle tap did not land in the playing clip");
+    const diag = await page.evaluate(
+      ({ a, b }) => ({
+        underA: document.elementFromPoint(a[0], a[1])?.className || document.elementFromPoint(a[0], a[1])?.tagName,
+        underB: document.elementFromPoint(b[0], b[1])?.className || document.elementFromPoint(b[0], b[1])?.tagName,
+        rectNow: document.querySelector(".circle-canvas").getBoundingClientRect().top,
+        key: window.__noodles.song.key,
+        scale: window.__noodles.song.scale,
+        home: window.__noodlesCircle.home(),
+        size: window.__noodlesCircle.size(),
+        sheetKids: [...document.querySelector("#sheet").children].map((k) => `${k.className}:${Math.round(k.getBoundingClientRect().height)}`),
+        wheels: document.querySelectorAll(".circle-canvas").length,
+        playing: window.__noodles.audio.playing,
+        mode: window.__noodles.audio.mode,
+        playingHarmScene: document.querySelector('.clip.playing[data-track="harmony"]')?.dataset.scene ?? "none",
+      }),
+      { a: cPoint(circleGeom.a), b: cPoint(circleGeom.b) }
+    );
+    assertState(false, `armed circle tap did not land in the playing clip: ${JSON.stringify({ ...diag, geomTop: circleGeom.top })}`);
+  };
   // A borrowed chord lands as {pcs} (D13): outer H+3 sits outside every
   // mode's sector, so this tap is chromatic by construction.
   await page.touchscreen.tap(...cPoint(circleGeom.c));
@@ -382,8 +416,10 @@ try {
   }
   await page.touchscreen.touchEnd();
   await page.waitForFunction((want) => window.__noodles.song.key === want, {}, (keyBeforeTravel + 7) % 12);
-  const trailLen = await page.evaluate(() => window.__noodlesCircle.trailLength());
-  assertState(trailLen >= 1, "circle trail stayed empty during playback");
+  // The travel is a key commit, which RESETS the trail (a stale line lies
+  // once the context rewrites — the dice-roll bug). Playback must regrow
+  // one within a bar, which asserts both the reset and the rebuild.
+  await page.waitForFunction(() => window.__noodlesCircle.trailLength() >= 1, { timeout: 15000 });
   // The front door: drag the knob to another in-sector wedge. The mode
   // renames; the stored notes hold still — that stillness IS the assertion.
   const doorFrom = await page.evaluate(() => ({
@@ -429,12 +465,14 @@ try {
   assertState(mirrored.during && !mirrored.after && mirrored.grew, `mirror hold misbehaved: ${JSON.stringify(mirrored)}`);
   await page.screenshot({ path: circleShotPath });
   await closeSheet(page);
-  // Undo the excursion: door, travel, and up to four punched chords.
+  // Undo the excursion: door, travel, and up to four punched chords. The
+  // first punch's snapshot holds the pre-set 6s across all scenes, so the
+  // same all-scenes reader that took harmonyBefore is the restore target.
   let harmonyRestored = false;
   for (let i = 0; i < 7 && !harmonyRestored; i++) {
     await tap(page, ".tbtn.undo");
     await wait(120);
-    harmonyRestored = (await page.evaluate(() => JSON.stringify(window.__noodles.song.scenes[0].harmony))) === harmonyBefore;
+    harmonyRestored = (await readHarmony()) === harmonyBefore;
   }
   assertState(harmonyRestored, "undo did not restore the punched harmony");
 
