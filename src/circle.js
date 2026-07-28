@@ -327,16 +327,23 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     sctx.strokeStyle = "#0a0a0c";
     sctx.stroke();
     // The sliver wears the diminished symbol — one glyph, not a name; the
-    // hold still does the naming.
-    const seamP = polar(seamAngle(), (R_MID + R_OUT) / 2 + 0.09);
+    // hold still does the naming. It sits out in the rim band's dark space
+    // on a backing dot, clear of the sliver it points at (buried on-wedge,
+    // per the builder's phone).
+    const seamP = polar(seamAngle(), (R_OUT + R_RIM) / 2);
+    sctx.beginPath();
+    sctx.arc(seamP.x, seamP.y, size * 0.024, 0, TAU);
+    sctx.fillStyle = "rgba(20,20,23,0.9)";
+    sctx.fill();
     sctx.textAlign = "center";
     sctx.textBaseline = "middle";
-    sctx.font = `700 ${Math.round(size * 0.034)}px ${FONT}`;
-    sctx.fillStyle = "rgba(255,255,255,0.85)";
-    sctx.fillText("°", seamP.x, seamP.y);
-    // Sector outline + the home front door.
+    sctx.font = `700 ${Math.round(size * 0.038)}px ${FONT}`;
+    sctx.fillStyle = "rgba(255,255,255,0.9)";
+    sctx.fillText("°", seamP.x, seamP.y + size * 0.006);
+    // Sector outline + the home front door — hairline-proportional, not a
+    // fixed 2 px that reads chunky at phone density and small mounts.
     sctx.strokeStyle = "rgba(232,184,75,0.9)";
-    sctx.lineWidth = 2;
+    sctx.lineWidth = Math.max(1, size * 0.0042);
     const a0 = angleOf(H - 1.5) + 0.012;
     const a1 = angleOf(H + 1.5) - 0.012;
     sctx.beginPath();
@@ -347,8 +354,8 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     const home = homeWedge();
     if (home.station >= 0) {
       drawWedgePath(sctx, home.station, home.ring === "outer" ? R_MID : R_HOLE, home.ring === "outer" ? R_OUT : R_MID, 0.02);
-      sctx.strokeStyle = "rgba(255,255,255,0.85)";
-      sctx.lineWidth = 2;
+      sctx.strokeStyle = "rgba(255,255,255,0.8)";
+      sctx.lineWidth = Math.max(1, size * 0.0042);
       sctx.stroke();
       // The door knob: grab it and carry the front door to another wedge in
       // the sector — same house, different mode, nothing about the sound moves.
