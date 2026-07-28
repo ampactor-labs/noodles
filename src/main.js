@@ -31,6 +31,8 @@ import {
   harmonyEntryEquals,
   voiceLead,
   scaleDegreeOfPc,
+  spellChordTones,
+  signatureAccFor,
 } from "./model.js";
 import { createAudio, KIT_NAMES, SAMPLE_KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, colorNamesFor, DRUM_BANKS, drumCornerNames, MASTER_DEFAULTS } from "./audio.js";
 import { createCircleView } from "./circle.js";
@@ -2782,6 +2784,7 @@ function buildHarmonyEditor(sceneIndex, scene) {
     pushUndo();
     scene.harmonyOct = next;
     octVal.textContent = octLabel();
+    drawStaff(); // the register move is visible: the engraving shifts an octave
     await ensureStarted();
     audio.preview(scene.harmony[selected], scene.harmonyOct);
   };
@@ -2793,6 +2796,129 @@ function buildHarmonyEditor(sceneIndex, scene) {
     ])
   );
   const scrollContainer = el("div", { class: "editor-scroll" });
+  // The staff: the same clip, wearing the costume. Treble clef, the key's
+  // real signature, and each slot's chord engraved AS ITS HEARD VOICING —
+  // the voiceLead chain, not root position. Accidentals print only where a
+  // tone breaks the signature's promise, and since harmony is one chord per
+  // bar, per-chord accidentals are engraving-correct: every slot is its own
+  // measure. Borrowed chords arrive with their accidentals on; that's the
+  // whole reveal.
+  const staffCanvas = el("canvas", { class: "staffview" });
+  scrollContainer.appendChild(staffCanvas);
+  function drawStaff() {
+    const w = staffCanvas.clientWidth;
+    if (!w || !scene.harmony.length) return;
+    const h = 96;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    staffCanvas.width = Math.round(w * dpr);
+    staffCanvas.height = Math.round(h * dpr);
+    const c = staffCanvas.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, w, h);
+    const S = 9; // line gap
+    const E4 = 5 * 7 + 2; // diatonic step index of the bottom line
+    const bottomY = h - 26;
+    const yOf = (step) => bottomY - (step - E4) * (S / 2);
+    c.strokeStyle = "rgba(255,255,255,0.34)";
+    c.lineWidth = 1;
+    for (let l = 0; l < 5; l++) {
+      const y = bottomY - l * S;
+      c.beginPath();
+      c.moveTo(4, y);
+      c.lineTo(w - 4, y);
+      c.stroke();
+    }
+    c.fillStyle = "rgba(240,240,244,0.9)";
+    c.textAlign = "left";
+    c.textBaseline = "middle";
+    // A drawn G clef, not U+1D11E: music glyphs need a music font, and
+    // neither headless Chrome nor a stock phone reliably has one — a path
+    // renders the same everywhere. Stylized: the spiral owns the G line.
+    const gY = yOf(E4 + 2);
+    const cx0 = S * 1.35;
+    c.strokeStyle = "rgba(240,240,244,0.9)";
+    c.lineWidth = 1.7;
+    c.lineCap = "round";
+    c.beginPath();
+    c.moveTo(cx0 + S * 0.1, gY + S * 2.1);
+    c.bezierCurveTo(cx0 + S * 1.6, gY + S * 1.7, cx0 + S * 1.7, gY + S * 0.4, cx0 + S * 0.75, gY);
+    c.bezierCurveTo(cx0 - S * 0.55, gY - S * 0.55, cx0 - S * 0.35, gY - S * 1.9, cx0 + S * 0.75, gY - S * 1.95);
+    c.bezierCurveTo(cx0 + S * 1.6, gY - S * 2.0, cx0 + S * 1.85, gY - S * 1.1, cx0 + S * 1.1, gY - S * 0.75);
+    c.bezierCurveTo(cx0 + S * 0.5, gY - S * 0.5, cx0 + S * 0.3, gY - S * 1.1, cx0 + S * 0.8, gY - S * 1.25);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(cx0 + S * 0.55, gY - S * 3.4);
+    c.bezierCurveTo(cx0 + S * 1.4, gY - S * 2.9, cx0 + S * 1.3, gY - S * 2.3, cx0 + S * 0.95, gY - S * 1.5);
+    c.lineTo(cx0 + S * 0.35, gY + S * 1.7);
+    c.bezierCurveTo(cx0 + S * 0.25, gY + S * 2.35, cx0 - S * 0.55, gY + S * 2.35, cx0 - S * 0.5, gY + S * 1.75);
+    c.stroke();
+    const sig = keySignature(song.key, song.scale);
+    const SHARP_UNITS = [8, 5, 9, 6, 3, 7, 4];
+    const FLAT_UNITS = [4, 7, 3, 6, 2, 5, 1];
+    c.font = `600 ${Math.round(S * 2.2)}px system-ui, sans-serif`;
+    let x = S * 3.6;
+    for (let i = 0; i < Math.abs(sig); i++) {
+      const u = (sig > 0 ? SHARP_UNITS : FLAT_UNITS)[i];
+      c.fillText(sig > 0 ? "♯" : "♭", x, yOf(E4 + u) - (sig > 0 ? 0 : S * 0.3));
+      x += S * 0.95;
+    }
+    const startX = x + S * 1.6;
+    const oct = 12 * (scene.harmonyOct || 0);
+    const cRect = staffCanvas.getBoundingClientRect();
+    let prev = null;
+    scene.harmony.forEach((entry, i) => {
+      const voiced = (prev = voiceLead(harmonyChord(entry).pcs, prev));
+      const tones = spellChordTones(entry);
+      const slotR = slots[i]?.getBoundingClientRect();
+      const cx = Math.max(startX, slotR ? slotR.left - cRect.left + slotR.width / 2 : startX + i * 72);
+      const notes = voiced
+        .map((m) => {
+          const midi = m + oct;
+          const pc = ((midi % 12) + 12) % 12;
+          const t = tones.find((tt) => tt.pc === pc) || tones[0];
+          return { step: Math.floor((midi - t.acc) / 12) * 7 + t.letter, acc: t.acc, letter: t.letter };
+        })
+        .sort((a, b) => a.step - b.step);
+      // Clustered seconds sidestep right, the standard rule.
+      for (let k = 1; k < notes.length; k++) {
+        if (notes[k].step - notes[k - 1].step === 1 && !notes[k - 1].dx) notes[k].dx = S * 0.95;
+      }
+      let accCount = 0;
+      for (const n of notes) {
+        const rel = n.step - E4;
+        c.strokeStyle = "rgba(255,255,255,0.34)";
+        c.lineWidth = 1;
+        for (let u = -2; u >= rel; u -= 2) {
+          const y = yOf(E4 + u);
+          c.beginPath();
+          c.moveTo(cx - S, y);
+          c.lineTo(cx + S, y);
+          c.stroke();
+        }
+        for (let u = 10; u <= rel; u += 2) {
+          const y = yOf(E4 + u);
+          c.beginPath();
+          c.moveTo(cx - S, y);
+          c.lineTo(cx + S, y);
+          c.stroke();
+        }
+        if (n.acc !== signatureAccFor(n.letter, sig)) {
+          c.fillStyle = "rgba(240,240,244,0.95)";
+          c.font = `600 ${Math.round(S * 1.9)}px system-ui, sans-serif`;
+          c.textAlign = "right";
+          const glyph = n.acc > 0 ? "♯" : n.acc < 0 ? "♭" : "♮";
+          c.fillText(glyph, cx - S * 0.9 - accCount * S * 0.75, yOf(n.step) - (n.acc < 0 ? S * 0.3 : 0));
+          c.textAlign = "left";
+          accCount += 1;
+        }
+        c.strokeStyle = "#f0f0f4";
+        c.lineWidth = 1.8;
+        c.beginPath();
+        c.ellipse(cx + (n.dx || 0), yOf(n.step), S * 0.68, S * 0.5, -0.25, 0, Math.PI * 2);
+        c.stroke();
+      }
+    });
+  }
   const row = el("div", { class: "chordrow" });
   const slots = scene.harmony.map((ci, idx) => {
     const slot = el("div", {
@@ -2866,7 +2992,10 @@ function buildHarmonyEditor(sceneIndex, scene) {
       }
     }
   }
-  requestAnimationFrame(drawThreads);
+  requestAnimationFrame(() => {
+    drawStaff();
+    drawThreads();
+  });
 
   const picker = el("div", { class: "picker" });
   CHORDS.forEach((ch, ci) => {
@@ -2882,6 +3011,7 @@ function buildHarmonyEditor(sceneIndex, scene) {
           slots[selected].innerHTML = chordMarkup(ci, { notes: true });
           audio.preview(ci);
           refreshClip(sceneIndex, "harmony");
+          drawStaff();
           drawThreads();
         },
       })

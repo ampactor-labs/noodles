@@ -222,7 +222,8 @@ try {
   await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Chords");
   await page.waitForFunction(() => {
     const t = document.querySelector(".vthreads");
-    return t && t.width > 0;
+    const s = document.querySelector(".staffview");
+    return t && t.width > 0 && s && s.width > 0;
   });
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));

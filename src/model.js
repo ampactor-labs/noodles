@@ -127,6 +127,32 @@ export function spelledDegree(d) {
 }
 export const scaleDegreeOfPc = (pc) => SPELLED.findIndex((s) => s.pc === (((pc % 12) + 12) % 12));
 
+// A triad's tones spelled for engraving: thirds stack in letters, so the
+// third is two letters up from the root and the fifth four, with whatever
+// accidental closes each gap. The root's letter comes from harmonyChord's
+// own name, which already spells diatonic roots by degree and borrowed
+// roots by function — so C♯dim engraves C♯ E G and the ♭VI of C engraves
+// A♭ C E♭, never G♯ B♯ D♯.
+export function spellChordTones(entry) {
+  const ch = harmonyChord(entry);
+  const li0 = LETTERS.indexOf(ch.name[0]);
+  return ch.pcs.map((pc, i) => {
+    const letter = (li0 + 2 * i) % 7;
+    const acc = ((pc - NATURAL_PC[letter]) % 12 + 18) % 12 - 6;
+    return { letter, acc, pc };
+  });
+}
+// What the key signature already promises for a letter: +1 inside the first
+// n sharps, −1 inside the first n flats, 0 otherwise. An accidental prints
+// only when a tone breaks the promise — including the natural that cancels.
+const SIG_SHARP_LETTERS = [3, 0, 4, 1, 5, 2, 6]; // F C G D A E B as letter indices
+const SIG_FLAT_LETTERS = [6, 2, 5, 1, 4, 0, 3]; // B E A D G C F
+export function signatureAccFor(letterIdx, sig) {
+  if (sig > 0) return SIG_SHARP_LETTERS.slice(0, sig).includes(letterIdx) ? 1 : 0;
+  if (sig < 0) return SIG_FLAT_LETTERS.slice(0, -sig).includes(letterIdx) ? -1 : 0;
+  return 0;
+}
+
 let curKey = 0;
 let curScale = "major";
 export let CHORDS = []; // live binding; importers see rebuilds
