@@ -20,13 +20,13 @@ import {
   normalizeScene,
   scaleNotes,
   noteName,
-  pcName,
   setScaleContext,
   snapToScale,
   makeMagicScene,
   stepsFor,
   keyDisplayName,
   keySignature,
+  spellScalePc,
 } from "./model.js";
 import { createAudio, KIT_NAMES, SAMPLE_KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, colorNamesFor, DRUM_BANKS, drumCornerNames, MASTER_DEFAULTS } from "./audio.js";
 import { createCircleView } from "./circle.js";
@@ -84,7 +84,7 @@ const meterLevel = (db) => {
   if (!Number.isFinite(db)) return 0;
   return Math.max(0, Math.min(1, (db - METER_MIN_DB) / (METER_MAX_DB - METER_MIN_DB)));
 };
-const chordNotes = (ci) => CHORDS[ci] ? CHORDS[ci].pcs.map(pcName).join(" ") : "";
+const chordNotes = (ci) => CHORDS[ci] ? CHORDS[ci].pcs.map(spellScalePc).join(" ") : "";
 function chordMarkup(ci, { notes = false } = {}) {
   const ch = CHORDS[ci];
   if (!ch) return "";

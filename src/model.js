@@ -19,11 +19,120 @@ const DEGREE_HUE = [150, 224, 138, 204, 36, 166, 8];
 const PC_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 export const pcName = (pc) => PC_NAMES[((pc % 12) + 12) % 12];
 
+// --- The circle of fifths: station geometry and key signatures ---
+// Stations are fixed forever: station 0 is C at twelve o'clock, +1 is a fifth
+// clockwise. Multiplying by 7 maps pc -> station, and because 7·7 ≡ 1 (mod
+// 12), the SAME multiplication maps station -> pc. One function, two names.
+export const stationOfPc = (pc) => ((((pc % 12) + 12) % 12) * 7) % 12;
+export const pcOfStation = stationOfPc;
+
+// Fixed station names, poster convention: the sharp side spells sharp, the
+// flat side flat, the seam at station 6 answers to both. Lowercase minors —
+// case is quality, the same convention the roman numerals already teach.
+export const STATION_MAJOR = ["C", "G", "D", "A", "E", "B", "F♯", "D♭", "A♭", "E♭", "B♭", "F"];
+export const STATION_MINOR = ["a", "e", "b", "f♯", "c♯", "g♯", "d♯", "b♭", "f", "c", "g", "d"];
+// The order accidentals arrive as you walk the circle — not a mnemonic, the
+// circle itself read from F (sharps) and from B (flats).
+export const SHARP_ORDER = ["F♯", "C♯", "G♯", "D♯", "A♯", "E♯"];
+export const FLAT_ORDER = ["B♭", "E♭", "A♭", "D♭", "G♭", "C♭"];
+
+// Every 7-note mode is a rotation of major, so its pitch content IS some
+// major key's content. The offset from a mode's tonic up to that relative
+// major is derived from SCALES itself rather than tabled — one source.
+const REL_MAJOR_OFFSET = Object.fromEntries(
+  Object.entries(SCALES).map(([name, iv]) => [
+    name,
+    iv.find((x) => {
+      const rot = iv.map((v) => (v - x + 12) % 12).sort((a, b) => a - b);
+      return rot.every((v, i) => v === SCALES.major[i]);
+    }) ?? 0,
+  ])
+);
+export const relMajorOffset = (scaleName) => REL_MAJOR_OFFSET[scaleName] ?? 0;
+export const relMajorPc = (pc, scaleName) => ((((pc % 12) + 12) % 12) + relMajorOffset(scaleName)) % 12;
+
+// Signature as a signed count: positive sharps, negative flats, +6 for the
+// F♯/G♭ seam by convention. A key's signature is just its station.
+export function keySignature(pc, scaleName) {
+  const s = stationOfPc(relMajorPc(pc, scaleName));
+  return s <= 6 ? s : s - 12;
+}
+
+// The key's honest name: spell by which side of the circle its signature
+// lives on (E♭ dorian, not D♯ dorian). pcName stays the chromatic namer for
+// debug; every UI name flows through the spelled paths below.
+const SHARP_PC = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
+const FLAT_PC = ["C", "D♭", "D", "E♭", "E", "F", "G♭", "G", "A♭", "A", "B♭", "B"];
+export function keyDisplayName(pc, scaleName) {
+  const i = ((pc % 12) + 12) % 12;
+  return keySignature(pc, scaleName) < 0 ? FLAT_PC[i] : SHARP_PC[i];
+}
+
+// What is this chord to me, from where I stand? Interval up from home tonic
+// to the chord root, as a roman numeral — lowercase when the chord is minor.
+const INTERVAL_ROMAN = ["I", "♭II", "II", "♭III", "III", "IV", "♭V", "V", "♭VI", "VI", "♭VII", "VII"];
+export function romanFromHome(homePc, pc, minor = false) {
+  const r = INTERVAL_ROMAN[(((pc - homePc) % 12) + 12) % 12];
+  return minor ? r.toLowerCase() : r;
+}
+
+// Semitones from degree d's root up to the scale tone `steps` scale-steps
+// above it — the diatonic extension interval (7th = 6 steps, 9th = 8), which
+// is what makes one "7" pad come out maj7 on I and dominant on V.
+export function degreeStepSemis(d, steps) {
+  const sc = SCALES[curScale];
+  const t = d + steps;
+  return sc[t % 7] + 12 * Math.floor(t / 7) - sc[d % 7];
+}
+
+// How many pitch classes two chords share — the trail's line weight.
+export function sharedPcCount(a, b) {
+  const s = new Set(a.map((p) => ((p % 12) + 12) % 12));
+  return b.reduce((n, p) => n + (s.has(((p % 12) + 12) % 12) ? 1 : 0), 0);
+}
+
+// --- Spelling: every scale degree gets its own letter ---
+// A key signature is a promise about letters: seven degrees, seven letters,
+// in order from the tonic's. F♯ major runs F♯ G♯ A♯ B C♯ D♯ E♯ — the seventh
+// degree is E♯, not F, because F is already taken. Degree spelling is letter
+// arithmetic: the d-th degree's letter is d letters past the tonic's, and the
+// accidental is whatever closes the gap to the actual pitch class. SPELLED is
+// rebuilt with CHORDS on every key/scale change.
+const LETTERS = ["C", "D", "E", "F", "G", "A", "B"];
+const NATURAL_PC = [0, 2, 4, 5, 7, 9, 11];
+const accGlyphs = (n) => (n > 0 ? "♯".repeat(n) : "♭".repeat(-n));
+let SPELLED = []; // per degree: { letter, acc, pc, name }
+
+function rebuildSpelling() {
+  const tonicLetter = LETTERS.indexOf(keyDisplayName(curKey, curScale)[0]);
+  SPELLED = SCALES[curScale].map((off, d) => {
+    const li = (tonicLetter + d) % 7;
+    const pc = (curKey + off) % 12;
+    const acc = ((pc - NATURAL_PC[li]) % 12 + 18) % 12 - 6;
+    return { letter: li, acc, pc, name: LETTERS[li] + accGlyphs(acc) };
+  });
+}
+
+// The honest name of a pitch class here: its degree spelling when it is in
+// the scale, the signature side's spelling when it is a visitor.
+export function spellScalePc(pc) {
+  const p = ((pc % 12) + 12) % 12;
+  const deg = SPELLED.find((s) => s.pc === p);
+  if (deg) return deg.name;
+  return keySignature(curKey, curScale) < 0 ? FLAT_PC[p] : SHARP_PC[p];
+}
+// The staff needs the letter and accidental, not just the string.
+export function spelledDegree(d) {
+  return SPELLED[((d % 7) + 7) % 7];
+}
+export const scaleDegreeOfPc = (pc) => SPELLED.findIndex((s) => s.pc === (((pc % 12) + 12) % 12));
+
 let curKey = 0;
 let curScale = "major";
 export let CHORDS = []; // live binding; importers see rebuilds
 
 function rebuildChords() {
+  rebuildSpelling(); // chord names ride the degree letters
   const sc = SCALES[curScale];
   CHORDS = [];
   for (let d = 0; d < 7; d++) {
@@ -39,7 +148,7 @@ function rebuildChords() {
     else if (third === 3 && fifth === 6) { roman = rn.toLowerCase() + "°"; suffix = "dim"; }
     else if (third === 4 && fifth === 8) { roman = rn + "+"; suffix = "aug"; }
     else { roman = rn.toLowerCase(); suffix = ""; }
-    CHORDS.push({ roman, name: pcName(pcs[0]) + suffix, pcs, degree: d, hue: DEGREE_HUE[d], sat: 56, light: 56 });
+    CHORDS.push({ roman, name: SPELLED[d].name + suffix, pcs, degree: d, hue: DEGREE_HUE[d], sat: 56, light: 56 });
   }
 }
 export function setScaleContext(key, scaleName) {
@@ -532,8 +641,14 @@ export function cloneScene(scene) {
 }
 
 // --- Scale helpers for the piano roll (current key + scale) ---
-const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-export const noteName = (m) => NOTE_NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1);
+// Notes spell like the key spells: in-scale pitches wear their degree letter
+// (E♯4 in F♯ major sits in E's octave), visitors take the signature side.
+export function noteName(m) {
+  const p = ((m % 12) + 12) % 12;
+  const deg = SPELLED.find((s) => s.pc === p);
+  if (deg) return deg.name + (Math.floor((m - deg.acc) / 12) - 1);
+  return spellScalePc(p) + (Math.floor(m / 12) - 1);
+}
 
 const scaleSet = () => new Set(SCALES[curScale].map((o) => (((curKey + o) % 12) + 12) % 12));
 
@@ -557,78 +672,6 @@ export function snapToScale(midi) {
     if (set.has((((midi - off) % 12) + 12) % 12)) return midi - off;
   }
   return midi;
-}
-
-// --- The circle of fifths: station geometry and key signatures ---
-// Stations are fixed forever: station 0 is C at twelve o'clock, +1 is a fifth
-// clockwise. Multiplying by 7 maps pc -> station, and because 7·7 ≡ 1 (mod
-// 12), the SAME multiplication maps station -> pc. One function, two names.
-export const stationOfPc = (pc) => ((((pc % 12) + 12) % 12) * 7) % 12;
-export const pcOfStation = stationOfPc;
-
-// Fixed station names, poster convention: the sharp side spells sharp, the
-// flat side flat, the seam at station 6 answers to both. Lowercase minors —
-// case is quality, the same convention the roman numerals already teach.
-export const STATION_MAJOR = ["C", "G", "D", "A", "E", "B", "F♯", "D♭", "A♭", "E♭", "B♭", "F"];
-export const STATION_MINOR = ["a", "e", "b", "f♯", "c♯", "g♯", "d♯", "b♭", "f", "c", "g", "d"];
-// The order accidentals arrive as you walk the circle — not a mnemonic, the
-// circle itself read from F (sharps) and from B (flats).
-export const SHARP_ORDER = ["F♯", "C♯", "G♯", "D♯", "A♯", "E♯"];
-export const FLAT_ORDER = ["B♭", "E♭", "A♭", "D♭", "G♭", "C♭"];
-
-// Every 7-note mode is a rotation of major, so its pitch content IS some
-// major key's content. The offset from a mode's tonic up to that relative
-// major is derived from SCALES itself rather than tabled — one source.
-const REL_MAJOR_OFFSET = Object.fromEntries(
-  Object.entries(SCALES).map(([name, iv]) => [
-    name,
-    iv.find((x) => {
-      const rot = iv.map((v) => (v - x + 12) % 12).sort((a, b) => a - b);
-      return rot.every((v, i) => v === SCALES.major[i]);
-    }) ?? 0,
-  ])
-);
-export const relMajorOffset = (scaleName) => REL_MAJOR_OFFSET[scaleName] ?? 0;
-export const relMajorPc = (pc, scaleName) => ((((pc % 12) + 12) % 12) + relMajorOffset(scaleName)) % 12;
-
-// Signature as a signed count: positive sharps, negative flats, +6 for the
-// F♯/G♭ seam by convention. A key's signature is just its station.
-export function keySignature(pc, scaleName) {
-  const s = stationOfPc(relMajorPc(pc, scaleName));
-  return s <= 6 ? s : s - 12;
-}
-
-// The key's honest name: spell by which side of the circle its signature
-// lives on (E♭ dorian, not D♯ dorian). pcName stays the chromatic namer for
-// absolute pitches; this is the name of a KEY.
-const SHARP_PC = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
-const FLAT_PC = ["C", "D♭", "D", "E♭", "E", "F", "G♭", "G", "A♭", "A", "B♭", "B"];
-export function keyDisplayName(pc, scaleName) {
-  const i = ((pc % 12) + 12) % 12;
-  return keySignature(pc, scaleName) < 0 ? FLAT_PC[i] : SHARP_PC[i];
-}
-
-// What is this chord to me, from where I stand? Interval up from home tonic
-// to the chord root, as a roman numeral — lowercase when the chord is minor.
-const INTERVAL_ROMAN = ["I", "♭II", "II", "♭III", "III", "IV", "♭V", "V", "♭VI", "VI", "♭VII", "VII"];
-export function romanFromHome(homePc, pc, minor = false) {
-  const r = INTERVAL_ROMAN[(((pc - homePc) % 12) + 12) % 12];
-  return minor ? r.toLowerCase() : r;
-}
-
-// Semitones from degree d's root up to the scale tone `steps` scale-steps
-// above it — the diatonic extension interval (7th = 6 steps, 9th = 8), which
-// is what makes one "7" pad come out maj7 on I and dominant on V.
-export function degreeStepSemis(d, steps) {
-  const sc = SCALES[curScale];
-  const t = d + steps;
-  return sc[t % 7] + 12 * Math.floor(t / 7) - sc[d % 7];
-}
-
-// How many pitch classes two chords share — the trail's line weight.
-export function sharedPcCount(a, b) {
-  const s = new Set(a.map((p) => ((p % 12) + 12) % 12));
-  return b.reduce((n, p) => n + (s.has(((p % 12) + 12) % 12) ? 1 : 0), 0);
 }
 
 export const ARRANGE_TRACKS = ["harmony", "drums", "bass", "melody"];
