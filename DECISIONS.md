@@ -123,8 +123,33 @@ of the geometry: the sector sits at the relative major's station and the
 home outline sits on the tonic's wedge, so dorian is C major's house entered
 at d. One naming split accepted knowingly: station labels and key names
 spell by circle side (B♭, E♭) while pcName stays sharp-only inside clips
-(A♯) — per-key spelling is banked, first in line.
+(A♯) — per-key spelling is banked, first in line. (Landed the same day: see
+the model spelling commit — the split is closed, and the staff work stands
+on it.)
 
+### D13 — Harmony slots learn to hold borrowed chords
+
+`scene.harmony` spoke only scale-degree indices, which made the palette
+can't-make-it-wrong and made a borrowed chord unstorable — the circle could
+visit ♭VI but never keep it. An entry is now `0..6` OR `{ pcs: [root, third,
+fifth] }`, written by the circle's armed capture when the tapped wedge sits
+outside the sector. One resolver (`harmonyChord` in model.js) turns either
+shape into the same CHORDS-shaped record, so playback, previews, session and
+arrangement minis, and the editor never branch on which kind they hold.
+
+Three calls inside it: borrowed chords TRANSPOSE with key changes alongside
+bass and melody (a ♭VI stays a ♭VI — the app's "whole song travels" promise
+outranks pitch-class stillness); they spell by their function, not the home
+signature's side (the ♭VI of C reads A♭ even though C is a sharp-side key);
+and they wear one off-palette violet instead of a function hue, because
+function is exactly what the scale can't assign a visitor. The diatonic
+picker stays seven-wide — the circle is the only chromatic writer, so the
+soft wall holds: reaching outside the neighborhood is still the deliberate
+gesture. Old projects load untouched (numbers normalize as before; unknown
+shapes coerce to I). Receipts: the D13 block in .tmp/dbg-circle-theory.mjs
+and the borrowed-punch assertion in npm run smoke.
+
+## Provisional (my recommendation, argue against it)
 
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 
