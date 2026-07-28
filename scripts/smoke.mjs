@@ -241,7 +241,7 @@ try {
     const r = document.querySelector(".circle-canvas").getBoundingClientRect();
     const C = window.__noodlesCircle;
     const H = C.home();
-    return { left: r.left, top: r.top, a: C.point("outer", H), b: C.point("outer", (H + 1) % 12), rim: C.rimPoint(H), rim2: C.rimPoint((H + 1) % 12) };
+    return { left: r.left, top: r.top, a: C.point("outer", H), b: C.point("outer", (H + 1) % 12), c: C.point("outer", (H + 3) % 12), rim: C.rimPoint(H), rim2: C.rimPoint((H + 1) % 12) };
   });
   const cPoint = (p) => [circleGeom.left + p.x, circleGeom.top + p.y];
   const readHarmony = () => page.evaluate(() => JSON.stringify(window.__noodles.song.scenes[0].harmony));
@@ -262,6 +262,12 @@ try {
     harmonyAfter = await readHarmony();
   }
   assertState(harmonyAfter !== harmonyBefore, "armed circle tap did not land in the playing clip");
+  // A borrowed chord lands as {pcs} (D13): outer H+3 sits outside every
+  // mode's sector, so this tap is chromatic by construction.
+  await page.touchscreen.tap(...cPoint(circleGeom.c));
+  await wait(250);
+  const borrowedStored = await page.evaluate(() => window.__noodles.song.scenes[0].harmony.some((e) => typeof e === "object" && Array.isArray(e?.pcs)));
+  assertState(borrowedStored, "armed borrowed tap did not store a {pcs} entry");
   await clickAction(page, "circle-arm"); // disarm before traveling
   const keyBeforeTravel = await page.evaluate(() => window.__noodles.song.key);
   const [crx, cry] = cPoint(circleGeom.rim);

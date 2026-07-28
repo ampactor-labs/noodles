@@ -27,6 +27,8 @@ import {
   keyDisplayName,
   keySignature,
   spellScalePc,
+  harmonyChord,
+  harmonyEntryEquals,
 } from "./model.js";
 import { createAudio, KIT_NAMES, SAMPLE_KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, colorNamesFor, DRUM_BANKS, drumCornerNames, MASTER_DEFAULTS } from "./audio.js";
 import { createCircleView } from "./circle.js";
@@ -84,11 +86,16 @@ const meterLevel = (db) => {
   if (!Number.isFinite(db)) return 0;
   return Math.max(0, Math.min(1, (db - METER_MIN_DB) / (METER_MAX_DB - METER_MIN_DB)));
 };
-const chordNotes = (ci) => CHORDS[ci] ? CHORDS[ci].pcs.map(spellScalePc).join(" ") : "";
-function chordMarkup(ci, { notes = false } = {}) {
-  const ch = CHORDS[ci];
+// Entries are degrees or borrowed {pcs}; harmonyChord speaks both. The roman
+// wears its function hue everywhere this markup lands — session minis,
+// arrangement minis, editor slots — so a borrowed chord's violet reads as
+// "not from here" straight off the grid.
+const chordNotes = (entry) => harmonyChord(entry).pcs.map(spellScalePc).join(" ");
+function chordMarkup(entry, { notes = false } = {}) {
+  const ch = harmonyChord(entry);
   if (!ch) return "";
-  return `<b>${ch.roman}</b><span>${ch.name}</span>${notes ? `<em class="chord-notes">${chordNotes(ci)}</em>` : ""}`;
+  const tint = hex(hslInt(ch.hue, ch.sat, 72));
+  return `<b style="color:${tint}">${ch.roman}</b><span>${ch.name}</span>${notes ? `<em class="chord-notes">${chordNotes(entry)}</em>` : ""}`;
 }
 
 const song = makeSong();
@@ -196,15 +203,18 @@ let circleBar = 0; // harmony slot being heard right now (from chord events)
 // bar-quantized by construction, since harmony is one chord per bar. Borrowed
 // chords (degree -1) are playable but not storable: the model speaks scale
 // degrees, so the bright region is exactly what the clip can hold.
-function circleCapture(degree) {
-  if (!circleArmed || degree < 0 || !audio.playing || audio.mode !== "scene") return false;
+function circleCapture(chord) {
+  if (!circleArmed || !audio.playing || audio.mode !== "scene") return false;
   const si = playingTracks.harmony;
   const scene = song.scenes[si];
   if (!scene?.harmony?.length) return false;
+  // Diatonic wedges store their degree (follows key changes for free);
+  // borrowed wedges store pitch classes (D13) — the violet visitors.
+  const entry = chord.degree >= 0 ? chord.degree : { pcs: chord.pcs.slice(0, 3) };
   const slot = circleBar % scene.harmony.length;
-  if (scene.harmony[slot] === degree) return false;
+  if (harmonyEntryEquals(scene.harmony[slot], entry)) return false;
   pushUndo();
-  scene.harmony[slot] = degree;
+  scene.harmony[slot] = entry;
   refreshClip(si, "harmony");
   return true;
 }
@@ -815,6 +825,10 @@ function applyKeyScale(key, scale) {
         for (const n of noteSlot(sc[trk][s])) n.midi = snapToScale(n.midi + delta);
       }
     }
+    // Borrowed chords ride the same transposition, so a ♭VI stays a ♭VI.
+    sc.harmony = sc.harmony.map((e) =>
+      typeof e === "number" ? e : { pcs: e.pcs.map((p) => ((p + delta) % 12 + 12) % 12) }
+    );
   }
 }
 

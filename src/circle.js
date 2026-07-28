@@ -26,6 +26,7 @@
 import {
   CHORDS,
   chordColor,
+  harmonyChord,
   stationOfPc,
   pcOfStation,
   relMajorPc,
@@ -186,20 +187,23 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
   // Only a clean tap writes into the playing clip — a strum is a run, a hold
   // is an audition. One intent, one write.
   function tryCapture(w) {
-    if (captureChord(w.degree)) {
+    if (captureChord(w)) {
       flash = { ring: w.ring, station: w.station, t: nowS() };
       buzz(10);
     }
   }
 
   // Playback's own chords walk the wheel too: the song watching itself.
-  function onPlaybackChord(ci) {
-    if (!open || !CHORDS[ci]) return;
-    const q = quality(CHORDS[ci].pcs);
-    const root = CHORDS[ci].pcs[0];
+  // Entries are degrees or borrowed {pcs}; either resolves to a wedge.
+  function onPlaybackChord(entry) {
+    if (!open) return;
+    const ch = harmonyChord(entry);
+    if (!ch?.pcs) return;
+    const q = quality(ch.pcs);
+    const root = ch.pcs[0];
     if (q === "dim") return pushTrail(wedges.seam);
     const station = q === "min" ? stationOfPc(norm12(root + 3)) : stationOfPc(root);
-    pushTrail({ ring: q === "min" ? "inner" : "outer", station, pcs: CHORDS[ci].pcs });
+    pushTrail({ ring: q === "min" ? "inner" : "outer", station, pcs: ch.pcs });
   }
 
   // --- Geometry / hit-testing (CSS px, origin at canvas top-left) ---

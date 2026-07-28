@@ -23,7 +23,7 @@
 // point a finger or a dice can reach is already mixed.
 
 import * as Tone from "tone";
-import { CHORDS, DRUM_VOICES, voiceLead, clipAt, arrangeLength, clipLaunch, clipLengthBars, noteSlot, stepsFor } from "./model.js";
+import { CHORDS, DRUM_VOICES, voiceLead, harmonyChord, clipAt, arrangeLength, clipLaunch, clipLengthBars, noteSlot, stepsFor } from "./model.js";
 
 // Per-track swing: offbeat lane steps get delayed by up to a third of a 16th
 // (1.0 = full triplet feel). Each track reads its own amount, falling back to
@@ -1118,13 +1118,15 @@ function eachActiveLayer(g, track, patch, fn) {
 // stays register-independent) and moves the pad and its halo together; the
 // low root hint stays anchored — it is the harmonic glue under the chord,
 // and bass owns the register it would otherwise wander into.
-function playChordOn(g, patches, vstate, ci, time, oct = 0) {
-  const voiced = voiceLead(CHORDS[ci].pcs, vstate.prev);
+function playChordOn(g, patches, vstate, entry, time, oct = 0) {
+  // entry is a scale degree or a borrowed {pcs} — harmonyChord speaks both.
+  const pcs = harmonyChord(entry).pcs;
+  const voiced = voiceLead(pcs, vstate.prev);
   vstate.prev = voiced;
   const shift = 12 * oct;
   eachActiveLayer(g, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(voiced.map((m) => midiToFreq(m + shift)), "1n", time));
   g.halo.triggerAttackRelease(midiToFreq(Math.max(...voiced) + 12 + shift), "1n", time);
-  g.sub.triggerAttackRelease(midiToFreq(48 + CHORDS[ci].pcs[0]), "1n", time);
+  g.sub.triggerAttackRelease(midiToFreq(48 + pcs[0]), "1n", time);
 }
 
 function playNoteStackOn(g, patches, track, slot, time) {
@@ -1525,13 +1527,14 @@ export function createAudio(song) {
     wakeTrack("drums");
     hitDrumOn(live, patches, v, time, vel);
   };
-  function preview(ci, oct = 0) {
+  function preview(entry, oct = 0) {
     wakeTrack("harmony");
-    const voiced = voiceLead(CHORDS[ci].pcs, liveVoice.prev);
+    const pcs = harmonyChord(entry).pcs;
+    const voiced = voiceLead(pcs, liveVoice.prev);
     const shift = 12 * oct;
     const at = tapTime();
     eachActiveLayer(live, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(voiced.map((m) => midiToFreq(m + shift)), "2n", at));
-    live.sub.triggerAttackRelease(midiToFreq(48 + CHORDS[ci].pcs[0]), "2n", at);
+    live.sub.triggerAttackRelease(midiToFreq(48 + pcs[0]), "2n", at);
   }
   // The circle's audition path: any pitch classes, not just the seven diatonic
   // degrees — a borrowed chord is a place you can visit even when the clip

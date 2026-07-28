@@ -172,6 +172,42 @@ export function hslInt(h, s, l) {
 export const chordColor = (ci, dl = 0) =>
   hslInt(CHORDS[ci].hue, CHORDS[ci].sat, Math.max(0, Math.min(100, CHORDS[ci].light + dl)));
 
+// --- Harmony entries: a slot holds a scale degree OR a borrowed chord ---
+// scene.harmony spoke only degree indices for its whole life, which is what
+// made the palette can't-make-it-wrong — and what made a borrowed chord
+// unstorable. An entry is now `0..6` (diatonic, follows the key for free) or
+// `{ pcs: [root, third, fifth] }` (chromatic — the circle writes those). The
+// key-change path transposes borrowed pcs alongside bass and melody, so a
+// ♭VI stays a ♭VI when the song travels. harmonyChord() resolves either
+// shape into the same CHORDS-shaped object, so playback, minis, and editors
+// never care which kind they hold. Borrowed chords wear one off-palette
+// violet: not from here, visibly.
+const BORROWED = { hue: 285, sat: 24, light: 60 };
+export function normalizeHarmonyEntry(e) {
+  if (typeof e === "number" && Number.isFinite(e)) return Math.max(0, Math.min(6, Math.round(e)));
+  const pcs = Array.isArray(e?.pcs) ? e.pcs.slice(0, 3).map((p) => ((Math.round(Number(p) || 0) % 12) + 12) % 12) : null;
+  return pcs && pcs.length === 3 ? { pcs } : 0;
+}
+export const normalizeHarmony = (arr) => (Array.isArray(arr) && arr.length ? arr.map(normalizeHarmonyEntry) : [0, 0, 0, 0]);
+export const harmonyEntryEquals = (a, b) =>
+  typeof a === "number" || typeof b === "number" ? a === b : !!a?.pcs && !!b?.pcs && a.pcs.join() === b.pcs.join();
+
+export function harmonyChord(entry) {
+  if (typeof entry === "number") return CHORDS[Math.max(0, Math.min(6, entry | 0))];
+  const pcs = entry?.pcs;
+  if (!pcs?.length) return CHORDS[0];
+  const t = (pcs[1] - pcs[0] + 12) % 12;
+  const f = (pcs[2] - pcs[0] + 12) % 12;
+  const minor = t === 3 && f !== 6;
+  const dim = t === 3 && f === 6;
+  const roman = romanFromHome(curKey, pcs[0], minor || dim) + (dim ? "°" : "");
+  // A borrowed chord spells by its FUNCTION: the ♭VI of C is A♭, never G♯,
+  // whatever side the home signature sits on.
+  const root = roman.includes("♭") ? FLAT_PC[pcs[0]] : spellScalePc(pcs[0]);
+  const suffix = dim ? "dim" : minor ? "m" : "";
+  return { roman, name: root + suffix, pcs, degree: -1, ...BORROWED };
+}
+
 // --- Voice leading: keep common tones, move the rest by the smallest step. ---
 const PERMS = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
 const nearestOctave = (pc, ref) => pc + 12 * Math.round((ref - pc) / 12);
@@ -299,6 +335,7 @@ export function normalizeSteps(steps = null) {
 export const stepsFor = (scene, track) => scene?.steps?.[track] || 16;
 
 export function normalizeScene(scene) {
+  scene.harmony = Array.isArray(scene.harmony) ? scene.harmony.map(normalizeHarmonyEntry) : [];
   scene.melody = normalizeNoteLane(scene.melody);
   scene.bass = normalizeNoteLane(scene.bass);
   const drums = scene.drums || {};
@@ -319,7 +356,7 @@ export function makeScene(harmony, drums, melody = null, bass = null, motion = n
   sceneSeq += 1;
   const scene = {
     tag,
-    harmony: harmony.slice(),
+    harmony: harmony.map(normalizeHarmonyEntry),
     drums: Object.fromEntries(DRUM_VOICES.map((v) => [v, normalizeDrumLane(drums[v])])),
     // Bass and melody: per-step note stacks (or null) for scale-snapped chords.
     // Each note is { midi, len, vel }; old single-note slots normalize to stacks.
