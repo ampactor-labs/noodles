@@ -711,8 +711,12 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     });
   }
 
+  // One layout read per gesture, not per move: the canvas sits still inside
+  // the fixed sheet, so the rect from pointerdown stays true until resize.
+  let gestureRect = null;
   canvas.addEventListener("pointerdown", (e) => {
-    const rect = canvas.getBoundingClientRect();
+    gestureRect = canvas.getBoundingClientRect();
+    const rect = gestureRect;
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     if (spiralT > 0.25) return; // the spiral is a view, not a controller
@@ -787,7 +791,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
   });
 
   canvas.addEventListener("pointermove", (e) => {
-    const rect = canvas.getBoundingClientRect();
+    const rect = gestureRect || (gestureRect = canvas.getBoundingClientRect());
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     if (doorDrag && doorDrag.id === e.pointerId) {
@@ -847,12 +851,21 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     }
     if (Math.hypot(x - g.startX, y - g.startY) > 14) {
       clearTimeout(g.timer); // moving means strumming, not holding
-      if (!g.strummed && strumWrites) tryCapture(g.curWedge, { strum: true }); // the origin joins the run
+      if (!g.strummed && strumWrites) tryCapture(g.curWedge, { strum: true, start: true }); // the origin joins the run
       g.strummed = true;
       const hit = hitTest(x, y);
       if (hit?.kind === "wedge" && (hit.wedge.ring !== g.curWedge.ring || hit.wedge.station !== g.curWedge.station)) {
         g.curWedge = hit.wedge;
-        soundWedge(hit.wedge);
+        // A fast swipe reads as a blur either way; a 60 ms floor between
+        // strum SOUNDS spares the voice pool the churn. Writes still land
+        // on every wedge crossed.
+        const now = nowS();
+        if (now - (g.lastStrumT || 0) > 0.06) {
+          g.lastStrumT = now;
+          soundWedge(hit.wedge);
+        } else {
+          pushTrail(mirrorHold != null ? wedgeOfPcs(effectiveChord(hit.wedge.pcs).pcs) : hit.wedge);
+        }
         if (strumWrites) tryCapture(hit.wedge, { strum: true });
       }
     }
@@ -969,6 +982,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     const w = wrap.clientWidth || 320;
     const target = Math.round(Math.min(w, sizeCap ?? window.innerHeight * 0.5));
     dpr = Math.min(2, window.devicePixelRatio || 1);
+    gestureRect = null; // layout moved; the cached rect is a lie now
     if (target === size && canvas.width === Math.round(target * dpr)) return;
     size = target;
     canvas.style.width = size + "px";

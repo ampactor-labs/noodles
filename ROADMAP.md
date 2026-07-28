@@ -84,8 +84,22 @@ writes quantized (0.5% pies, ¼-px playhead) and skipped when unchanged, so pies
 every frame or two instead of sixty times a second. Sound-neutral only, per the standing
 rule: no quality or capability trades.
 
-The 2026-07-18 pass went after "choppy and laggy even on decent phones," and the findings
-were main-thread, not DSP. The laggy half was arithmetic: Tone's `now()` adds the 0.25 s
+The 2026-07-28 ultra-audit went after the same complaint on the feature-heavy
+0.4.x builds, and the regressions were all main-thread, all new (receipts:
+.tmp/dbg-perf-ultra.mjs, long-task counts on a desktop — multiply several-fold
+for the A16): a four-wedge editor strum ran one 109 ms task (per-wedge
+whole-song undo clone + synchronous staff/threads/clip repaints — now one undo
+per gesture, paints coalesced to one rAF per burst, and strum SOUNDS floored at
+60 ms apart while writes still land per wedge: 109 ms → 0 long tasks, burst
+wall 18 → 2 ms); the circle read getBoundingClientRect per pointermove (one
+forced layout per event during strums/rim/door — now cached per gesture);
+paint() sync-redrew the roll staff with two layout reads per note-drag move
+(now rAF-coalesced); and D14's chop persistence packed/unpacked unbounded
+audio on the main thread (a 90 s row measured inside a 388 ms boot task — now
+capped at 30 s at decode AND restore, restore deferred 900 ms past boot and
+phase-split into sub-50 ms tasks, and a slice-mode flip stores a tiny meta row
+instead of repacking megabytes). The residual ~305 ms boot task is bundle
+parse/eval — pre-existing, the known cold-open cost, untouched by this pass. The laggy half was arithmetic: Tone's `now()` adds the 0.25 s
 lookAhead, so every interactive trigger — chord preview, drum pad, note audition, XY-pad
 ride, even the stop button — sounded a quarter second after the finger, on every device,
 while the code's own comment claimed previews "fire at now." Interactive paths now schedule

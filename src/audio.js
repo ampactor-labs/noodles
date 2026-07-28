@@ -375,17 +375,26 @@ function unpackBuffer(packed) {
   return b;
 }
 async function restoreSavedSamples() {
-  for (const [key, v] of await idbEntries()) {
+  const rows = await idbEntries();
+  const meta = rows.find(([k]) => k === "chopmeta")?.[1];
+  const breathe = () => new Promise((resolve) => setTimeout(resolve, 0));
+  for (const [key, v] of rows) {
     if (!v?.channels?.length) continue;
     try {
       if (key === "chop" && !chopKit) {
-        const buffer = unpackBuffer(v);
-        const mode = v.mode === "grid" ? "grid" : "auto";
+        // Cap old oversized rows, and give the unpack copy and the slice
+        // scan their own tasks — the restore must never be one long freeze.
+        const cap = Math.round(CHOP_MAX_SEC * (v.sampleRate || 44100));
+        const packed = { ...v, channels: v.channels.map((ch) => (ch.length > cap ? ch.subarray(0, cap) : ch)) };
+        const buffer = unpackBuffer(packed);
+        await breathe();
+        const mode = (meta?.mode || v.mode) === "grid" ? "grid" : "auto";
         chopKit = { buffer, slices: sliceChops(buffer, mode), name: v.name || "sample", mode };
       } else if (key.startsWith("drum:")) {
         const voice = key.slice(5);
         if (!userSamples[voice]) userSamples[voice] = { buffer: new Tone.ToneAudioBuffer(unpackBuffer(v)), name: v.name || "saved" };
       }
+      await breathe();
     } catch {
       // one bad row never blocks the rest
     }
@@ -424,23 +433,30 @@ function sliceChops(buffer, mode) {
   return onsets.slice(0, 16).map((start, i, a) => ({ start, dur: (i + 1 < a.length ? a[i + 1] : dur) - start }));
 }
 
+// Thirty seconds is the ceiling: chops are grooves and breaks, not songs,
+// and every cost downstream — normalize, slice scan, the IDB pack, the boot
+// restore — is a copy of this length on the MAIN thread. Unbounded, a
+// full-song upload froze boot for hundreds of milliseconds (measured 388 ms
+// on a desktop; multiply for the A16).
+const CHOP_MAX_SEC = 30;
 async function decodeChop(arrayBuffer, name, mode) {
   const raw = await Tone.getContext().rawContext.decodeAudioData(arrayBuffer);
+  const length = Math.min(raw.length, Math.round(CHOP_MAX_SEC * raw.sampleRate));
   const ch0 = raw.getChannelData(0);
   let peak = 0;
   let sumSq = 0;
-  for (let i = 0; i < ch0.length; i++) {
+  for (let i = 0; i < length; i++) {
     const a = Math.abs(ch0[i]);
     if (a > peak) peak = a;
     sumSq += ch0[i] * ch0[i];
   }
-  const rms = Math.sqrt(sumSq / ch0.length) || 1e-6;
+  const rms = Math.sqrt(sumSq / length) || 1e-6;
   const gain = Math.min(CHOP_TARGET_RMS / rms, 0.891 / (peak || 1));
-  const buffer = new AudioBuffer({ length: raw.length, numberOfChannels: raw.numberOfChannels, sampleRate: raw.sampleRate });
+  const buffer = new AudioBuffer({ length, numberOfChannels: raw.numberOfChannels, sampleRate: raw.sampleRate });
   for (let c = 0; c < raw.numberOfChannels; c++) {
     const src = raw.getChannelData(c);
     const dst = buffer.getChannelData(c);
-    for (let i = 0; i < src.length; i++) dst[i] = src[i] * gain;
+    for (let i = 0; i < length; i++) dst[i] = src[i] * gain;
   }
   chopKit = { buffer, slices: sliceChops(buffer, mode), name, mode };
   idbPut("chop", { name, mode, ...packBuffer(buffer) });
@@ -1578,7 +1594,9 @@ export function createAudio(song) {
   setMetersActive(false); // boot state: the mixer sheet is closed
 
   loadSamples();
-  restoreSavedSamples(); // device memory: saved one-shots + chop kit (D14)
+  // Device memory (D14) restores well after boot: the cold open's first
+  // paint and first tap must never queue behind a buffer copy.
+  setTimeout(restoreSavedSamples, 900);
   const patches = Object.fromEntries(TRACK_KEYS.map((t) => [t, defaultPatch(t)]));
   for (const t of TRACK_KEYS) applyPatchTo(live, t, patches[t]);
   // The master bus's own patch. Defaults equal the compiled chain, so a graph
@@ -2242,7 +2260,9 @@ export function createAudio(song) {
       if (!chopKit) return;
       chopKit.mode = mode === "grid" ? "grid" : "auto";
       chopKit.slices = sliceChops(chopKit.buffer, chopKit.mode);
-      idbPut("chop", { name: chopKit.name, mode: chopKit.mode, ...packBuffer(chopKit.buffer) });
+      // A mode flip stores one tiny row — repacking megabytes of audio to
+      // record a string was a main-thread hitch for nothing.
+      idbPut("chopmeta", { mode: chopKit.mode });
     },
     userSampleName: (voice) => userSamples[voice]?.name || null,
     async loadUserSample(voice, arrayBuffer, name) {

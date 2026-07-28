@@ -244,8 +244,12 @@ try {
     const w = document.querySelector("#sheet .circle-canvas");
     return t && t.width > 0 && s && s.width > 0 && w && w.width > 0;
   });
-  // The wheel is the palette: a strum across it paints bars in a row.
+  // The wheel is the palette: a strum across it paints bars in a row. Slots
+  // are pre-set to the dim degree, which no OUTER wedge can write — so the
+  // strum's writes can never all no-op into a false failure.
   const strummed = await page.evaluate(() => {
+    const dim = window.__noodlesTone && window.__noodles.song.scenes[0].harmony.map(() => 6);
+    window.__noodles.song.scenes[0].harmony = dim || [6, 6, 6, 6];
     const canvas = document.querySelector("#sheet .circle-canvas");
     const r = canvas.getBoundingClientRect();
     const before = JSON.stringify(window.__noodles.song.scenes[0].harmony);

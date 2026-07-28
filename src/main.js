@@ -2866,6 +2866,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
   // slices aren't pitches.
   const rollStaff = chops ? null : el("canvas", { class: "rollstaff" });
   if (rollStaff) sheet.appendChild(rollStaff);
+  let rollStaffRAF = 0;
   function drawRollStaff() {
     if (!rollStaff) return;
     const w = rollStaff.clientWidth;
@@ -3117,7 +3118,14 @@ function buildPianoEditor(sceneIndex, scene, track) {
         vbars[s].parentElement.style.opacity = notes.length ? 1 : 0.3;
       }
     }
-    drawRollStaff();
+    // Coalesced: paint() runs per pointermove during a note stretch, and a
+    // sync staff redraw there is two forced layouts per move on little cores.
+    if (!rollStaffRAF) {
+      rollStaffRAF = requestAnimationFrame(() => {
+        rollStaffRAF = 0;
+        drawRollStaff();
+      });
+    }
   }
 
   const scrollToNotes = () => {
@@ -3470,6 +3478,21 @@ function buildHarmonyEditor(sceneIndex, scene) {
     selected = (selected + 1) % scene.harmony.length;
     slots.forEach((s, k) => s.classList.toggle("sel", k === selected));
   };
+  // Writes repaint on the next frame, once per burst — a four-wedge strum is
+  // one event turn, and drawing staff + threads + clip per wedge inside it
+  // measured a 109 ms long task on a desktop (an audible gap's worth on the
+  // A16). One undo per strum gesture for the same reason: structuredClone
+  // per wedge is GC food.
+  let editorPaintRAF = 0;
+  const scheduleEditorPaint = () => {
+    if (editorPaintRAF) return;
+    editorPaintRAF = requestAnimationFrame(() => {
+      editorPaintRAF = 0;
+      drawStaff();
+      drawThreads();
+      refreshClip(sceneIndex, "harmony");
+    });
+  };
   editorCircle = createCircleView({
     song,
     audio,
@@ -3482,12 +3505,10 @@ function buildHarmonyEditor(sceneIndex, scene) {
         if (ctx.strum) advanceSel();
         return false;
       }
-      pushUndo();
+      if (!ctx.strum || ctx.start) pushUndo();
       scene.harmony[selected] = entry;
       slots[selected].innerHTML = chordMarkup(entry, { notes: true });
-      refreshClip(sceneIndex, "harmony");
-      drawStaff();
-      drawThreads();
+      scheduleEditorPaint();
       if (ctx.strum) advanceSel();
       return true;
     },
