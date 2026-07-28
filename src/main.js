@@ -681,9 +681,11 @@ function drawStaffLetters(c, yOf, baseStep, bass, S) {
   const letters = bass ? "GABCDEFGA" : "EFGABCDEF";
   c.textAlign = "left";
   c.textBaseline = "middle";
-  c.font = `600 ${Math.max(6, Math.round(S * 0.95))}px system-ui, sans-serif`;
+  c.font = `600 ${Math.max(5.5, Math.round(S * 0.75))}px system-ui, sans-serif`;
   c.fillStyle = "rgba(255,255,255,0.32)";
-  for (let u = 0; u <= 8; u++) c.fillText(letters[u], 2.5, yOf(baseStep + u));
+  // Two staggered columns - lines left, spaces right - because at a
+  // half-gap pitch one column buries itself.
+  for (let u = 0; u <= 8; u++) c.fillText(letters[u], u % 2 ? 2.5 + S * 0.8 : 2.5, yOf(baseStep + u));
 }
 
 // The compass: twelve station dots, the sector arc, and a bright dot on the
@@ -2943,14 +2945,14 @@ function buildPianoEditor(sceneIndex, scene, track) {
     if (!rollStaff) return;
     const w = rollStaff.clientWidth;
     if (!w) return;
-    const h = 84;
+    const h = 94;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     rollStaff.width = Math.round(w * dpr);
     rollStaff.height = Math.round(h * dpr);
     const c = rollStaff.getContext("2d");
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.clearRect(0, 0, w, h);
-    const S = 7;
+    const S = 8;
     const bass = track === "bass";
     const baseStep = bass ? 25 : 37; // bottom line: G2 on the bass staff, E4 on the treble
     const bottomY = h - 24;
@@ -2968,13 +2970,13 @@ function buildPianoEditor(sceneIndex, scene, track) {
     c.strokeStyle = "rgba(240,240,244,0.85)";
     c.textBaseline = "middle";
     drawStaffLetters(c, yOf, baseStep, bass, S);
-    if (bass) drawFClef(c, S * 1.8, yOf(baseStep + 6), S);
-    else drawGClef(c, S * 1.9, yOf(baseStep + 2), S);
+    if (bass) drawFClef(c, S * 2.2, yOf(baseStep + 6), S);
+    else drawGClef(c, S * 2.3, yOf(baseStep + 2), S);
     const sig = keySignature(song.key, song.scale);
     const units = sig > 0 ? [8, 5, 9, 6, 3, 7, 4] : [4, 7, 3, 6, 2, 5, 1];
     c.textAlign = "center";
     c.font = `600 ${Math.round(S * 2)}px system-ui, sans-serif`;
-    let sx = S * 5.5;
+    let sx = S * 5.9;
     for (let i = 0; i < Math.abs(sig); i++) {
       const u = units[i] - (bass ? 2 : 0);
       c.fillText(sig > 0 ? "♯" : "♭", sx, yOf(baseStep + u) - (sig < 0 ? S * 0.3 : 0));
@@ -3318,16 +3320,16 @@ function buildHarmonyEditor(sceneIndex, scene) {
   function drawStaff() {
     const w = staffCanvas.clientWidth;
     if (!w || !scene.harmony.length) return;
-    const h = 96;
+    const h = 118;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     staffCanvas.width = Math.round(w * dpr);
     staffCanvas.height = Math.round(h * dpr);
     const c = staffCanvas.getContext("2d");
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.clearRect(0, 0, w, h);
-    const S = 9; // line gap
+    const S = 11; // line gap
     const E4 = 5 * 7 + 2; // diatonic step index of the bottom line
-    const bottomY = h - 26;
+    const bottomY = h - 30;
     const yOf = (step) => bottomY - (step - E4) * (S / 2);
     c.strokeStyle = "rgba(255,255,255,0.34)";
     c.lineWidth = 1;
@@ -3342,13 +3344,13 @@ function buildHarmonyEditor(sceneIndex, scene) {
     c.strokeStyle = "rgba(240,240,244,0.9)";
     c.textBaseline = "middle";
     drawStaffLetters(c, yOf, E4, false, S);
-    drawGClef(c, S * 1.9, yOf(E4 + 2), S);
+    drawGClef(c, S * 2.3, yOf(E4 + 2), S);
     const sig = keySignature(song.key, song.scale);
     const SHARP_UNITS = [8, 5, 9, 6, 3, 7, 4];
     const FLAT_UNITS = [4, 7, 3, 6, 2, 5, 1];
     c.font = `600 ${Math.round(S * 2.2)}px system-ui, sans-serif`;
     c.textAlign = "center";
-    let x = S * 5.2;
+    let x = S * 5.6;
     for (let i = 0; i < Math.abs(sig); i++) {
       const u = (sig > 0 ? SHARP_UNITS : FLAT_UNITS)[i];
       c.fillText(sig > 0 ? "♯" : "♭", x, yOf(E4 + u) - (sig > 0 ? 0 : S * 0.3));

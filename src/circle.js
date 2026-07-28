@@ -232,15 +232,26 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
   function playPcs(pcs) {
     ensureStarted().then(() => audio.previewPcs(applyMirror(pcs), getHarmonyOct()));
   }
+  // The wedge remembers its voicing: release the bloom over a pad and plain
+  // taps play that stack until a hold releases on empty air. The mirror
+  // stays a triad toy - reflection has no root-position law for towers yet.
+  const stickyExt = new Map(); // "ring:station" -> EXT_PADS index
+  const stickyKey = (w) => w.ring + ":" + w.station;
+  const wedgePcs = (w) => {
+    const sel = stickyExt.get(stickyKey(w));
+    return sel != null ? extPcs(w, EXT_PADS[sel]) : w.pcs;
+  };
   function soundWedge(w) {
-    playPcs(w.pcs);
-    pushTrail(mirrorHold != null ? wedgeOfPcs(effectiveChord(w.pcs).pcs) : w);
+    const pcs = mirrorHold != null ? w.pcs : wedgePcs(w);
+    playPcs(pcs);
+    pushTrail(mirrorHold != null ? wedgeOfPcs(effectiveChord(w.pcs).pcs) : { ...w, pcs });
   }
   // A clean tap writes; a hold is an audition. Strums write only where the
   // mount says so (the editor), never in the key sheet — one intent, one
   // write, unless the surface's whole point is painting a run.
   function tryCapture(w, ctx = {}) {
-    const chord = mirrorHold != null ? effectiveChord(w.pcs) : w;
+    const sel = mirrorHold == null ? stickyExt.get(stickyKey(w)) : null;
+    const chord = mirrorHold != null ? effectiveChord(w.pcs) : sel != null ? { degree: -1, pcs: extPcs(w, EXT_PADS[sel]) } : w;
     if (captureChord(chord, ctx)) {
       const fw = mirrorHold != null ? wedgeOfPcs(chord.pcs) : w;
       flash = { ring: fw.ring, station: fw.station, t: nowS() };
@@ -412,6 +423,17 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
         sctx.fillText(label, p.x, p.y);
       }
     }
+    // Sticky voicings wear their number at the wedge's shoulder.
+    sctx.font = `700 ${Math.round(size * 0.027)}px ${FONT}`;
+    sctx.fillStyle = "#e8b84b";
+    for (const [key, sel] of stickyExt) {
+      const [ring, stStr] = key.split(":");
+      const station = Number(stStr);
+      if (station < 0) continue;
+      const p = polar(angleOf(station) + STEP * 0.3, ring === "outer" ? R_OUT - 0.05 : R_MID - 0.05);
+      sctx.fillText(EXT_PADS[sel].id, p.x, p.y);
+    }
+
     // Grab dots on the sector's rim span.
     sctx.fillStyle = "rgba(232,184,75,0.8)";
     for (const off of [-0.3, 0, 0.3]) {
@@ -703,10 +725,10 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     // Fan the pads away from the wheel's center so the thumb never covers
     // them, and keep every pad on the canvas. Six pads: a wider, tighter fan.
     const base = Math.atan2(y - center(), x - center());
-    const r = Math.max(size * 0.046, 23);
-    const dist = r * 2.55;
+    const r = Math.max(size * 0.056, 27);
+    const dist = r * 2.7;
     return EXT_PADS.map((_, i) => {
-      const a = base + (i - 2.5) * 0.52;
+      const a = base + (i - 2.5) * 0.6;
       return {
         x: Math.max(r + 2, Math.min(size - r - 2, x + Math.cos(a) * dist)),
         y: Math.max(r + 2, Math.min(size - r - 2, y + Math.sin(a) * dist)),
@@ -786,6 +808,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
       if (!g.down || g.bloom) return;
       g.bloom = true;
       g.pads = padLayout(g.x, g.y);
+      g.bloomSel = stickyExt.get(stickyKey(g.curWedge)) ?? null;
       buzz(6);
       wake();
     }, HOLD_MS);
@@ -921,17 +944,23 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     g.down = false;
     gestures.delete(e.pointerId);
     if (e.type === "pointerup" && !g.bloom && !g.strummed) tryCapture(g.curWedge);
-    else if (e.type === "pointerup" && g.bloom && g.bloomSel != null) {
-      // Releasing ON a pad is as deliberate as a tap: the chosen extension
-      // can land in the clip. Stored as {pcs} even when diatonic — the model
-      // recognizes the triad underneath and keeps its function color. The
-      // mirror is deliberately not applied here: a reflected seventh has no
-      // root-position law yet.
-      const pcs = extPcs(g.curWedge, EXT_PADS[g.bloomSel]);
-      if (captureChord({ degree: -1, pcs })) {
-        flash = { ring: g.curWedge.ring, station: g.curWedge.station, t: nowS() };
-        buzz(10);
+    else if (e.type === "pointerup" && g.bloom) {
+      // Releasing ON a pad is as deliberate as a tap: the wedge remembers
+      // the voicing (plain taps play it from now on) and the chosen stack
+      // can land in the clip - {pcs} even when diatonic, the model keeps
+      // the function color. Empty air forgets, back to the triad.
+      const key = stickyKey(g.curWedge);
+      if (g.bloomSel != null) {
+        stickyExt.set(key, g.bloomSel);
+        const pcs = extPcs(g.curWedge, EXT_PADS[g.bloomSel]);
+        if (captureChord({ degree: -1, pcs })) {
+          flash = { ring: g.curWedge.ring, station: g.curWedge.station, t: nowS() };
+          buzz(10);
+        }
+      } else {
+        stickyExt.delete(key);
       }
+      paintStatic(); // the sticky badges live on the static wheel
     }
     wake();
   }
