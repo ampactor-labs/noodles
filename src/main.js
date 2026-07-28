@@ -3353,7 +3353,7 @@ function buildHarmonyEditor(sceneIndex, scene) {
     const FLAT_UNITS = [4, 7, 3, 6, 2, 5, 1];
     c.font = `600 ${Math.round(S * 2.2)}px system-ui, sans-serif`;
     c.textAlign = "center";
-    let x = S * 5.6;
+    let x = S * 6.0;
     for (let i = 0; i < Math.abs(sig); i++) {
       const u = (sig > 0 ? SHARP_UNITS : FLAT_UNITS)[i];
       c.fillText(sig > 0 ? "♯" : "♭", x, yOf(E4 + u) - (sig > 0 ? 0 : S * 0.3));
@@ -3379,7 +3379,7 @@ function buildHarmonyEditor(sceneIndex, scene) {
       }
       const inv = (typeof entry === "object" && entry.inv) || 0;
       if (inv > 0) midis.push(36 + ch.bass);
-      const notes = midis
+      let notes = midis
         .map((m) => {
           const midi = m + oct;
           const pc = ((midi % 12) + 12) % 12;
@@ -3387,6 +3387,17 @@ function buildHarmonyEditor(sceneIndex, scene) {
           return { step: Math.floor((midi - t.acc) / 12) * 7 + t.letter, acc: t.acc, letter: t.letter };
         })
         .sort((a, b) => a.step - b.step);
+      // 8va: if the tower would run off the canvas, write it an octave
+      // lower and say so - engraving's own convention, taught in passing.
+      let octDrop = 0;
+      while (notes.length && yOf(notes[notes.length - 1].step - octDrop * 7) < S * 1.4 && octDrop < 2) octDrop++;
+      if (octDrop) {
+        notes = notes.map((n) => ({ ...n, step: n.step - octDrop * 7 }));
+        c.fillStyle = "rgba(240,240,244,0.7)";
+        c.font = `italic 700 ${Math.round(S * 1.1)}px system-ui, sans-serif`;
+        c.textAlign = "center";
+        c.fillText(octDrop === 1 ? "8va" : "15ma", cx, Math.max(S * 0.8, yOf(notes[notes.length - 1].step) - S * 1.6));
+      }
       // Clustered seconds sidestep right, the standard rule.
       for (let k = 1; k < notes.length; k++) {
         if (notes[k].step - notes[k - 1].step === 1 && !notes[k - 1].dx) notes[k].dx = S * 0.95;

@@ -276,6 +276,15 @@ export function harmonyChord(entry) {
       if (dim) ext = (seventh === 9 ? "°" : "ø") + N;
       else if (seventh === 11) ext = "maj" + N;
       else ext = N;
+      // Alterations, named off the actual intervals: the diatonic iii11 in
+      // major carries a ♭9 and should say so; lydian's IV names its ♯11.
+      if (pcs.length > 4) {
+        const nine = rel(pcs[4]);
+        if (nine === 1) ext += "♭9";
+        else if (nine === 3) ext += "♯9";
+      }
+      if (pcs.length > 5 && rel(pcs[5]) === 6) ext += "♯11";
+      if (pcs.length > 6 && rel(pcs[6]) === 8) ext += "♭13";
     }
   }
   const halfDim = ext.startsWith("ø") || ext.startsWith("°"); // ° moves into the suffix
