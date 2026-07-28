@@ -1372,7 +1372,7 @@ function playArrangementStepOn(g, patches, vstate, song, bar, stepInBar, time) {
   if (d) {
     const sc = song.scenes[d.scene];
     const idx = ((bar - d.start) * 16 + stepInBar) % stepsFor(sc, "drums");
-    const at = time + swingOffsetFor(song, "drums", idx);
+    const at = Math.max(0, time + swingOffsetFor(song, "drums", idx));
     for (const v of DRUM_VOICES) {
       if (sc.drums[v][idx] > 0) {
         vstate.wake?.("drums");
@@ -1389,7 +1389,7 @@ function playArrangementStepOn(g, patches, vstate, song, bar, stepInBar, time) {
     const slot = sc[trk][idx];
     if (noteSlot(slot).length) {
       vstate.wake?.(trk);
-      playNoteStackOn(g, patches, trk, slot, time + swingOffsetFor(song, trk, idx));
+      playNoteStackOn(g, patches, trk, slot, Math.max(0, time + swingOffsetFor(song, trk, idx)));
     }
   }
   return chord;
@@ -1851,7 +1851,7 @@ export function createAudio(song) {
     const drumScene = drumState.active ? song.scenes[drumState.scene] : null;
     if (drumScene) {
       const idx = drumState.step % stepsFor(drumScene, "drums");
-      const at = time + swingOffsetFor(song, "drums", idx);
+      const at = Math.max(0, time + swingOffsetFor(song, "drums", idx));
       for (const v of DRUM_VOICES) {
         if (drumScene.drums[v][idx] > 0) {
           hitDrum(v, at, drumScene.drums[v][idx]);
@@ -1865,7 +1865,7 @@ export function createAudio(song) {
       const scene = st.active ? song.scenes[st.scene] : null;
       if (!scene) continue;
       const idx = st.step % stepsFor(scene, track);
-      playNoteStack(track, scene[track][idx], time + swingOffsetFor(song, track, idx));
+      playNoteStack(track, scene[track][idx], Math.max(0, time + swingOffsetFor(song, track, idx)));
     }
 
     const anchorsCurrent = trackLoopAnchors(time);

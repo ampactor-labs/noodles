@@ -20,6 +20,13 @@ headless gates (`npm run smoke`, `npm run calibrate`).
 4. **User-sample persistence** — one story covering drum one-shots AND the chop
    buffer (IndexedDB vs project-file embedding, the open fork from the sample loader).
 
+The wheel unified the harmony surfaces 2026-07-28 evening: the chord editor's
+seven-block picker is replaced by the circle itself (same component, small
+mount, always armed — taps write the selected bar, strums paint runs of bars,
+blooms/borrowed/mirror all write), and the footer KEY button became a live
+mini-wheel compass. One harmonic instrument, three mounts: footer glyph, key
+sheet, editor palette.
+
 The chop deck shipped 2026-07-28 (DECISIONS D6 + P4): melody's second source —
 load a sample, sliced at hits or on the grid, rows as slices, the upper run
 replaying at double speed, normalized once at load, session-scoped like the

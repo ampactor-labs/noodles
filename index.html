@@ -209,6 +209,15 @@
         font-size: 10px;
         font-weight: 600;
       }
+      .keyglyph {
+        display: block;
+        flex: 0 0 auto;
+      }
+      .keybtn-name {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
       /* The circle sheet */
       .circle-wrap {
         display: flex;
@@ -901,31 +910,6 @@
         outline: 2px solid #fff;
         z-index: 3;
       }
-      .picker {
-        display: grid;
-        grid-template-columns: repeat(7, 1fr);
-        gap: 6px;
-      }
-      .copt {
-        border-radius: 6px;
-        min-height: 58px;
-        padding: 5px 2px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        font-size: 15px;
-        font-weight: 700;
-        color: #fff;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-      }
-      .copt b { font-size: 16px; }
-      .copt span { font-size: 10px; opacity: 0.8; font-weight: 600; margin-top: 2px; }
-      .copt .chord-notes {
-        font-size: 7px;
-        opacity: 0.82;
-      }
-
       /* Arrangement view */
       #arrangement {
         flex: 1;

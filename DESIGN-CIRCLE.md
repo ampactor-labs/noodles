@@ -185,6 +185,22 @@ frame on a ~350 px square. Receipts: `.tmp/dbg-circle.mjs` (screenshots,
 travel, trail), and the circle section in `npm run smoke` (armed punch,
 travel commit, undo restore).
 
+## The wheel as the app's geometry (2026-07-28, "unify, simplify, empower")
+
+The circle stopped being a destination and became the harmonic surface
+everywhere chords appear. One component, three mounts: the footer's KEY
+button draws a 26 px live compass (sector arc, front-door dot); the key
+sheet mounts the full wheel with the ● arm; the chord editor mounts a small
+one in place of the old seven-block picker — always armed, because editing
+is the intent, with `strumWrites` on so a drag across wedges paints bars in
+a row while the selection walks forward. Everything the big wheel does —
+blooms, borrowed reaches, the mirror, rim travel, the door, the spiral —
+works in the editor, and a key change from the editor's own wheel rebuilds
+the open editor so slots, staff, threads, and wheel re-speak together. The
+editor column now reads top to bottom as four projections of one clip:
+engraved staff, named slots, voice threads, and the wheel. The picker idiom
+and its CSS are deleted; the wheel is the palette.
+
 ## Prior art, one line
 
 Existing circle apps — the Play Store's, the CodePen SVG wheels — are

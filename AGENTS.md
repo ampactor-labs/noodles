@@ -190,11 +190,17 @@ in-sector wedge and the mode renames without moving a note (degrees re-index; a
 stationary grab is a plain tap). Rendering is a cached static layer plus rAF only
 while open and animating; theory helpers (station math `pc·7 mod 12`, signatures,
 `keyDisplayName`, diatonic extension intervals) live in model.js.
-`window.__noodlesCircle` exposes geometry for the harnesses; design reasoning and
-the bank are in `DESIGN-CIRCLE.md`. The chord editor carries the circle's two
-sibling projections (both in main.js): the engraved treble staff above the slots
-(the heard voicing, signature-honest — `DESIGN-STAFF.md`) and the voice-leading
-thread strip below them (held tones gold and level, moving voices sloped).
+`window.__noodlesCircle` exposes geometry for the harnesses (the key sheet's
+instance only); design reasoning and the bank are in `DESIGN-CIRCLE.md`. The
+component mounts twice: the key sheet (full size, ● arm gates clip writes) and
+the chord editor (small, always armed, `strumWrites` on — a drag across wedges
+paints bars in a row while the selection walks forward). The editor stacks the
+wheel under its two sibling projections (all in main.js): the engraved treble
+staff above the slots (the heard voicing, signature-honest — `DESIGN-STAFF.md`)
+and the voice-leading thread strip (held tones gold and level, moving voices
+sloped). The old seven-block picker is gone; the wheel is the palette. The
+footer's KEY button draws a live mini-wheel compass (sector arc + front-door
+dot, `drawKeyGlyph`).
 
 **`src/main.js`** — all UI and interaction, vanilla DOM (no framework). It builds: the
 transport (pinned **play + undo + redo** that never scroll and sit above any open editor,

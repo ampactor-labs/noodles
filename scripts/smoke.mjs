@@ -223,8 +223,26 @@ try {
   await page.waitForFunction(() => {
     const t = document.querySelector(".vthreads");
     const s = document.querySelector(".staffview");
-    return t && t.width > 0 && s && s.width > 0;
+    const w = document.querySelector("#sheet .circle-canvas");
+    return t && t.width > 0 && s && s.width > 0 && w && w.width > 0;
   });
+  // The wheel is the palette: a strum across it paints bars in a row.
+  const strummed = await page.evaluate(() => {
+    const canvas = document.querySelector("#sheet .circle-canvas");
+    const r = canvas.getBoundingClientRect();
+    const before = JSON.stringify(window.__noodles.song.scenes[0].harmony);
+    const pt = (deg) => ({
+      x: r.left + r.width / 2 + Math.cos((deg * Math.PI) / 180) * (r.width / 2) * 0.62,
+      y: r.top + r.height / 2 + Math.sin((deg * Math.PI) / 180) * (r.height / 2) * 0.62,
+    });
+    const o = (p, id) => ({ bubbles: true, cancelable: true, pointerId: id, pointerType: "touch", clientX: p.x, clientY: p.y });
+    canvas.dispatchEvent(new PointerEvent("pointerdown", o(pt(-90), 81)));
+    canvas.dispatchEvent(new PointerEvent("pointermove", o(pt(-60), 81)));
+    canvas.dispatchEvent(new PointerEvent("pointermove", o(pt(-30), 81)));
+    canvas.dispatchEvent(new PointerEvent("pointerup", o(pt(-30), 81)));
+    return before !== JSON.stringify(window.__noodles.song.scenes[0].harmony);
+  });
+  assertState(strummed, "the editor wheel's strum wrote no bars");
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
 

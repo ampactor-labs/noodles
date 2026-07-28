@@ -69,7 +69,12 @@ function quality(pcs) {
   return t === 3 && f === 6 ? "dim" : t === 3 ? "min" : "maj";
 }
 
-export function createCircleView({ song, audio, ensureStarted, commitKeyScale, commitMode, captureChord, getHarmonyOct, buzz }) {
+// Options beyond the callbacks: `sizeCap` bounds the wheel (the chord editor
+// mounts a smaller one), `strumWrites` makes a strum capture every wedge it
+// crosses (the editor paints whole progressions in one drag; the key sheet
+// keeps strums as pure runs), and `debugHandle` installs __noodlesCircle
+// (the key sheet's instance only — the harnesses steer by it).
+export function createCircleView({ song, audio, ensureStarted, commitKeyScale, commitMode, captureChord, getHarmonyOct, buzz, sizeCap, strumWrites = false, debugHandle = true }) {
   const wrap = document.createElement("div");
   wrap.className = "circle-wrap";
   const canvas = document.createElement("canvas");
@@ -234,11 +239,12 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     playPcs(w.pcs);
     pushTrail(mirrorHold != null ? wedgeOfPcs(effectiveChord(w.pcs).pcs) : w);
   }
-  // Only a clean tap writes into the playing clip — a strum is a run, a hold
-  // is an audition. One intent, one write.
-  function tryCapture(w) {
+  // A clean tap writes; a hold is an audition. Strums write only where the
+  // mount says so (the editor), never in the key sheet — one intent, one
+  // write, unless the surface's whole point is painting a run.
+  function tryCapture(w, ctx = {}) {
     const chord = mirrorHold != null ? effectiveChord(w.pcs) : w;
-    if (captureChord(chord)) {
+    if (captureChord(chord, ctx)) {
       const fw = mirrorHold != null ? wedgeOfPcs(chord.pcs) : w;
       flash = { ring: fw.ring, station: fw.station, t: nowS() };
       buzz(10);
@@ -827,11 +833,13 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     }
     if (Math.hypot(x - g.startX, y - g.startY) > 14) {
       clearTimeout(g.timer); // moving means strumming, not holding
+      if (!g.strummed && strumWrites) tryCapture(g.curWedge, { strum: true }); // the origin joins the run
       g.strummed = true;
       const hit = hitTest(x, y);
       if (hit?.kind === "wedge" && (hit.wedge.ring !== g.curWedge.ring || hit.wedge.station !== g.curWedge.station)) {
         g.curWedge = hit.wedge;
         soundWedge(hit.wedge);
+        if (strumWrites) tryCapture(hit.wedge, { strum: true });
       }
     }
   });
@@ -945,7 +953,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
   // --- Lifecycle ---
   function resize() {
     const w = wrap.clientWidth || 320;
-    const target = Math.round(Math.min(w, window.innerHeight * 0.5));
+    const target = Math.round(Math.min(w, sizeCap ?? window.innerHeight * 0.5));
     dpr = Math.min(2, window.devicePixelRatio || 1);
     if (target === size && canvas.width === Math.round(target * dpr)) return;
     size = target;
@@ -993,7 +1001,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
 
   // Debug handle for the headless harness — geometry only, same contract as
   // window.__noodles: not a public API, but smoke depends on it.
-  if (typeof window !== "undefined") {
+  if (debugHandle && typeof window !== "undefined") {
     window.__noodlesCircle = {
       point: (ring, station) => wedgePoint(ring, station),
       rimPoint: (station) => polar(angleOf(station), (R_OUT + R_RIM) / 2),

@@ -9,7 +9,6 @@ import {
   ARRANGE_TRACKS,
   SCALE_NAMES,
   FOLLOW_ACTIONS,
-  chordColor,
   clipLaunch,
   hslInt,
   makeSong,
@@ -33,6 +32,8 @@ import {
   scaleDegreeOfPc,
   spellChordTones,
   signatureAccFor,
+  stationOfPc,
+  relMajorPc,
 } from "./model.js";
 import { createAudio, KIT_NAMES, SAMPLE_KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, colorNamesFor, DRUM_BANKS, drumCornerNames, MASTER_DEFAULTS } from "./audio.js";
 import { createCircleView } from "./circle.js";
@@ -69,7 +70,6 @@ function slotPeakVel(slot) {
 }
 
 const hex = (n) => "#" + (n >>> 0).toString(16).padStart(6, "0");
-const chordHex = (ci) => hex(chordColor(ci));
 const padHex = (v) => hex(hslInt(DRUM_META[v].hue, DRUM_META[v].sat, DRUM_META[v].light));
 
 const TRACKS = [
@@ -203,6 +203,7 @@ const sceneEls = []; // per scene: { row, clips: {track: el} }
 // the write into the playing clip.
 let circleArmed = false; // ● in the circle bar: taps land in the playing clip
 let circleBar = 0; // harmony slot being heard right now (from chord events)
+let editorCircle = null; // the chord editor's mounted wheel, one at a time
 // A clean armed tap on a diatonic wedge replaces the chord being heard —
 // bar-quantized by construction, since harmony is one chord per bar. Borrowed
 // chords (degree -1) are playable but not storable: the model speaks scale
@@ -244,6 +245,9 @@ function circleDoorMode(tonicPc, scaleName) {
   updateUndoButtons();
   circleView.refreshStatic();
   updateCircleChrome();
+  // A mode change from the editor's own wheel: rebuild the open editor so
+  // slots, staff, and wheel all speak the new names.
+  if (editor?.track === "harmony") openEditor(editor.scene, editor.track);
 }
 const circleView = createCircleView({
   song,
@@ -446,17 +450,22 @@ function renderFooter() {
     humanSlider,
     humanVal,
   ]);
-  // The key control IS the circle: one button wearing the key's honest name,
-  // opening the wheel. Where the two dropdowns stood.
-  const keyBtn = el("div", {
-    class: "tbtn keybtn",
-    id: "key-btn",
-    "data-sheet": "circle",
-    role: "button",
-    tabindex: "0",
-    html: `${keyDisplayName(song.key, song.scale)}<small>${song.scale}</small>`,
-    onclick: openCircleSheet,
-  });
+  // The key control IS the circle: a live mini-wheel — the app's compass,
+  // sector and front door at a glance — beside the key's honest name.
+  const glyph = el("canvas", { class: "keyglyph" });
+  const keyBtn = el(
+    "div",
+    {
+      class: "tbtn keybtn",
+      id: "key-btn",
+      "data-sheet": "circle",
+      role: "button",
+      tabindex: "0",
+      onclick: openCircleSheet,
+    },
+    [glyph, el("span", { class: "keybtn-name", html: `${keyDisplayName(song.key, song.scale)}<small>${song.scale}</small>` })]
+  );
+  drawKeyGlyph(glyph);
   const keyctl = el("div", { class: "keyctl" }, [keyBtn]);
   // The dice sits with the song's musical identity: one tap rolls a whole new
   // key + tempo + sounds + magic scene, same as a fresh load. Undo-safe.
@@ -487,7 +496,7 @@ function openAboutSheet() {
     p("Each row is a scene — a loop and a song section in one. + adds another: blank, a copy, or a fresh magic one. The corner pie on a playing clip shows where it is in its loop. Long-press a clip for launch modes and follow actions, a scene's ▶ for scene moves, a track name for track moves."),
 
     label("editors"),
-    p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key. Chords: pick from the seven that fit, colored by their job — the staff above writes down exactly what you'll hear, and the threads below show which notes carry over between chords. − / + shortens a clip's loop; a 12-step line against 16-step drums drifts in and out of phase on purpose. ◧ zooms the note grid when your thumbs need bigger targets."),
+    p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key. Chords: the wheel itself is the palette — tap a wedge to set the selected bar, drag across the wheel to paint a run of bars in one stroke, and everything the big wheel does works here too. The staff above writes down exactly what you'll hear; the threads below show which notes carry over. − / + shortens a clip's loop; a 12-step line against 16-step drums drifts in and out of phase on purpose. ◧ zooms the note grid when your thumbs need bigger targets."),
 
     label("the circle"),
     p("Tap the key name at the bottom and the circle of fifths opens. The bright neighborhood is your key — tap a wedge to hear its chord, hold it for sevenths and sus, drag across them to strum. The dim wedges outside are chords you can borrow. Arm ● and a clean tap lands in the playing clip. Drag the rim to carry the whole song to a new key and watch the sharps arrive one by one; drag the white dot to call the same notes by another mode's name; hold the middle and everything you tap comes back mirrored; pinch open to see why twelve fifths never quite close."),
@@ -603,6 +612,43 @@ function openAboutSheet() {
   });
 }
 
+
+// The compass: twelve station dots, the sector arc, and a bright dot on the
+// front door — the wheel's whole story at sixteen pixels, always in the
+// footer. Redrawn with the footer on every key move.
+function drawKeyGlyph(canvas) {
+  const s = 26;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = canvas.height = Math.round(s * dpr);
+  canvas.style.width = canvas.style.height = s + "px";
+  const c = canvas.getContext("2d");
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const H = stationOfPc(relMajorPc(song.key, song.scale));
+  const mid = s / 2;
+  const r = mid - 3;
+  const ang = (st) => (st * Math.PI) / 6 - Math.PI / 2;
+  c.strokeStyle = "rgba(232,184,75,0.95)";
+  c.lineWidth = 2.4;
+  c.lineCap = "round";
+  c.beginPath();
+  c.arc(mid, mid, r, ang(H - 1.5), ang(H + 1.5));
+  c.stroke();
+  c.fillStyle = "rgba(255,255,255,0.35)";
+  for (let i = 0; i < 12; i++) {
+    const rel = (((i - H) % 12) + 12) % 12;
+    if (rel <= 1 || rel === 11) continue;
+    c.beginPath();
+    c.arc(mid + Math.cos(ang(i)) * r, mid + Math.sin(ang(i)) * r, 1.1, 0, Math.PI * 2);
+    c.fill();
+  }
+  const tonic = harmonyChord(0).pcs;
+  const minorish = (tonic[1] - tonic[0] + 12) % 12 === 3;
+  const doorSt = stationOfPc(minorish ? (tonic[0] + 3) % 12 : tonic[0]);
+  c.fillStyle = "#fff";
+  c.beginPath();
+  c.arc(mid + Math.cos(ang(doorSt)) * r, mid + Math.sin(ang(doorSt)) * r, 2.2, 0, Math.PI * 2);
+  c.fill();
+}
 
 // ---------------------------------------------------------------------------
 // The circle sheet: the wheel, a scale row, and the ● that lets taps land in
@@ -911,6 +957,9 @@ function circleKeyScale(key, scale) {
   updateUndoButtons();
   circleView.refreshStatic();
   updateCircleChrome();
+  // Travel from the editor's own wheel: rebuild the open editor so slots,
+  // staff, threads, and wheel all speak the new key.
+  if (editor?.track === "harmony") openEditor(editor.scene, editor.track);
 }
 
 // ---------------------------------------------------------------------------
@@ -1402,6 +1451,8 @@ function openEditor(sceneIndex, track) {
 
 function closeEditor() {
   if (sheetId === "circle") circleView.closed();
+  editorCircle?.closed();
+  editorCircle = null;
   editor = null;
   sheetId = null;
   cancelAnimationFrame(mixerRAF);
@@ -1417,6 +1468,8 @@ function closeEditor() {
 // opener can forget one.
 function resetSheet(color) {
   if (sheetId === "circle") circleView.closed();
+  editorCircle?.closed();
+  editorCircle = null;
   editor = null;
   sheetId = null;
   cancelAnimationFrame(mixerRAF);
@@ -3097,27 +3150,45 @@ function buildHarmonyEditor(sceneIndex, scene) {
     drawThreads();
   });
 
-  const picker = el("div", { class: "picker" });
-  CHORDS.forEach((ch, ci) => {
-    picker.appendChild(
-      el("div", {
-        class: "copt",
-        style: `background:${chordHex(ci)}`,
-        html: chordMarkup(ci, { notes: true }),
-        onclick: async () => {
-          await ensureStarted();
-          pushUndo();
-          scene.harmony[selected] = ci;
-          slots[selected].innerHTML = chordMarkup(ci, { notes: true });
-          audio.preview(ci);
-          refreshClip(sceneIndex, "harmony");
-          drawStaff();
-          drawThreads();
-        },
-      })
-    );
+  // The wheel IS the palette — the same instrument as the key sheet, mounted
+  // small, always armed because editing is the intent. Taps write the
+  // selected bar; a strum paints bars in a row (the origin wedge joins the
+  // run and the selection walks forward); blooms write sevenths, the dim
+  // wedges write borrowed chords, the mirror writes reflections. One
+  // harmonic surface everywhere.
+  const advanceSel = () => {
+    selected = (selected + 1) % scene.harmony.length;
+    slots.forEach((s, k) => s.classList.toggle("sel", k === selected));
+  };
+  editorCircle = createCircleView({
+    song,
+    audio,
+    ensureStarted,
+    commitKeyScale: circleKeyScale,
+    commitMode: circleDoorMode,
+    captureChord: (chord, ctx = {}) => {
+      const entry = chord.degree >= 0 ? chord.degree : { pcs: chord.pcs.slice(0, 4) };
+      if (harmonyEntryEquals(scene.harmony[selected], entry)) {
+        if (ctx.strum) advanceSel();
+        return false;
+      }
+      pushUndo();
+      scene.harmony[selected] = entry;
+      slots[selected].innerHTML = chordMarkup(entry, { notes: true });
+      refreshClip(sceneIndex, "harmony");
+      drawStaff();
+      drawThreads();
+      if (ctx.strum) advanceSel();
+      return true;
+    },
+    getHarmonyOct: () => scene.harmonyOct || 0,
+    buzz,
+    sizeCap: 236,
+    strumWrites: true,
+    debugHandle: false,
   });
-  scrollContainer.appendChild(picker);
+  scrollContainer.appendChild(editorCircle.el);
+  requestAnimationFrame(() => editorCircle?.opened());
   sheet.appendChild(scrollContainer);
 }
 
@@ -4098,6 +4169,7 @@ audio.onVisual((e) => {
   if (e.type === "chord" || e.type === "arrchord") {
     circleBar = e.bar;
     circleView.onPlaybackChord(e.chord);
+    editorCircle?.onPlaybackChord(e.chord);
   }
 
   if (e.type === "step") {
