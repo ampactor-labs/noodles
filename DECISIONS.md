@@ -221,6 +221,25 @@ beside playNoteStackOn) and the piano roll's row labels, and nothing else.
 Provisional because it decides what the melody track IS when a sample is
 loaded — ratify or overturn before the build.
 
+### D16 — Send rides close D5's deferral: the base is the mixer
+
+The deferred fork was the base-restore story: when a verb or echo lane
+ends, what level does the track come back to? The answer: the mixer's
+static channelState is the base, exactly as patch lanes treat the sound
+patch. A lane overrides per step; the first laneless scene ramps the base
+back once (the same motionOn restore-once contract). Lanes store the
+knob's -30..0 dB normalized to 0..1, so a send ride reads like every other
+lane in the picker and the painter; playback inverts it and ramps the
+per-track send gain directly. Capture is the same performance: arm ● ride,
+sweep verb or echo — knobs now sitting on the Sound sheet beside amount
+and motion — and only what you touched grows a lane. The live path wakes a
+parked return before a lane opens its send (the setSend discipline,
+threaded through as mstate.wakeSend); offline, renderOffline scans the
+scenes' ride lanes so a return a ride needs gets built even when every
+static send is off — without that scan a recorded ride rendered dry.
+Revert is deleting the SEND_PARAMS branch in applyMotionOn; ride lanes in
+project files would then just be ignored keys.
+
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 
 Reading §7 straight: the couch-songwriting cold open is the milestone, the backing-track/Link scenario is phase two. Confirm this is the priority order before the research pass sets its emphasis.

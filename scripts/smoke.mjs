@@ -217,16 +217,25 @@ try {
   assertState(rollStaffOk, "roll staff missing or unpainted");
   const laneOk = await page.evaluate(() => {
     window.__noodles.song.scenes[0].motion ||= {};
-    window.__noodles.song.scenes[0].motion.melody = { x: new Array(64).fill(0.3) };
+    // A patch lane and a send ride together: the picker lists both kinds.
+    window.__noodles.song.scenes[0].motion.melody = { x: new Array(64).fill(0.3), verb: new Array(64).fill(0.5) };
     const vkey = document.querySelector(".vkey-pick");
     vkey.click();
     const picked = vkey.textContent;
     const chips = document.querySelectorAll(".lane-bar").length;
+    vkey.click();
+    const pickedRide = vkey.textContent;
+    document.querySelector(".lane-clear").click();
+    const rideCleared = !window.__noodles.song.scenes[0].motion.melody?.verb;
+    vkey.click();
     document.querySelector(".lane-clear").click();
     const cleared = !window.__noodles.song.scenes[0].motion?.melody;
-    return { picked, chips, cleared, back: vkey.textContent };
+    return { picked, chips, pickedRide, rideCleared, cleared, back: vkey.textContent };
   });
-  assertState(laneOk.picked === "x" && laneOk.chips === 4 && laneOk.cleared && laneOk.back === "vel", `motion lane picker misbehaved: ${JSON.stringify(laneOk)}`);
+  assertState(
+    laneOk.picked === "x" && laneOk.chips === 4 && laneOk.pickedRide === "verb" && laneOk.rideCleared && laneOk.cleared && laneOk.back === "vel",
+    `motion lane picker misbehaved: ${JSON.stringify(laneOk)}`
+  );
   // Editor dice: rolled melody notes stay inside a 2-octave in-scale window
   // between octave 2 and octave 5 (the old roll scattered across ~8 octaves).
   await page.evaluate(() => [...document.querySelectorAll(".tfbtn")].find((b) => b.textContent === "🎲")?.click());
@@ -612,25 +621,32 @@ try {
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
   await tap(page, '.arr-thead[data-track="bass"]');
   await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Sound");
-  // Motion capture: arm the bass, play, ride the pad via setPatch, and some
-  // playing scene must grow an x lane with real variety in it.
+  // Motion capture: arm the bass, play, ride the pad via setPatch AND the
+  // verb send via setSend; some playing scene must grow both an x lane and a
+  // verb ride with real variety in them (the send ride is D5's closure).
   await page.evaluate(() => window.__noodles.audio.armMotion("bass", true));
   await tap(page, ".tbtn.play");
   await page.evaluate(async () => {
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     for (let i = 0; i < 10; i++) {
       window.__noodles.audio.setPatch("bass", { x: i / 10, y: 1 - i / 10 });
+      window.__noodles.audio.setSend("bass", -30 + i * 3);
       await wait(150);
     }
   });
   await page.waitForFunction(() => {
     return window.__noodles.song.scenes.some((sc) => {
       const lane = sc.motion?.bass?.x;
-      return Array.isArray(lane) && new Set(lane.map((v) => v.toFixed(2))).size > 2;
+      const ride = sc.motion?.bass?.verb;
+      const varied = (a) => Array.isArray(a) && new Set(a.map((v) => v.toFixed(2))).size > 2;
+      return varied(lane) && varied(ride);
     });
   }, { timeout: 15000 });
   await tap(page, ".tbtn.play");
-  await page.evaluate(() => window.__noodles.audio.disarmMotion());
+  await page.evaluate(() => {
+    window.__noodles.audio.disarmMotion();
+    window.__noodles.audio.setSend("bass", -30); // static send back to off; the recorded ride stays
+  });
   // Drums: kit pad, sample/synth banks, and the one-shot picker. The sound
   // sheet replaced the mixer, so reopen it to reach the drums strip.
   await closeSheet(page);

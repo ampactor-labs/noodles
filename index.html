@@ -1652,6 +1652,15 @@
       .knobrow .knob-val {
         font-size: 12px;
       }
+      /* Five knobs (pocket + the send ride pair) on a 360px phone: smaller
+         dials keep one row with air instead of a squeeze. */
+      .knobrow.five .knob-dial {
+        width: 44px;
+        height: 44px;
+      }
+      .knobrow.five .knob-val {
+        font-size: 11px;
+      }
       /* Sound page sizing: full available height, no scrolling — the morph
          pad flexes to absorb what the fixed rows leave (overflow stays as a
          tiny-viewport safety net). Leaves the transport bar reachable. */

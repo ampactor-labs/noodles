@@ -514,7 +514,7 @@ function openAboutSheet() {
     p("Tap a track's name — or ✦ on its mixer strip — to open its sound: a morph pad with four sounds in the corners, everything between them yours to find. Add one color — crush, phase, trem, wob; drums take crush — with its own amount and motion. Pocket swings that one track against the global GROOVE, and HUMAN drifts every hit a few milliseconds like hands would. Drums come in two banks, sampled kits and a synth kit, and every drum can pin a one-shot, load a WAV, or 🎙 record your own mouth. Melody has two sources: the synth, or chops — load any sample and it lands sliced across the rows, the upper rows replaying at double speed."),
 
     label("ride"),
-    p("Arm ● ride in a sound sheet, hit play, and perform: your moves on the pad and knobs are captured to the beat and loop with the clip from then on. Rides live in the scene, save with the project, and play in exports. A clip wearing ∿ has one."),
+    p("Arm ● ride in a sound sheet, hit play, and perform: your moves on the pad and knobs — the verb and echo sends included — are captured to the beat and loop with the clip from then on. Rides live in the scene, save with the project, and play in exports. A clip wearing ∿ has one."),
 
     label("mix"),
     p("Mix opens the mixer. The fader is the meter: drag the handle to set level, the body glows with loudness, the bright bar is the peak, the tick holds the recent maximum. Verb and echo are sends into a shared room, off by default — turn a knob up to send a track into it."),
@@ -2317,6 +2317,8 @@ function openSoundSheet(track) {
   body.appendChild(el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "color" }), chips]));
 
   const pctFmt = (v) => `${Math.round(v * 100)}%`;
+  const sendFmt = (v) => (v <= -29 ? "off" : `${Math.round(v)}`);
+  const mix = mixState[track];
   const knobs = [
     knob("amount", 0, 1, 0.01, patch.amount, (v) => audio.setPatch(track, { amount: v }), pctFmt),
     knob("motion", 0, 1, 0.01, patch.motion, (v) => audio.setPatch(track, { motion: v }), pctFmt),
@@ -2329,10 +2331,23 @@ function openSoundSheet(track) {
       }, pctFmt)
     );
   }
+  // The ride surface owns the sends too: with the arm on this sheet, a verb
+  // or echo sweep here records a lane exactly like amount/motion. Writes go
+  // through the mixer's state so its strip reopens where you left it.
+  knobs.push(
+    knob("verb", -30, 0, 1, mix.verb, (v) => {
+      mix.verb = v;
+      audio.setSend(track, v);
+    }, sendFmt),
+    knob("echo", -30, 0, 1, mix.echo, (v) => {
+      mix.echo = v;
+      audio.setEcho(track, v);
+    }, sendFmt)
+  );
   body.appendChild(
     el("div", { class: "propsection" }, [
-      el("div", { class: "proplabel", text: track === "harmony" ? "amount · motion" : "amount · motion · pocket" }),
-      el("div", { class: "knobrow" }, knobs),
+      el("div", { class: "proplabel", text: track === "harmony" ? "amount · motion · verb · echo" : "amount · motion · pocket · verb · echo" }),
+      el("div", { class: "knobrow" + (knobs.length >= 5 ? " five" : "") }, knobs),
     ])
   );
 

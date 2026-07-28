@@ -10,13 +10,16 @@ headless gates (`npm run smoke`, `npm run calibrate`).
 
 ## Agreed next (in order)
 
-1. **Send automation** — the one remaining gated fork: motion lanes for verb/echo
-   sends need the base-restore story against mixer state decided first (D5's
-   deliberate deferral; everything else from that list has shipped).
-2. **Staff export** — a rendered engraving PNG in the export sheet (round-trip
+1. **Staff export** — a rendered engraving PNG in the export sheet (round-trip
    principle; DESIGN-STAFF.md names it).
-3. **Extension storage in the picker** — the editor wheel already writes 7ths;
+2. **Extension storage in the picker** — the editor wheel already writes 7ths;
    showing/editing them on the slot faces is the remaining surface.
+
+Send rides shipped 2026-07-28 (D16, closing D5's last deferral): verb/echo
+knobs live on the Sound sheet next to amount/motion, the ● ride arm captures
+sweeps into normalized lanes, the mixer's static state is the base a laneless
+scene restores to, and offline renders build a return any recorded ride
+needs. The lane picker and painter took the new lanes without changes.
 
 Shipped 2026-07-28 late: motion-lane EDITING (the lane picker — vel plus any
 captured ride, drawn per step, bar chips for long lanes, ✕ clears; both piano

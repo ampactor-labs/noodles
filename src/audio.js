@@ -1433,23 +1433,54 @@ function hitDrumOn(g, patches, v, time, vel = 0.9) {
 // step. The morph path schedules its ramps at the tick's transport time so
 // automation lands on the heard beat; color params apply at callback time
 // (their plain-property knobs can't be scheduled). mstate.motionOn remembers
-// which tracks are riding lanes so the base patch gets restored exactly once
-// when the lanes end.
+// which tracks are riding lanes so the base gets restored exactly once when
+// the lanes end.
+//
+// Send lanes (verb/echo) ride the mixer, not the patch: values are stored
+// normalized 0..1 (the knob's -30..0 dB mapped linearly, -30 = off) so a
+// lane reads like every other lane, and playback ramps the per-track send
+// gain directly. The base to restore is the mixer's static channelState,
+// which arrives via mstate.sends(track) — live passes a channelState
+// reader, renderOffline its captured copy. mstate.wakeSend lets the live
+// transport reconnect a parked return BEFORE a lane opens its send
+// (offline passes none; returns there are built or skipped up front).
+const SEND_PARAMS = ["verb", "echo"];
+const laneToDb = (v) => -30 + Math.max(0, Math.min(1, v)) * 30;
+function applySendLevel(g, mstate, kind, track, db, time) {
+  if (sendGain(db) > 0) mstate.wakeSend?.(kind);
+  const node = kind === "verb" ? g.verbSends[track] : g.echoSends[track];
+  node.gain.rampTo(sendGain(db), 0.02, time);
+}
 function applyMotionOn(g, patchesRef, mstate, track, scene, step, time) {
   const lanes = scene?.motion?.[track];
   mstate.motionOn ||= {};
   if (!lanes || !Object.keys(lanes).length) {
     if (mstate.motionOn[track]) {
       applyPatchTo(g, track, patchesRef[track], { ramp: true, at: time });
+      if (mstate.sends) {
+        const base = mstate.sends(track);
+        for (const kind of SEND_PARAMS) applySendLevel(g, mstate, kind, track, base[kind], time);
+      }
       mstate.motionOn[track] = false;
     }
     return;
   }
   const eff = { ...patchesRef[track] };
+  let patchLane = false;
   for (const [param, lane] of Object.entries(lanes)) {
-    if (Array.isArray(lane) && lane.length) eff[param] = lane[step % lane.length] ?? eff[param];
+    if (!Array.isArray(lane) || !lane.length) continue;
+    const v = lane[step % lane.length];
+    if (SEND_PARAMS.includes(param)) {
+      applySendLevel(g, mstate, param, track, laneToDb(v), time);
+    } else {
+      eff[param] = v ?? eff[param];
+      patchLane = true;
+    }
   }
-  applyPatchTo(g, track, eff, { ramp: true, at: time });
+  // Send-only lanes skip the patch ramp bundle — per-16th applyPatchTo is
+  // real work on a phone and nothing patch-side moved. motionOn still keeps
+  // the restore-once contract for whichever side rode.
+  if (patchLane || mstate.motionOn[track]) applyPatchTo(g, track, eff, { ramp: true, at: time });
   mstate.motionOn[track] = true;
 }
 
@@ -1722,15 +1753,19 @@ export function createAudio(song) {
 
   const liveVoice = { prev: null };
   liveVoice.wake = wakeTrack;
+  liveVoice.sends = (t) => channelState[t];
+  liveVoice.wakeSend = wakeReturn;
   liveVoice.recordMotion = (track, scene, step) => {
     if (!motionArmed[track]) return false;
     recordMotionTick(track, scene, step);
     return true;
   };
-  // Motion capture: arm a track and every 16th samples the live patch values
-  // (your finger on the pad) into the playing scene's lanes — but only the
-  // params you actually touched while armed, so untouched knobs stay free.
-  const MOTION_PARAMS = ["x", "y", "amount", "motion"];
+  // Motion capture: arm a track and every 16th samples the live values
+  // (your finger on the pad or a send knob) into the playing scene's lanes —
+  // but only the params you actually touched while armed, so untouched knobs
+  // stay free. Send rides sample the mixer's dB normalized to the 0..1 lane
+  // range (laneToDb inverts it at playback).
+  const MOTION_PARAMS = ["x", "y", "amount", "motion", "verb", "echo"];
   const motionArmed = Object.fromEntries(TRACK_KEYS.map((t) => [t, false]));
   const motionDirty = Object.fromEntries(TRACK_KEYS.map((t) => [t, new Set()]));
   function recordMotionTick(track, scene, step) {
@@ -1739,11 +1774,15 @@ export function createAudio(song) {
     const dirty = motionDirty[track];
     if (!dirty.size) return;
     const lanes = ((scene.motion ||= {})[track] ||= {});
+    const valueOf = (param) =>
+      SEND_PARAMS.includes(param)
+        ? Math.max(0, Math.min(1, (channelState[track][param] + 30) / 30))
+        : patches[track][param];
     for (const param of dirty) {
       // New rides get a 4-bar window; slow sweeps need the room (short loops
       // simply repeat inside it).
-      if (!lanes[param]) lanes[param] = new Array(64).fill(patches[track][param]);
-      lanes[param][step % lanes[param].length] = patches[track][param];
+      if (!lanes[param]) lanes[param] = new Array(64).fill(valueOf(param));
+      lanes[param][step % lanes[param].length] = valueOf(param);
     }
   }
   const playChord = (ci, time, oct) => {
@@ -2183,12 +2222,14 @@ export function createAudio(song) {
     },
     setSend(track, db) {
       channelState[track].verb = db;
+      if (motionArmed[track]) motionDirty[track].add("verb");
       if (sendGain(db) > 0) wakeReturn("verb"); // reconnect BEFORE the gain opens
       live.verbSends[track].gain.rampTo(sendGain(db), 0.02, tapTime());
       if (!anySendOn("verb")) parkReturnSoon("verb");
     },
     setEcho(track, db) {
       channelState[track].echo = db;
+      if (motionArmed[track]) motionDirty[track].add("echo");
       if (sendGain(db) > 0) wakeReturn("echo");
       live.echoSends[track].gain.rampTo(sendGain(db), 0.02, tapTime());
       if (!anySendOn("echo")) parkReturnSoon("echo");
@@ -2378,13 +2419,19 @@ export function createAudio(song) {
           // return that isn't built costs nothing (see buildGraph).
           const anySoloed = TRACK_KEYS.some((track) => channelState[track].solo);
           const audible = (k) => !(soloTrack ? k !== soloTrack : channelState[k].mute || (anySoloed && !channelState[k].solo));
+          // A return is needed when a static send is open OR a recorded ride
+          // opens one mid-song — without the scan a ride would render dry.
+          const rides = (kind) =>
+            song.scenes.some((sc) =>
+              TRACK_KEYS.some((k) => audible(k) && sc.motion?.[k]?.[kind]?.some((v) => sendGain(laneToDb(v)) > 0))
+            );
           // Exports render the full chain; opts.graph = "live" exists only
           // for the measurement probes to cost the live grade offline.
           const g = buildGraph({
             meters: false,
             exportGrade: opts.graph !== "live",
-            withVerb: TRACK_KEYS.some((k) => audible(k) && sendGain(channelState[k].verb) > 0),
-            withEcho: TRACK_KEYS.some((k) => audible(k) && sendGain(channelState[k].echo) > 0),
+            withVerb: TRACK_KEYS.some((k) => audible(k) && sendGain(channelState[k].verb) > 0) || rides("verb"),
+            withEcho: TRACK_KEYS.some((k) => audible(k) && sendGain(channelState[k].echo) > 0) || rides("echo"),
           });
           for (const t of TRACK_KEYS) applyPatchTo(g, t, patchesCopy[t]);
           applyMasterTo(g, masterCopy); // the export hears the same bus moves
@@ -2402,7 +2449,12 @@ export function createAudio(song) {
           }
           // (Return parking is decided at construction now — see withVerb/
           // withEcho above: a return this pass doesn't need was never built.)
-          const vstate = { prev: null };
+          // Send rides restore to the mixer state this render captured; no
+          // wakeSend — offline returns are built or skipped, never parked.
+          const sendsCopy = Object.fromEntries(
+            TRACK_KEYS.map((k) => [k, { verb: channelState[k].verb, echo: channelState[k].echo }])
+          );
+          const vstate = { prev: null, sends: (t) => sendsCopy[t] };
           let step = 0;
           new Tone.Loop((time) => {
             if (step >= stopStep) return;
