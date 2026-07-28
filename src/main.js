@@ -3651,8 +3651,10 @@ audio.onVisual((e) => {
     // The queued pulse blinks ON the grid: this event is pinned to the heard
     // beat (scheduleVisual), so toggling here puts the blink at the quarter-
     // note boundary instead of a free-running CSS animation that restarts
-    // wherever a repaint catches it.
-    sessionEl.classList.toggle("qblink", e.stepInBar % 4 < 2);
+    // wherever a repaint catches it. Gated on something actually being queued:
+    // a class flip on #session invalidates the whole grid's styles, and the
+    // ungated form paid that twice a beat for every minute of plain playback.
+    sessionEl.classList.toggle("qblink", e.stepInBar % 4 < 2 && TRACKS.some((t) => queuedSceneTracks[t.key] >= 0));
 
     editor?.moveCursor?.(e.stepInBar);
   }
