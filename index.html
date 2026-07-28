@@ -20,16 +20,6 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="noodles" />
     <style>
-      /* Registered so the clip pie timers can transition it (smooth sweep
-         instead of 16th-note jumps). Unsupported browsers just jump.
-         inherits MUST be true: the pie lives on a ::after pseudo-element and
-         only receives --pct from its clip via inheritance — registering it
-         non-inheriting pins every pie at the initial value (empty, forever). */
-      @property --pct {
-        syntax: "<number>";
-        inherits: true;
-        initial-value: 0;
-      }
       :root {
         --bg: #0e0e0f;
         --bar: #1b1b1d;
@@ -495,8 +485,14 @@
         font-size: 9px;
         color: color-mix(in srgb, var(--tc) 80%, #fff 20%);
       }
-      .clip.filled::after {
-        content: "";
+      /* The pie is its own LEAF element, and --pct is written on IT — never on
+         the clip. On the clip (the old ::after form) every 30 Hz write
+         invalidated the clip's whole subtree (custom properties inherit) and
+         repainted the whole cell; measured at 4x throttle that was ~70 ms/s of
+         main-thread style/paint across four playing clips — the single biggest
+         steady-playback cost. On the leaf, a write recalcs and repaints 10px.
+         No CSS transition: the pump drives it against the audio clock. */
+      .clip .pie {
         position: absolute;
         top: 6px;
         right: 6px;
@@ -506,10 +502,8 @@
         background: conic-gradient(color-mix(in srgb, var(--tc) 85%, #fff) calc(var(--pct, 0) * 1%), rgba(0,0,0,0.3) 0);
         opacity: 0;
         pointer-events: none;
-        /* --pct is driven per-frame by the pie pump against the audio clock —
-           no CSS transition, so the pie never interpolates on a second clock. */
       }
-      .clip.playing::after {
+      .clip.playing .pie {
         opacity: 1;
       }
       .clip.playing {

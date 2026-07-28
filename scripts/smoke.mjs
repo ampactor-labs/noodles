@@ -220,12 +220,12 @@ try {
   await page.waitForFunction(() => document.querySelectorAll(".clip.playing").length >= 4);
   const playOn = await page.$eval(".tbtn.play", (el) => el.classList.contains("on"));
   assertState(playOn, "play button did not enter playing state");
-  // The pie timers must actually fill: --pct is read by a ::after pseudo, so
-  // it must reach it via inheritance (regression: @property inherits:false
-  // pinned every pie at zero).
+  // The pie timers must actually fill: the pump writes --pct on the .pie leaf
+  // inside each playing clip (never on the clip — an inherited write there
+  // invalidated the whole cell's subtree per frame).
   await page.waitForFunction(() => {
-    const clip = document.querySelector(".clip.playing");
-    return clip && parseFloat(getComputedStyle(clip, "::after").getPropertyValue("--pct")) > 0;
+    const pie = document.querySelector(".clip.playing .pie");
+    return pie && parseFloat(getComputedStyle(pie).getPropertyValue("--pct")) > 0;
   }, { timeout: 15000 });
   await tap(page, "#view-toggle-btn");
   const stillPlayingAfterView = await page.$eval(".tbtn.play", (el) => el.classList.contains("on"));

@@ -970,7 +970,7 @@ function renderSession() {
     grid.appendChild(head);
   }
   song.scenes.forEach((scene, i) => {
-    const refs = { clips: {} };
+    const refs = { clips: {}, pies: {} };
     const launch = el("div", {
       class: "scenecell",
       "data-scene": String(i),
@@ -995,8 +995,10 @@ function renderSession() {
         if (badge) clip.appendChild(badge);
         const state = stateBadge(scene, t.key);
         if (state) clip.appendChild(state);
+        refs.pies[t.key] = clip.appendChild(el("div", { class: "pie" }));
       } else {
         clip.textContent = "+";
+        refs.pies[t.key] = null;
       }
       bindSessionClip(clip, i, t.key, filled);
       refs.clips[t.key] = clip;
@@ -1070,17 +1072,19 @@ function clockPump() {
     const a = pieAnchors[t.key];
     const sceneIdx = playingTracks[t.key];
     if (!a || sceneIdx < 0) continue;
-    const clipEl = sceneEls[sceneIdx]?.clips[t.key];
-    if (!clipEl) continue;
+    // Write on the pie LEAF, never the clip: an inherited custom property set
+    // on the clip invalidated its whole subtree per write (see the .pie CSS).
+    const pieEl = sceneEls[sceneIdx]?.pies[t.key];
+    if (!pieEl) continue;
     const prog = a.dur > 0 ? Math.min(1, Math.max(0, (now - a.start) / a.dur)) : 0;
     // Quantize to half-percent steps and skip unchanged writes: a pie on a
     // long loop moves well under 0.5%/frame, and every skipped write is a
     // conic-gradient repaint the A16 doesn't pay for. Still the audio clock —
     // each write that does land is exact.
     const pct = Math.round(prog * 200) / 2;
-    if (clipEl.__pct !== pct) {
-      clipEl.__pct = pct;
-      clipEl.style.setProperty("--pct", String(pct));
+    if (pieEl.__pct !== pct) {
+      pieEl.__pct = pct;
+      pieEl.style.setProperty("--pct", String(pct));
     }
   }
   if (arrAnchor && arrPlayhead) {
@@ -2663,6 +2667,7 @@ function refreshClip(sceneIndex, track) {
   clip.classList.toggle("empty", content === null);
   if (!content) {
     clip.textContent = "+";
+    refs.pies[track] = null;
     return;
   }
   clip.appendChild(el("div", { class: "tri", text: "▶" }));
@@ -2671,6 +2676,7 @@ function refreshClip(sceneIndex, track) {
   if (badge) clip.appendChild(badge);
   const state = stateBadge(song.scenes[sceneIndex], track);
   if (state) clip.appendChild(state);
+  refs.pies[track] = clip.appendChild(el("div", { class: "pie" }));
 }
 
 // ---------------------------------------------------------------------------
