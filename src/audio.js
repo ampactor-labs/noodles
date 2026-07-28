@@ -40,8 +40,17 @@ const swingOffsetFor = (song, track, laneStep) =>
 // which is the only way its numbers stay true when the chain changes.
 if (typeof window !== "undefined") window.__noodlesTone = Tone;
 
-const midiToFreq = (m) => Tone.Frequency(m, "midi").toFrequency();
-const sixteenth = () => Tone.Time("16n").toSeconds();
+// Plain arithmetic, not Tone.Frequency / Tone.Time: those minted a full Tone
+// object per triggered note and per note stack — the same per-hit allocation
+// class playSampleHit hunted (see its comment), steady GC food on the
+// scheduling path. The double reciprocal reproduces Tone's own path
+// (toFrequency() is 1/toSeconds(), toSeconds() is 1/mtof) bit-for-bit —
+// verified identical across midi -12..140 (.tmp/perf-formula-oracle.mjs);
+// without it 13 of 153 midis shift by one ulp. 15/bpm is bitwise equal to
+// Time("16n").toSeconds() across 40..220 BPM, and reads the ACTIVE context's
+// transport exactly as Tone.Time did, so offline renders keep their tempo.
+const midiToFreq = (m) => 1 / (1 / (440 * Math.pow(2, (m - 69) / 12)));
+const sixteenth = () => 15 / Tone.getTransport().bpm.value;
 
 export const TRACK_KEYS = ["harmony", "drums", "bass", "melody"];
 export const MELODIC_TRACKS = ["harmony", "bass", "melody"];
