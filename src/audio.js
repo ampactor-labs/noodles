@@ -1507,7 +1507,14 @@ export function createAudio(song) {
   // (Tone's default 0.05) to 8 Hz. The tick is what refills the scheduling
   // window after a main-thread stall — at 125 ms a recovering scheduler could
   // burn half the 0.25 s armor just waiting for its next tick.
-  const context = new Tone.Context({ latencyHint: "playback", lookAhead: 0.25, updateInterval: 0.05 });
+  // Tap feel is a chosen trade, not a constant (the ? page's "tap response"
+  // row): "playback" buys the biggest output buffer Android offers — xrun
+  // armor for weak phones — while "interactive" asks for AAudio's
+  // low-latency path and can halve the press-to-ear time where the device
+  // delivers it. The transport's 0.25 s lookAhead is scheduler headroom
+  // either way; it never adds to a tap (tapTime bypasses it).
+  const tapFeel = typeof localStorage !== "undefined" && localStorage.getItem("noodles:tap-feel") === "tight" ? "interactive" : "playback";
+  const context = new Tone.Context({ latencyHint: tapFeel, lookAhead: 0.25, updateInterval: 0.05 });
   Tone.setContext(context);
   // setContext swaps the active context, so the clock loop below binds to the
   // NEW context's transport. The deprecated Tone.Transport / Tone.Draw globals

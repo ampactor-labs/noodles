@@ -579,6 +579,23 @@ function openAboutSheet() {
       }),
     ]),
 
+    // Tap response: the audio buffer trade, chosen per device. "safe" is the
+    // big-buffer default that never crackles; "tight" asks Android for its
+    // low-latency path — worth trying on any phone where taps feel late.
+    (() => {
+      const KEY = "noodles:tap-feel";
+      const cur = () => (localStorage.getItem(KEY) === "tight" ? "tight" : "safe");
+      const label = () => `tap response · ${cur()}`;
+      const btn = el("div", { class: "tfbtn", text: label(), "data-action": "tap-feel" });
+      const restart = el("div", { class: "tfbtn accent", text: "restart to apply", style: "display:none", onclick: () => location.reload() });
+      btn.addEventListener("click", () => {
+        localStorage.setItem(KEY, cur() === "tight" ? "safe" : "tight");
+        btn.textContent = label();
+        restart.style.display = "";
+      });
+      return el("div", { class: "tfrow" }, [btn, restart]);
+    })(),
+
     p("If the moving parts run ahead of or behind what you hear (Bluetooth loves doing this), nudge the visuals until they sit on the sound:"),
     (() => {
       const label = () => `sync ${syncNudgeMs > 0 ? "+" : ""}${syncNudgeMs} ms`;
@@ -4499,8 +4516,12 @@ function startPerfHud() {
       // audio thread starving (underruns) — the stutter, quantified.
       const aud = raw ? (raw.currentTime - audioLast) / dt : 0;
       if (raw) audioLast = raw.currentTime;
-      const lat = raw ? Math.round(((raw.baseLatency || 0) + (raw.outputLatency || 0)) * 1000) : 0;
-      perfHudEl.textContent = `${Math.round(frames / dt)}fps jank${jank} worst${Math.round(worst)}ms · aud×${aud.toFixed(2)} lat${lat}ms ${raw?.state ?? "?"}`;
+      // bl = the context's own buffer, ol = what the OS admits to past it.
+      // ol reading 0 means the device won't say — the real chain is bigger
+      // than anything shown here, and the ? sync nudge is the ear's fix.
+      const bl = raw ? Math.round((raw.baseLatency || 0) * 1000) : 0;
+      const ol = raw ? Math.round((raw.outputLatency || 0) * 1000) : 0;
+      perfHudEl.textContent = `${Math.round(frames / dt)}fps jank${jank} worst${Math.round(worst)}ms · aud×${aud.toFixed(2)} bl${bl} ol${ol} ${raw?.state ?? "?"}`;
       frames = 0;
       jank = 0;
       worst = 0;
