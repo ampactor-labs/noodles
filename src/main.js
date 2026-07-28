@@ -25,8 +25,11 @@ import {
   snapToScale,
   makeMagicScene,
   stepsFor,
+  keyDisplayName,
+  keySignature,
 } from "./model.js";
 import { createAudio, KIT_NAMES, SAMPLE_KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, colorNamesFor, DRUM_BANKS, drumCornerNames, MASTER_DEFAULTS } from "./audio.js";
+import { createCircleView } from "./circle.js";
 
 // Pitch range shown in the piano roll, per track.
 const PIANO = { melody: { base: 12, rows: 56 }, bass: { base: 12, rows: 56 } };
@@ -182,6 +185,38 @@ let playingScene = -1;
 const playingTracks = Object.fromEntries(TRACKS.map((t) => [t.key, -1]));
 const queuedSceneTracks = Object.fromEntries(TRACKS.map((t) => [t.key, -1]));
 const sceneEls = []; // per scene: { row, clips: {track: el} }
+
+// --- The circle of fifths: key navigator + playable harmony surface ---
+// The circle is a pure view over song.key/song.scale and CHORDS (src/circle.js);
+// this side owns what a tap MEANS to the song: the sheet, the arm toggle, and
+// the write into the playing clip.
+let circleArmed = false; // ● in the circle bar: taps land in the playing clip
+let circleBar = 0; // harmony slot being heard right now (from chord events)
+// A clean armed tap on a diatonic wedge replaces the chord being heard —
+// bar-quantized by construction, since harmony is one chord per bar. Borrowed
+// chords (degree -1) are playable but not storable: the model speaks scale
+// degrees, so the bright region is exactly what the clip can hold.
+function circleCapture(degree) {
+  if (!circleArmed || degree < 0 || !audio.playing || audio.mode !== "scene") return false;
+  const si = playingTracks.harmony;
+  const scene = song.scenes[si];
+  if (!scene?.harmony?.length) return false;
+  const slot = circleBar % scene.harmony.length;
+  if (scene.harmony[slot] === degree) return false;
+  pushUndo();
+  scene.harmony[slot] = degree;
+  refreshClip(si, "harmony");
+  return true;
+}
+const circleView = createCircleView({
+  song,
+  audio,
+  ensureStarted,
+  commitKeyScale: circleKeyScale,
+  captureChord: circleCapture,
+  getHarmonyOct: () => (playingTracks.harmony >= 0 ? song.scenes[playingTracks.harmony]?.harmonyOct || 0 : 0),
+  buzz,
+});
 
 let view = "session"; // 'session' | 'arrangement'
 let sessionRecord = false;
@@ -341,21 +376,18 @@ function renderFooter() {
     grooveSlider,
     grooveVal,
   ]);
-  const keySel = el("select", { class: "keysel" });
-  for (let i = 0; i < 12; i++) {
-    const o = el("option", { value: String(i), text: pcName(i) });
-    if (i === song.key) o.selected = true;
-    keySel.appendChild(o);
-  }
-  keySel.addEventListener("change", () => setKeyScale(parseInt(keySel.value, 10), song.scale));
-  const scaleSel = el("select", { class: "keysel" });
-  SCALE_NAMES.forEach((n) => {
-    const o = el("option", { value: n, text: n });
-    if (n === song.scale) o.selected = true;
-    scaleSel.appendChild(o);
+  // The key control IS the circle: one button wearing the key's honest name,
+  // opening the wheel. Where the two dropdowns stood.
+  const keyBtn = el("div", {
+    class: "tbtn keybtn",
+    id: "key-btn",
+    "data-sheet": "circle",
+    role: "button",
+    tabindex: "0",
+    html: `${keyDisplayName(song.key, song.scale)}<small>${song.scale}</small>`,
+    onclick: openCircleSheet,
   });
-  scaleSel.addEventListener("change", () => setKeyScale(song.key, scaleSel.value));
-  const keyctl = el("div", { class: "keyctl" }, [keySel, scaleSel]);
+  const keyctl = el("div", { class: "keyctl" }, [keyBtn]);
   // The dice sits with the song's musical identity: one tap rolls a whole new
   // key + tempo + sounds + magic scene, same as a fresh load. Undo-safe.
   const diceBtn = el("div", { class: "tbtn accent", text: "🎲", id: "dice-btn", title: "New song: random key, tempo, sounds", onclick: rerollSong });
@@ -498,6 +530,58 @@ function openAboutSheet() {
   });
 }
 
+
+// ---------------------------------------------------------------------------
+// The circle sheet: the wheel, a scale row, and the ● that lets taps land in
+// the playing clip. Everything theoretical on it is pull — names on hold,
+// signatures at whisper opacity, the order of sharps only while you travel.
+// ---------------------------------------------------------------------------
+const circleSubText = () => {
+  const sig = keySignature(song.key, song.scale);
+  const label = sig === 0 ? "♮" : sig > 0 ? `${sig}♯` : `${-sig}♭`;
+  return `${keyDisplayName(song.key, song.scale)} ${song.scale} · ${label}`;
+};
+
+function updateCircleChrome() {
+  if (sheetId !== "circle") return;
+  const sub = sheet.querySelector(".sheet-bar .sub");
+  if (sub) sub.textContent = circleSubText();
+  sheet.querySelectorAll("[data-scale]").forEach((c) => c.classList.toggle("accent", c.dataset.scale === song.scale));
+}
+
+function openCircleSheet() {
+  resetSheet("#e8b84b");
+  sheetId = "circle";
+  const armBtn = el("div", {
+    class: "close circle-arm" + (circleArmed ? " on" : ""),
+    text: "●",
+    title: "Armed: taps write into the playing clip",
+    "data-action": "circle-arm",
+    onclick: () => {
+      circleArmed = !circleArmed;
+      armBtn.classList.toggle("on", circleArmed);
+      buzz(6);
+    },
+  });
+  sheet.appendChild(sheetBar("Circle", circleSubText(), { buttons: [armBtn] }));
+  sheet.appendChild(circleView.el);
+  sheet.appendChild(
+    el(
+      "div",
+      { class: "tfrow circle-scale" },
+      SCALE_NAMES.map((n) =>
+        el("div", {
+          class: "tfbtn" + (n === song.scale ? " accent" : ""),
+          text: n,
+          "data-scale": n,
+          onclick: () => circleKeyScale(song.key, n),
+        })
+      )
+    )
+  );
+  openSheet();
+  circleView.opened();
+}
 
 function emptyScene() {
   return makeScene(
@@ -720,8 +804,7 @@ function rerollSong() {
 
 // Change the global key/scale; harmony follows automatically (it's degree-based),
 // and bass/melody are transposed + re-snapped so the whole song stays in key.
-function setKeyScale(key, scale) {
-  pushUndo();
+function applyKeyScale(key, scale) {
   const delta = key - song.key;
   song.key = ((key % 12) + 12) % 12;
   song.scale = scale;
@@ -733,7 +816,21 @@ function setKeyScale(key, scale) {
       }
     }
   }
-  refreshAll();
+}
+
+// The circle's commit path: same transpose as ever, but the sheet stays up —
+// refreshAll would slam it shut mid-travel. Everything it re-renders sits
+// behind the scrim anyway; the circle repaints its own wheel.
+function circleKeyScale(key, scale) {
+  if (key === song.key && scale === song.scale) return;
+  pushUndo();
+  applyKeyScale(key, scale);
+  renderTransport();
+  renderSession();
+  if (view === "arrangement") renderArrangement();
+  updateUndoButtons();
+  circleView.refreshStatic();
+  updateCircleChrome();
 }
 
 // ---------------------------------------------------------------------------
@@ -1224,6 +1321,7 @@ function openEditor(sceneIndex, track) {
 }
 
 function closeEditor() {
+  if (sheetId === "circle") circleView.closed();
   editor = null;
   sheetId = null;
   cancelAnimationFrame(mixerRAF);
@@ -1238,6 +1336,7 @@ function closeEditor() {
 // running mixer meter loop), append a title bar, open. Keep them here so no
 // opener can forget one.
 function resetSheet(color) {
+  if (sheetId === "circle") circleView.closed();
   editor = null;
   sheetId = null;
   cancelAnimationFrame(mixerRAF);
@@ -3660,7 +3759,14 @@ audio.onVisual((e) => {
   else if (e.scene !== undefined && e.scene !== playingScene) setPlaying(e.scene);
   // Always sync queued state from audio engine
   if (e.queuedTracks !== undefined) applyQueued(e.queuedTracks, e.queueEpoch);
-  
+
+  // The song walks the wheel: playback chords feed the circle's trail, and
+  // the heard bar is where an armed tap lands.
+  if (e.type === "chord" || e.type === "arrchord") {
+    circleBar = e.bar;
+    circleView.onPlaybackChord(e.chord);
+  }
+
   if (e.type === "step") {
     if (sessionRecord && audio.playing && e.stepInBar === 0 && view === "session") {
       for (const track of ARRANGE_TRACKS) {

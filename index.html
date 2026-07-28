@@ -202,6 +202,47 @@
         font-size: 12px;
         font-weight: 600;
       }
+      /* The key button: the circle's front door, wearing the key's name. */
+      .tbtn.keybtn {
+        background: #2b2b2e;
+        border: 1px solid #000;
+        font-size: 13px;
+        font-weight: 700;
+        padding: 0 12px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .tbtn.keybtn small {
+        color: var(--dim);
+        font-size: 10px;
+        font-weight: 600;
+      }
+      /* The circle sheet */
+      .circle-wrap {
+        display: flex;
+        justify-content: center;
+        padding: 0 0 6px;
+      }
+      .circle-canvas {
+        display: block;
+        touch-action: none; /* the wheel owns every gesture on it */
+      }
+      .circle-arm {
+        color: #d24b4b;
+        margin-right: 6px;
+      }
+      .circle-arm.on {
+        background: #d24b4b;
+        color: #fff;
+      }
+      .circle-scale {
+        justify-content: center;
+      }
+      .circle-scale .tfbtn {
+        padding: 7px 9px;
+        font-size: 12px;
+      }
       .tbtn.play.on {
         background: #39a35e;
         color: #fff;

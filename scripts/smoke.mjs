@@ -14,6 +14,7 @@ const shotPath = path.join(outDir, "smoke.png");
 const propsShotPath = path.join(outDir, "smoke-clip-props.png");
 const mixerShotPath = path.join(outDir, "smoke-mixer.png");
 const exportShotPath = path.join(outDir, "smoke-export.png");
+const circleShotPath = path.join(outDir, "smoke-circle.png");
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -227,6 +228,54 @@ try {
     const pie = document.querySelector(".clip.playing .pie");
     return pie && parseFloat(getComputedStyle(pie).getPropertyValue("--pct")) > 0;
   }, { timeout: 15000 });
+
+  // --- The circle of fifths, while the loop plays: tap wedges (they sound
+  // and trail), arm ● and punch a chord into the playing clip, travel one
+  // station up the rim, then undo the whole excursion. The outer H and H+1
+  // wedges are diatonic in every mode (the sector theorem), so two taps on
+  // different degrees guarantee at least one armed write lands.
+  await tap(page, "#key-btn");
+  await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Circle");
+  await wait(700); // let a chord event land so the trail has an entry
+  const circleGeom = await page.evaluate(() => {
+    const r = document.querySelector(".circle-canvas").getBoundingClientRect();
+    const C = window.__noodlesCircle;
+    const H = C.home();
+    return { left: r.left, top: r.top, a: C.point("outer", H), b: C.point("outer", (H + 1) % 12), rim: C.rimPoint(H), rim2: C.rimPoint((H + 1) % 12) };
+  });
+  const cPoint = (p) => [circleGeom.left + p.x, circleGeom.top + p.y];
+  const harmonyBefore = await page.evaluate(() => JSON.stringify(window.__noodles.song.scenes[0].harmony));
+  await clickAction(page, "circle-arm");
+  await page.touchscreen.tap(...cPoint(circleGeom.a));
+  await wait(150);
+  await page.touchscreen.tap(...cPoint(circleGeom.b));
+  await wait(250);
+  const harmonyAfter = await page.evaluate(() => JSON.stringify(window.__noodles.song.scenes[0].harmony));
+  assertState(harmonyAfter !== harmonyBefore, "armed circle tap did not land in the playing clip");
+  await clickAction(page, "circle-arm"); // disarm before traveling
+  const keyBeforeTravel = await page.evaluate(() => window.__noodles.song.key);
+  const [crx, cry] = cPoint(circleGeom.rim);
+  const [cr2x, cr2y] = cPoint(circleGeom.rim2);
+  await page.touchscreen.touchStart(crx, cry);
+  for (let i = 1; i <= 3; i++) {
+    await page.touchscreen.touchMove(crx + ((cr2x - crx) * i) / 3, cry + ((cr2y - cry) * i) / 3);
+    await wait(50);
+  }
+  await page.touchscreen.touchEnd();
+  await page.waitForFunction((want) => window.__noodles.song.key === want, {}, (keyBeforeTravel + 7) % 12);
+  const trailLen = await page.evaluate(() => window.__noodlesCircle.trailLength());
+  assertState(trailLen >= 1, "circle trail stayed empty during playback");
+  await page.screenshot({ path: circleShotPath });
+  await closeSheet(page);
+  // Undo the excursion: travel plus up to two punched chords.
+  let harmonyRestored = false;
+  for (let i = 0; i < 3 && !harmonyRestored; i++) {
+    await tap(page, ".tbtn.undo");
+    await wait(120);
+    harmonyRestored = (await page.evaluate(() => JSON.stringify(window.__noodles.song.scenes[0].harmony))) === harmonyBefore;
+  }
+  assertState(harmonyRestored, "undo did not restore the punched harmony");
+
   await tap(page, "#view-toggle-btn");
   const stillPlayingAfterView = await page.$eval(".tbtn.play", (el) => el.classList.contains("on"));
   assertState(stillPlayingAfterView, "view switch stopped playback");
