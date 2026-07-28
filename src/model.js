@@ -559,6 +559,78 @@ export function snapToScale(midi) {
   return midi;
 }
 
+// --- The circle of fifths: station geometry and key signatures ---
+// Stations are fixed forever: station 0 is C at twelve o'clock, +1 is a fifth
+// clockwise. Multiplying by 7 maps pc -> station, and because 7·7 ≡ 1 (mod
+// 12), the SAME multiplication maps station -> pc. One function, two names.
+export const stationOfPc = (pc) => ((((pc % 12) + 12) % 12) * 7) % 12;
+export const pcOfStation = stationOfPc;
+
+// Fixed station names, poster convention: the sharp side spells sharp, the
+// flat side flat, the seam at station 6 answers to both. Lowercase minors —
+// case is quality, the same convention the roman numerals already teach.
+export const STATION_MAJOR = ["C", "G", "D", "A", "E", "B", "F♯", "D♭", "A♭", "E♭", "B♭", "F"];
+export const STATION_MINOR = ["a", "e", "b", "f♯", "c♯", "g♯", "d♯", "b♭", "f", "c", "g", "d"];
+// The order accidentals arrive as you walk the circle — not a mnemonic, the
+// circle itself read from F (sharps) and from B (flats).
+export const SHARP_ORDER = ["F♯", "C♯", "G♯", "D♯", "A♯", "E♯"];
+export const FLAT_ORDER = ["B♭", "E♭", "A♭", "D♭", "G♭", "C♭"];
+
+// Every 7-note mode is a rotation of major, so its pitch content IS some
+// major key's content. The offset from a mode's tonic up to that relative
+// major is derived from SCALES itself rather than tabled — one source.
+const REL_MAJOR_OFFSET = Object.fromEntries(
+  Object.entries(SCALES).map(([name, iv]) => [
+    name,
+    iv.find((x) => {
+      const rot = iv.map((v) => (v - x + 12) % 12).sort((a, b) => a - b);
+      return rot.every((v, i) => v === SCALES.major[i]);
+    }) ?? 0,
+  ])
+);
+export const relMajorOffset = (scaleName) => REL_MAJOR_OFFSET[scaleName] ?? 0;
+export const relMajorPc = (pc, scaleName) => ((((pc % 12) + 12) % 12) + relMajorOffset(scaleName)) % 12;
+
+// Signature as a signed count: positive sharps, negative flats, +6 for the
+// F♯/G♭ seam by convention. A key's signature is just its station.
+export function keySignature(pc, scaleName) {
+  const s = stationOfPc(relMajorPc(pc, scaleName));
+  return s <= 6 ? s : s - 12;
+}
+
+// The key's honest name: spell by which side of the circle its signature
+// lives on (E♭ dorian, not D♯ dorian). pcName stays the chromatic namer for
+// absolute pitches; this is the name of a KEY.
+const SHARP_PC = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
+const FLAT_PC = ["C", "D♭", "D", "E♭", "E", "F", "G♭", "G", "A♭", "A", "B♭", "B"];
+export function keyDisplayName(pc, scaleName) {
+  const i = ((pc % 12) + 12) % 12;
+  return keySignature(pc, scaleName) < 0 ? FLAT_PC[i] : SHARP_PC[i];
+}
+
+// What is this chord to me, from where I stand? Interval up from home tonic
+// to the chord root, as a roman numeral — lowercase when the chord is minor.
+const INTERVAL_ROMAN = ["I", "♭II", "II", "♭III", "III", "IV", "♭V", "V", "♭VI", "VI", "♭VII", "VII"];
+export function romanFromHome(homePc, pc, minor = false) {
+  const r = INTERVAL_ROMAN[(((pc - homePc) % 12) + 12) % 12];
+  return minor ? r.toLowerCase() : r;
+}
+
+// Semitones from degree d's root up to the scale tone `steps` scale-steps
+// above it — the diatonic extension interval (7th = 6 steps, 9th = 8), which
+// is what makes one "7" pad come out maj7 on I and dominant on V.
+export function degreeStepSemis(d, steps) {
+  const sc = SCALES[curScale];
+  const t = d + steps;
+  return sc[t % 7] + 12 * Math.floor(t / 7) - sc[d % 7];
+}
+
+// How many pitch classes two chords share — the trail's line weight.
+export function sharedPcCount(a, b) {
+  const s = new Set(a.map((p) => ((p % 12) + 12) % 12));
+  return b.reduce((n, p) => n + (s.has(((p % 12) + 12) % 12) ? 1 : 0), 0);
+}
+
 export const ARRANGE_TRACKS = ["harmony", "drums", "bass", "melody"];
 export const LAUNCH_MODES = ["loop", "oneshot"];
 export const FOLLOW_ACTIONS = ["none", "next", "prev", "random"];
