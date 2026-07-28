@@ -455,7 +455,10 @@ function openAboutSheet() {
     p("Each row is a scene — a loop and a song section in one. + adds another: blank, a copy, or a fresh magic one. The corner pie on a playing clip shows where it is in its loop. Long-press a clip for launch modes and follow actions, a scene's ▶ for scene moves, a track name for track moves."),
 
     label("editors"),
-    p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key. Chords: pick from the seven that fit, colored by their job. − / + shortens a clip's loop; a 12-step line against 16-step drums drifts in and out of phase on purpose. ◧ zooms the note grid when your thumbs need bigger targets."),
+    p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key. Chords: pick from the seven that fit, colored by their job — the staff above writes down exactly what you'll hear, and the threads below show which notes carry over between chords. − / + shortens a clip's loop; a 12-step line against 16-step drums drifts in and out of phase on purpose. ◧ zooms the note grid when your thumbs need bigger targets."),
+
+    label("the circle"),
+    p("Tap the key name at the bottom and the circle of fifths opens. The bright neighborhood is your key — tap a wedge to hear its chord, hold it for sevenths and sus, drag across them to strum. The dim wedges outside are chords you can borrow. Arm ● and a clean tap lands in the playing clip. Drag the rim to carry the whole song to a new key and watch the sharps arrive one by one; drag the white dot to call the same notes by another mode's name; hold the middle and everything you tap comes back mirrored; pinch open to see why twelve fifths never quite close."),
 
     label("sound"),
     p("Tap a track's name — or ✦ on its mixer strip — to open its sound: a morph pad with four sounds in the corners, everything between them yours to find. Add one color — crush, phase, trem, wob; drums take crush — with its own amount and motion. Pocket swings that one track against the global GROOVE. Drums come in two banks, sampled kits and a synth kit, and every drum can pin a one-shot, load a WAV, or 🎙 record your own mouth."),
@@ -470,7 +473,7 @@ function openAboutSheet() {
     p("View flips to the timeline. Drag clips around, pull a right edge to resize, sweep the strip under the bar numbers to set a loop — tap the loop to switch it on and off. Arm ● in the top bar while you jam: scene changes and your mute moves both write into the timeline, and the hatched bars play silent everywhere, exports included."),
 
     label("keep it"),
-    p("File saves the project to a file or keeps it on this device, and exports a WAV — master or four stems — through the exact chain you're hearing. Mic recordings last until the tab closes; save the project to keep everything else."),
+    p("File saves the project to a file or keeps it on this device, and exports a WAV — master or four stems, named for your key — through the exact chain you're hearing. Mic recordings last until the tab closes; save the project to keep everything else."),
     p("Install it and noodles leaves the browser behind: full screen, its own icon, and everything — sounds, samples, exports — works with no signal at all."),
 
     p("Made for couches and phone speakers. Tell your friends."),

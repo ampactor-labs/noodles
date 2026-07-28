@@ -457,6 +457,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     c.stroke();
     c.textAlign = "center";
     c.textBaseline = "middle";
+    c.font = `600 ${Math.round(size * 0.032)}px ${FONT}`;
     for (let s = 0; s <= 12; s++) {
       const p = spiralNode(s, k);
       c.beginPath();
@@ -465,7 +466,6 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
       c.fill();
       const lp = polar(p.a, p.rf + 0.085);
       c.fillStyle = s === 12 ? "#e8b84b" : "rgba(232,232,236,0.8)";
-      c.font = `600 ${Math.round(size * 0.032)}px ${FONT}`;
       c.fillText(s === 12 ? "B♯" : STATION_MAJOR[s % 12], lp.x, lp.y);
     }
     if (k > 0.85) {
@@ -662,9 +662,12 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     if (open && needsAnim(t)) raf = requestAnimationFrame(paint);
   }
 
+  // Only things that animate BETWEEN events keep rAF alive: fades and the
+  // spiral snap. Every held state — a resting mirror finger, an open bloom,
+  // a drag between moves — is static until its next event, and each event
+  // calls wake(), so holding costs zero frames.
   function needsAnim(t = nowS()) {
-    if (gestures.size || rimDrag || doorDrag || flash) return true;
-    if (mirrorHold != null || spiralPinch?.committed || spiralSnap) return true;
+    if (flash || spiralSnap) return true;
     return trail.some((e) => t - e.t < TRAIL_FADE);
   }
   function wake() {

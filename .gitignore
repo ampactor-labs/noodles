@@ -1,6 +1,7 @@
 # Node / web toolchain
 node_modules/
 dist/
+dist-prof/
 .vite/
 .tmp/
 *.local
