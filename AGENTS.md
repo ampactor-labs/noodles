@@ -131,9 +131,11 @@ the drum-voice metadata, and `makeSong` / `makeScene` / `cloneScene` / `arrangeL
 **`src/audio.js`** — `createAudio(song)` builds the Tone.js graph and returns the transport
 API. The one rule that matters: **`buildGraph()` is the only place the signal chain exists.**
 The live context and `renderOffline` (WAV export) both call it — never fork the chain. One
-sanctioned flag, not a fork: `exportGrade` (DECISIONS D10) — live runs a level-matched
-half-Freeverb and a 4-stage phaser for audio-thread headroom, exports render the full
-chain, uniformly on every device; everything feel-bearing is identical in both grades. Topology: per track a preset **trim** Gain and
+sanctioned flag, not a fork: `exportGrade` (DECISIONS D10, deepened by D15 at the
+builder's order) — live runs a lightened chain for audio-thread headroom (two verb combs,
+two phaser stages, input comps bypassed level-neutral, no chorus, no halo) while exports
+render everything, uniformly on every device; levels match, width and squeeze return in
+the export. Topology: per track a preset **trim** Gain and
 `Tone.Channel` (drums skip the per-track input compressor; they already get parallel
 compression), reverb + echo sends whose returns ride the kick-sidechain duck along with
 everything melodic (a wet tail must pump with the dry mix, not fill the pocket), a drum bus
@@ -241,7 +243,9 @@ not D♯, and F♯ major's E♯; borrowed chords store as violet `{pcs}` entries
 front-door knob re-modes without moving a note); the chord editor's engraved staff
 and voice-leading threads; one-tap Transforms;
 undo/redo; groove/swing; WAV export (master + four stems, plus a seamless loop render when
-the arrangement loop is set) through the same graph as live playback, handed back as
+the arrangement loop is set) through the full-grade graph — since D15 the live grade
+plays a lightened chain (no input comps/chorus/halo, two combs) while exports render
+everything — handed back as
 tap-to-save buttons because a long render outlives a phone tap's transient activation;
 project save/load to file and localStorage; GitHub Pages deploy on push.
 

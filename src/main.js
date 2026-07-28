@@ -508,7 +508,7 @@ function openAboutSheet() {
     p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key, the staff above writes the lane down as you draw (bass gets its own clef), and each row's name wears its job's color. Chords: the wheel itself is the palette — tap a wedge to set the selected bar, drag across the wheel to paint a run of bars in one stroke, and everything the big wheel does works here too, over its own staff and the threads that show which notes carry over. The lane under any editor has a picker: tap vel to flip through captured rides, redraw them per step, chips pick the bar, ✕ clears one. − / + shortens a clip's loop; a 12-step line against 16-step drums drifts in and out of phase on purpose. ◧ zooms the note grid when your thumbs need bigger targets."),
 
     label("the circle"),
-    p("Tap the key name at the bottom and the circle of fifths opens. The bright neighborhood is your key — tap a wedge to hear its chord, hold it for sevenths and sus, drag across them to strum. The dim wedges outside are chords you can borrow. Arm ● and a clean tap lands in the playing clip. Drag the rim to carry the whole song to a new key and watch the sharps arrive one by one; drag the white dot to call the same notes by another mode's name; hold the middle and everything you tap comes back mirrored; pinch open to see why twelve fifths never quite close."),
+    p("Tap the key name at the bottom and the circle of fifths opens. The bright neighborhood is your key — tap a wedge to hear its chord, drag across them to strum, and hold one for the ladder: 7, 9, 11, 13, sus. Release on a pad and the wedge keeps that voicing — the little gold number remembers — and it lands in the playing clip; release on empty air to forget. The dim wedges outside are chords you can borrow. Arm ● and plain taps write too. Drag the rim to carry the whole song to a new key and watch the sharps arrive one by one; drag the white dot to call the same notes by another mode's name; hold the middle and everything you tap comes back mirrored; pinch open to see why twelve fifths never quite close."),
 
     label("sound"),
     p("Tap a track's name — or ✦ on its mixer strip — to open its sound: a morph pad with four sounds in the corners, everything between them yours to find. Add one color — crush, phase, trem, wob; drums take crush — with its own amount and motion. Pocket swings that one track against the global GROOVE, and HUMAN drifts every hit a few milliseconds like hands would. Drums come in two banks, sampled kits and a synth kit, and every drum can pin a one-shot, load a WAV, or 🎙 record your own mouth. Melody has two sources: the synth, or chops — load any sample and it lands sliced across the rows, the upper rows replaying at double speed."),
@@ -523,7 +523,7 @@ function openAboutSheet() {
     p("View flips to the timeline. Drag clips around, pull a right edge to resize, sweep the strip under the bar numbers to set a loop — tap the loop to switch it on and off. Arm ● in the top bar while you jam: scene changes and your mute moves both write into the timeline, and the hatched bars play silent everywhere, exports included."),
 
     label("keep it"),
-    p("File saves the project to a file or keeps it on this device, and exports a WAV — master or four stems, named for your key — through the exact chain you're hearing. Loaded samples and mouth-drums now stay on this device between visits. And you can write a dare into File before saving: the words travel with the project and greet whoever loads it — nothing checks, nothing grades, the dare is between you two."),
+    p("File saves the project to a file or keeps it on this device, and exports a WAV — master or four stems, named for your key — through the full studio chain (your phone plays a lightened live mix to stay smooth; exports always render everything). Loaded samples and mouth-drums now stay on this device between visits. And you can write a dare into File before saving: the words travel with the project and greet whoever loads it — nothing checks, nothing grades, the dare is between you two."),
     p("Install it and noodles leaves the browser behind: full screen, its own icon, and everything — sounds, samples, exports — works with no signal at all."),
 
     p("Made for couches and phone speakers. Tell your friends."),
@@ -2944,6 +2944,8 @@ function buildPianoEditor(sceneIndex, scene, track) {
   const rollStaff = chops ? null : el("canvas", { class: "rollstaff" });
   if (rollStaff) sheet.appendChild(rollStaff);
   let rollStaffRAF = 0;
+  const laneMidis = lane.flatMap((slot) => noteSlot(slot).map((n) => n.midi)).sort((a, b) => a - b);
+  const bassClef = laneMidis.length ? laneMidis[Math.floor(laneMidis.length / 2)] < 57 : track === "bass";
   function drawRollStaff() {
     if (!rollStaff) return;
     const w = rollStaff.clientWidth;
@@ -2956,7 +2958,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.clearRect(0, 0, w, h);
     const S = 8;
-    const bass = track === "bass";
+    const bass = bassClef; // the lane's register picks the clef, not the track name
     const baseStep = bass ? 25 : 37; // bottom line: G2 on the bass staff, E4 on the treble
     const bottomY = h - 24;
     const yOf = (step) => bottomY - (step - baseStep) * (S / 2);
