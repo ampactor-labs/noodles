@@ -18,10 +18,15 @@ headless gates (`npm run smoke`, `npm run calibrate`).
    the base-restore story against mixer state is decided.
 
 Shipped since the last revision: the playable circle of fifths as the key selector
-(DECISIONS D12, design + v2 bank in DESIGN-CIRCLE.md) — sector-lit diatonic palette,
+(DECISIONS D12, design + bank in DESIGN-CIRCLE.md) — sector-lit diatonic palette,
 tap/hold/strum chords through the harmony instrument, ● punch-in to the playing clip,
 rim-drag key travel with the accidentals arriving in order, playback trail weighted
-by shared tones; clip launch modes + follow-actions, the vertical mixer,
+by shared tones; the theory-teacher arc on top of it (2026-07-28): per-key spelling
+(seven letters per key, E♯ where the signature demands it), borrowed-chord storage
+(D13 — the circle writes violet `{pcs}` entries that transpose with the song), the
+front-door knob (drag to re-mode; renames everything, moves nothing), the chord
+editor's voice-leading threads, and the engraved treble staff over the slots
+(DESIGN-STAFF.md); clip launch modes + follow-actions, the vertical mixer,
 sends, sidechain duck, per-preset loudness calibration, session record, WAV/stem export,
 project files, the dice, the morphable devices (XY pad between the preset corners +
 color/motion slot per track, calibration-gated), the bundled drum sample bank with

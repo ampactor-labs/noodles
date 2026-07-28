@@ -115,9 +115,15 @@ Clip = { scene: sceneIndex, start: bar, len: bars }   // references a scene's cl
 
 Scale-awareness lives here: `CHORDS` is an exported **live binding** (a `let`, not a `const`)
 rebuilt by `setScaleContext(key, scaleName)` — the seven diatonic triads are derived from the
-key + scale, with correct roman-numeral case and names. Harmony is stored as **scale-degree
-indices**, so it follows a key/scale change for free (plus a per-scene `harmonyOct`, ±1,
-applied at playback after voice leading so chord continuity stays register-independent). `scaleNotes(base, rows)` and
+key + scale, with correct roman-numeral case and names spelled by degree-letter arithmetic
+(seven letters per key, so F♯ major's seventh chord is E♯dim; `spellScalePc`/`noteName`/
+`spellChordTones` carry the same law to chord tones, roll labels, and the staff). Harmony is
+stored as **scale-degree indices or borrowed `{pcs}` entries** (DECISIONS D13) resolved
+everywhere through `harmonyChord`, so it follows a key/scale change for free — borrowed pcs
+transpose alongside bass/melody — (plus a per-scene `harmonyOct`, ±1,
+applied at playback after voice leading so chord continuity stays register-independent).
+Circle-of-fifths theory (station math, signatures, mode offsets, `keyDisplayName`) lives
+here too. `scaleNotes(base, rows)` and
 `snapToScale(midi)` drive the piano roll. `SCALES` has major/minor/dorian/phrygian/lydian/
 mixolydian (all 7-note, so 7 chords each). Also here: `voiceLead`, `sharedTones`, `euclid`,
 the drum-voice metadata, and `makeSong` / `makeScene` / `cloneScene` / `arrangeLength` / `clipAt`.
@@ -178,10 +184,17 @@ sector slides around a fixed wheel; accidentals light up in arrival order during
 the drag). The sheet's ● arms writing: a clean tap then replaces the chord being
 heard in the playing clip, bar-quantized because harmony is one chord per bar.
 Playback chords draw a fading trail whose segment weight is the shared-tone count.
-Rendering is a cached static layer plus rAF only while open and animating; theory
-helpers (station math `pc·7 mod 12`, signatures, `keyDisplayName`, diatonic
-extension intervals) live in model.js. `window.__noodlesCircle` exposes geometry
-for the harnesses; design reasoning and the v2 bank are in `DESIGN-CIRCLE.md`.
+Out-of-sector taps audition borrowed chords, and armed they store `{pcs}` entries
+(D13). The white knob on the home wedge is the front door: drag it to another
+in-sector wedge and the mode renames without moving a note (degrees re-index; a
+stationary grab is a plain tap). Rendering is a cached static layer plus rAF only
+while open and animating; theory helpers (station math `pc·7 mod 12`, signatures,
+`keyDisplayName`, diatonic extension intervals) live in model.js.
+`window.__noodlesCircle` exposes geometry for the harnesses; design reasoning and
+the bank are in `DESIGN-CIRCLE.md`. The chord editor carries the circle's two
+sibling projections (both in main.js): the engraved treble staff above the slots
+(the heard voicing, signature-honest — `DESIGN-STAFF.md`) and the voice-leading
+thread strip below them (held tones gold and level, moving voices sloped).
 
 **`src/main.js`** — all UI and interaction, vanilla DOM (no framework). It builds: the
 transport (pinned **play + undo + redo** that never scroll and sit above any open editor,
@@ -208,7 +221,10 @@ velocity lane; vertical mixer strips (fader, pan, reverb + echo sends, live mete
 hold, preset pickers); loudness-matched device presets per track; randomized-but-balanced
 cold open (key, scale, tempo, presets, magic scene) plus a 🎲 button that rerolls it all;
 global Key + Scale via the playable circle of fifths (the whole app transposes and
-re-snaps in key; keys wear their honest spelling — E♭, not D♯); one-tap Transforms;
+re-snaps in key; keys and every note name wear their honest per-key spelling — E♭,
+not D♯, and F♯ major's E♯; borrowed chords store as violet `{pcs}` entries and the
+front-door knob re-modes without moving a note); the chord editor's engraved staff
+and voice-leading threads; one-tap Transforms;
 undo/redo; groove/swing; WAV export (master + four stems, plus a seamless loop render when
 the arrangement loop is set) through the same graph as live playback, handed back as
 tap-to-save buttons because a long render outlives a phone tap's transient activation;

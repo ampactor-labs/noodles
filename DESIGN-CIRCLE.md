@@ -123,26 +123,41 @@ name surface in the app. First item in the bank below.
   the clip can hold. Honest, and it makes the soft wall physical: you can
   visit ♭VII, and if you want to live there, you move the key.
 
-## Banked for v2, each one a reveal
+## The bank, one day later
 
-- **Drag the front door.** Slide the home marker within the fixed sector to
-  change mode directly — dorian as "same neighborhood, enter at d." The scale
-  chips already do the choosing; this makes the geometry do it.
+Four of the original reveals landed 2026-07-28, the same arc that opened
+this file (receipts in the theory oracle and the smoke gate):
+
+- **Drag the front door** — built. The white knob on the home wedge carries
+  the door to any in-sector wedge; the mode renames and not one stored note
+  moves (degrees re-index by `(d − shift) mod 7`; proven sound-neutral for
+  all six doors across all 72 mode/key pairs). One lesson paid for on the
+  way: the knob's first hit zone was fat enough to eat armed taps on the
+  home wedge — a handle that outranks the surface under it has to be tight,
+  and a stationary grab now falls through to full tap semantics.
+- **Per-key spelling** — built. Degree-letter arithmetic through
+  `rebuildChords` and `noteName`; seven letters per key, F♯ major gets its
+  E♯, the A♯/B♭ split is closed.
+- **Chromatic harmony storage** — built (DECISIONS D13). Slots hold degrees
+  or `{pcs}`; the circle is the chromatic writer; borrowed chords transpose
+  with the song and wear the visitor's violet.
+- **The staff projection** — built, v1 (DESIGN-STAFF.md): the chord editor
+  engraves the heard voicing over the slots, signature-honest, accidentals
+  only where the promise breaks. The voice-leading threads landed beside it,
+  which closes the handoff's own "common tones light up" line.
+
+Still banked, each one a reveal:
+
 - **The spiral.** Pinch out and the circle un-closes into the Pythagorean
   spiral: twelve 3:2 fifths miss home by 23.46 cents, and equal temperament
   splits the difference (700 instead of 701.955). One dismissible line for
   the engineer who has been hearing that ratio his whole mixing life.
 - **Negative harmony mirror.** Reflect the trail across the key's axis and
   audition the reflection. A plaything, never a term.
-- **The staff projection.** Retroactive notation: the same clip rendered as
-  an engraved staff with the key signature the circle already knows. The
-  opacity dial slides piano roll into sheet music.
-- **Chromatic harmony storage.** Let a harmony slot hold `{pcs}` alongside
-  degree indices so borrowed chords become writable. A real model fork;
-  surface it in DECISIONS before building.
-- **Extension storage** (7/9/sus on stored chords) — same fork, smaller.
-- **Per-key spelling** through `pcName`/`rebuildChords`, ending the A♯/B♭
-  split.
+- **Extension storage** (7/9/sus on stored chords) — the D13 fork's smaller
+  sibling; the bloom already plays them.
+- **The melody staff.** The piano roll's own slide toward notation; needs a
+  grand-staff decision for bass (DESIGN-STAFF.md).
 - **Partner dares.** Constraint clips a teacher can hand you ("stay in E♭,
   no voice moves more than a step") — the soft-wall mechanism already
   exists; this points it at two people on a couch.
