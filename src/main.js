@@ -314,8 +314,24 @@ function renderFooter() {
     value: String(song.swing),
     class: "swingslider",
   });
-  grooveSlider.addEventListener("pointerdown", () => pushUndo());
+  // Snapshot on the first real change, not on pointerdown: a tap that never
+  // moves the slider used to structuredClone the whole song into the undo
+  // stack for nothing (the bindTempoControl pattern).
+  let groovePre = null;
+  grooveSlider.addEventListener("pointerdown", () => {
+    groovePre = null;
+  });
+  // A gesture ends with change; the next one (keyboard steps included, which
+  // never fire pointerdown) snapshots fresh.
+  grooveSlider.addEventListener("change", () => {
+    groovePre = null;
+  });
   grooveSlider.addEventListener("input", () => {
+    if (!groovePre) {
+      groovePre = snapshot();
+      markTouched();
+      commitUndo(groovePre);
+    }
     song.swing = parseFloat(grooveSlider.value);
     audio.setSwing(song.swing);
     grooveVal.textContent = Math.round(song.swing * 100) + "%";
