@@ -3796,19 +3796,22 @@ async function doExport(mode) {
   clearExportOffers();
   setExportStatus(mode === "loop" ? "Rendering loop\u2026" : mode === "master" ? "Rendering master\u2026" : "Rendering stems\u2026");
   try {
+    // Files carry their key (Eb-dorian, F#-major): the later-improvement
+    // pass in another tool starts with the one fact it always needs.
+    const keySlug = `${keyDisplayName(song.key, song.scale).replace("\u266f", "#").replace("\u266d", "b")}-${song.scale}`;
     if (mode === "loop") {
       const buf = await audio.renderOffline(null, { loop: { start: song.loop.start, len: song.loop.len } });
-      offerSave(encodeWav(buf), "noodles-loop.wav", `Save loop \u00b7 ${song.loop.len} ${song.loop.len === 1 ? "bar" : "bars"}`);
+      offerSave(encodeWav(buf), `noodles-${keySlug}-loop.wav`, `Save loop \u00b7 ${song.loop.len} ${song.loop.len === 1 ? "bar" : "bars"}`);
       setExportStatus("Seamless loop ready \u2014 tap to save:");
     } else if (mode === "master") {
       const buf = await audio.renderOffline(null);
-      offerSave(encodeWav(buf), "noodles-master.wav", "Save master WAV");
+      offerSave(encodeWav(buf), `noodles-${keySlug}.wav`, "Save master WAV");
       setExportStatus("Master ready \u2014 tap to save:");
     } else {
       for (const t of TRACKS) {
         setExportStatus(`Rendering ${t.name}\u2026`);
         const buf = await audio.renderOffline(t.key);
-        offerSave(encodeWav(buf), `noodles-${t.key}.wav`, `Save ${t.name} stem`);
+        offerSave(encodeWav(buf), `noodles-${keySlug}-${t.key}.wav`, `Save ${t.name} stem`);
       }
       setExportStatus("Stems ready \u2014 tap to save:");
     }

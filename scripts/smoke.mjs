@@ -314,6 +314,23 @@ try {
   await page.waitForFunction((want) => window.__noodles.song.scale === want, {}, doorTargetScale);
   const doorAfterBass = await page.evaluate(() => JSON.stringify(window.__noodles.song.scenes[0].bass));
   assertState(doorAfterBass === doorFrom.bass, "the door drag moved notes — re-mode must be a pure renaming");
+  // The mirror, via synthetic pointers (CDP can't hold two real touches
+  // reliably in a long run): a finger on the hole reflects the next tap.
+  const mirrored = await page.evaluate(() => {
+    const canvas = document.querySelector(".circle-canvas");
+    const r = canvas.getBoundingClientRect();
+    const C = window.__noodlesCircle;
+    const opts = (x, y, id) => ({ bubbles: true, cancelable: true, pointerId: id, pointerType: "touch", clientX: r.left + x, clientY: r.top + y });
+    const before = C.trailLength();
+    canvas.dispatchEvent(new PointerEvent("pointerdown", opts(C.size() / 2, C.size() / 2, 71)));
+    const during = C.mirrorOn();
+    const v = C.point("outer", (C.home() + 1) % 12);
+    canvas.dispatchEvent(new PointerEvent("pointerdown", opts(v.x, v.y, 72)));
+    canvas.dispatchEvent(new PointerEvent("pointerup", opts(v.x, v.y, 72)));
+    canvas.dispatchEvent(new PointerEvent("pointerup", opts(C.size() / 2, C.size() / 2, 71)));
+    return { during, after: C.mirrorOn(), grew: C.trailLength() > before };
+  });
+  assertState(mirrored.during && !mirrored.after && mirrored.grew, `mirror hold misbehaved: ${JSON.stringify(mirrored)}`);
   await page.screenshot({ path: circleShotPath });
   await closeSheet(page);
   // Undo the excursion: door, travel, and up to four punched chords.

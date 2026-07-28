@@ -194,15 +194,53 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     wake();
   }
 
+  // --- The mirror: negative harmony as a plaything, never a term ---
+  // Hold the center hole and every tap reflects across the key's axis (the
+  // line between tonic and dominant): pc -> 2·tonic + 7 − pc. Reflection
+  // swaps major and minor by arithmetic, and most reflections of diatonic
+  // chords land in the parallel minor — borrowed, violet, and (armed)
+  // storable through D13. Release and the wheel plays straight again.
+  let mirrorHold = null; // pointerId resting on the hole
+  const mirrorPc = (p) => norm12(2 * homePc() + 7 - p);
+  const applyMirror = (pcs) => (mirrorHold != null ? pcs.map(mirrorPc) : pcs);
+  // Any triad set back into root position: try each tone as the root.
+  function rootPosition(pcs) {
+    for (const r of pcs) {
+      const rest = pcs.map((p) => norm12(p - r)).sort((a, b) => a - b);
+      if ((rest[1] === 3 || rest[1] === 4) && rest[2] >= 6 && rest[2] <= 8) {
+        return [r, norm12(r + rest[1]), norm12(r + rest[2])];
+      }
+    }
+    return pcs.slice();
+  }
+  function wedgeOfPcs(pcs) {
+    const q = quality(pcs);
+    if (q === "dim") return { ...wedges.seam, pcs };
+    const station = q === "min" ? stationOfPc(norm12(pcs[0] + 3)) : stationOfPc(pcs[0]);
+    return { ring: q === "min" ? "inner" : "outer", station, pcs };
+  }
+  // The chord a tap MEANS right now, mirror included, resolved to a degree
+  // when the scale owns it.
+  function effectiveChord(pcs) {
+    const m = rootPosition(applyMirror(pcs));
+    const d = CHORDS.findIndex((c) => c.pcs.join() === m.join());
+    return { degree: d, pcs: m };
+  }
+
+  function playPcs(pcs) {
+    ensureStarted().then(() => audio.previewPcs(applyMirror(pcs), getHarmonyOct()));
+  }
   function soundWedge(w) {
-    ensureStarted().then(() => audio.previewPcs(w.pcs, getHarmonyOct()));
-    pushTrail(w);
+    playPcs(w.pcs);
+    pushTrail(mirrorHold != null ? wedgeOfPcs(effectiveChord(w.pcs).pcs) : w);
   }
   // Only a clean tap writes into the playing clip — a strum is a run, a hold
   // is an audition. One intent, one write.
   function tryCapture(w) {
-    if (captureChord(w)) {
-      flash = { ring: w.ring, station: w.station, t: nowS() };
+    const chord = mirrorHold != null ? effectiveChord(w.pcs) : w;
+    if (captureChord(chord)) {
+      const fw = mirrorHold != null ? wedgeOfPcs(chord.pcs) : w;
+      flash = { ring: fw.ring, station: fw.station, t: nowS() };
       buzz(10);
     }
   }
@@ -213,11 +251,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     if (!open) return;
     const ch = harmonyChord(entry);
     if (!ch?.pcs) return;
-    const q = quality(ch.pcs);
-    const root = ch.pcs[0];
-    if (q === "dim") return pushTrail(wedges.seam);
-    const station = q === "min" ? stationOfPc(norm12(root + 3)) : stationOfPc(root);
-    pushTrail({ ring: q === "min" ? "inner" : "outer", station, pcs: ch.pcs });
+    pushTrail(wedgeOfPcs(ch.pcs));
   }
 
   // --- Geometry / hit-testing (CSS px, origin at canvas top-left) ---
@@ -389,12 +423,90 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     c.fillText(scaleName + (sig ? " · " + sig : ""), center(), center() + size * 0.028);
   }
 
+  // --- The spiral: pinch out and the circle un-closes ---
+  // Twelve equal-tempered fifths close the wheel by construction. Twelve PURE
+  // 3:2 fifths do not: each one overshoots 700 cents by 1.955, and the walk
+  // arrives 23.46 cents past home — the Pythagorean comma. Pinching morphs
+  // the wheel into that walk: B♯ lands visibly past C, and the one line of
+  // why appears only at full stretch, in the gesture that asked for it.
+  let spiralT = 0;
+  let spiralPinch = null; // { d0, t0, committed }
+  let spiralSnap = null; // { from, target, t0 }
+  const COMMA_STEP = ((701.955 - 700) / 1200) * TAU; // one pure fifth's excess
+  function snapSpiral(target) {
+    spiralSnap = { from: spiralT, target, t0: nowS() };
+    wake();
+  }
+  function spiralNode(s, k) {
+    const a = angleOf(s) + k * s * COMMA_STEP;
+    const rf = 0.86 - k * (12 - s) * 0.024;
+    return { a, rf, ...polar(a, rf) };
+  }
+  function drawSpiral(c) {
+    const k = spiralT;
+    c.save();
+    c.globalAlpha = Math.min(1, k * 1.3);
+    c.strokeStyle = "rgba(232,184,75,0.75)";
+    c.lineWidth = 2;
+    c.beginPath();
+    for (let s = 0; s <= 12.001; s += 0.125) {
+      const p = spiralNode(s, k);
+      if (s === 0) c.moveTo(p.x, p.y);
+      else c.lineTo(p.x, p.y);
+    }
+    c.stroke();
+    c.textAlign = "center";
+    c.textBaseline = "middle";
+    for (let s = 0; s <= 12; s++) {
+      const p = spiralNode(s, k);
+      c.beginPath();
+      c.arc(p.x, p.y, s === 12 ? 5 : 3.5, 0, TAU);
+      c.fillStyle = s === 12 ? "#e8b84b" : "#e8e8ec";
+      c.fill();
+      const lp = polar(p.a, p.rf + 0.085);
+      c.fillStyle = s === 12 ? "#e8b84b" : "rgba(232,232,236,0.8)";
+      c.font = `600 ${Math.round(size * 0.032)}px ${FONT}`;
+      c.fillText(s === 12 ? "B♯" : STATION_MAJOR[s % 12], lp.x, lp.y);
+    }
+    if (k > 0.85) {
+      const p0 = spiralNode(0, k);
+      const p12 = spiralNode(12, k);
+      c.strokeStyle = "rgba(255,255,255,0.55)";
+      c.setLineDash([4, 4]);
+      c.lineWidth = 1.4;
+      c.beginPath();
+      c.moveTo(p12.x, p12.y);
+      c.lineTo(p0.x, p0.y);
+      c.stroke();
+      c.setLineDash([]);
+      const fade = (k - 0.85) / 0.15;
+      c.fillStyle = `rgba(232,232,236,${(0.8 * fade).toFixed(3)})`;
+      c.font = `600 ${Math.round(size * 0.031)}px ${FONT}`;
+      c.fillText("a fifth is 3:2 — walk twelve and you miss home by 23 cents;", center(), size - size * 0.078);
+      c.fillText("equal temperament splits the difference", center(), size - size * 0.04);
+    }
+    c.restore();
+  }
+
   function paint() {
     raf = 0;
     const t = nowS();
+    if (spiralSnap) {
+      const k = Math.min(1, (t - spiralSnap.t0) / 0.18);
+      spiralT = spiralSnap.from + (spiralSnap.target - spiralSnap.from) * k;
+      if (k >= 1) spiralSnap = null;
+    }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, size, size);
+    ctx.globalAlpha = 1 - spiralT * 0.92;
     ctx.drawImage(staticLayer, 0, 0, size, size);
+    ctx.globalAlpha = 1;
+    if (spiralT > 0.5) {
+      drawSpiral(ctx);
+      if (open && needsAnim(t)) raf = requestAnimationFrame(paint);
+      return;
+    }
+    if (spiralT > 0.02) drawSpiral(ctx);
 
     // Trail: the progression drawn as chords of the circle, each segment's
     // weight the number of tones the two chords share — near means smooth,
@@ -506,9 +618,23 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
       ctx.setLineDash([]);
     }
 
+    // The mirror's axis, drawn only while a finger holds it: the line the
+    // reflection folds across, running between tonic and dominant.
+    if (mirrorHold != null) {
+      const aA = angleOf(stationOfPc(homePc()) + 0.5);
+      ctx.strokeStyle = "rgba(255,255,255,0.5)";
+      ctx.setLineDash([6, 5]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(center() + Math.cos(aA) * R() * R_RIM, center() + Math.sin(aA) * R() * R_RIM);
+      ctx.lineTo(center() - Math.cos(aA) * R() * R_RIM, center() - Math.sin(aA) * R() * R_RIM);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     // The hole is the one name surface: traveling shows where you'd land,
     // door-dragging the mode you'd rename into, holding names what you're
-    // touching, idle says you are here.
+    // touching — reflected while the mirror is held — idle says you are here.
     if (rimDrag) {
       const candTonic = norm12(pcOfStation(rimDrag.cand) - relMajorOffset(song.scale));
       drawHole(ctx, keyDisplayName(candTonic, song.scale), song.scale, sigLabel(rimDrag.cand));
@@ -517,12 +643,18 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
       const mode = MODE_OF_WEDGE[cw.ring]?.[norm12(cw.station - H)] || song.scale;
       const tonic = cw.ring === "outer" ? pcOfStation(cw.station) : norm12(pcOfStation(cw.station) + 9);
       drawHole(ctx, keyDisplayName(tonic, mode), mode, "same " + (sigLabel(H) || "♮"));
+    } else if (held && mirrorHold != null) {
+      const ec = effectiveChord(held.curWedge.pcs);
+      const ch = harmonyChord(ec.degree >= 0 ? ec.degree : { pcs: ec.pcs });
+      drawHole(ctx, ch.name, `${ch.roman} of ${homeName()}`, "⇋");
     } else if (held) {
       const w = held.curWedge;
       const name = held.bloom && held.bloomSel != null ? extLabel(w, EXT_PADS[held.bloomSel]) : rootName(w);
       const roman = w.degree >= 0 ? CHORDS[w.degree].roman : romanFromHome(homePc(), w.root, w.q === "min");
       const sig = w.ring === "outer" && w.station >= 0 ? sigLabel(w.station) : "";
       drawHole(ctx, name, `${roman} of ${homeName()}`, sig);
+    } else if (mirrorHold != null) {
+      drawHole(ctx, homeName(), song.scale, "⇋");
     } else {
       drawHole(ctx, homeName(), song.scale, sigLabel(H));
     }
@@ -532,6 +664,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
 
   function needsAnim(t = nowS()) {
     if (gestures.size || rimDrag || doorDrag || flash) return true;
+    if (mirrorHold != null || spiralPinch?.committed || spiralSnap) return true;
     return trail.some((e) => t - e.t < TRAIL_FADE);
   }
   function wake() {
@@ -559,6 +692,21 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+    if (spiralT > 0.25) return; // the spiral is a view, not a controller
+    // A finger resting on the hole holds the mirror: everything the other
+    // hand plays reflects across the key's axis until it lifts.
+    if (mirrorHold == null && Math.hypot(x - center(), y - center()) < R() * (R_HOLE - 0.02)) {
+      e.preventDefault();
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        // synthetic streams can end before capture resolves
+      }
+      mirrorHold = e.pointerId;
+      buzz(6);
+      wake();
+      return;
+    }
     // The door knob outranks the wedge under it — but only just: its zone is
     // kept tight, and a stationary grab falls through to full tap semantics,
     // so the home wedge has no dead spots and no capture holes.
@@ -667,7 +815,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
       if (sel !== g.bloomSel) {
         g.bloomSel = sel;
         if (sel != null) {
-          ensureStarted().then(() => audio.previewPcs(extPcs(g.curWedge, EXT_PADS[sel]), getHarmonyOct()));
+          playPcs(extPcs(g.curWedge, EXT_PADS[sel]));
           buzz(6);
         }
       }
@@ -686,6 +834,11 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
   });
 
   function endPointer(e) {
+    if (mirrorHold === e.pointerId) {
+      mirrorHold = null;
+      wake();
+      return;
+    }
     if (doorDrag && doorDrag.id === e.pointerId) {
       const cand = doorDrag.cand;
       const wasCancel = e.type === "pointercancel";
@@ -731,6 +884,49 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
   canvas.addEventListener("pointerup", endPointer);
   canvas.addEventListener("pointercancel", endPointer);
 
+  // Pinch is the spiral's gesture, on touch events (pointer events can't see
+  // two fingers as one act). Two touches only become a pinch once their
+  // distance actually changes — two-thumb chords stay two taps.
+  canvas.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.touches.length === 2) {
+        const [a, b] = e.touches;
+        spiralPinch = { d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), t0: spiralT, committed: false };
+      }
+    },
+    { passive: true }
+  );
+  canvas.addEventListener(
+    "touchmove",
+    (e) => {
+      if (!spiralPinch || e.touches.length !== 2) return;
+      const [a, b] = e.touches;
+      const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      if (!spiralPinch.committed && Math.abs(d - spiralPinch.d0) > 24) {
+        spiralPinch.committed = true;
+        gestures.forEach((g) => clearTimeout(g.timer));
+        gestures.clear(); // the two would-be taps are a pinch now
+      }
+      if (spiralPinch.committed) {
+        // touch-action:none already owns scrolling; only cancel when the
+        // event allows it (synthetic streams arrive non-cancelable).
+        if (e.cancelable) e.preventDefault();
+        spiralT = Math.max(0, Math.min(1, spiralPinch.t0 + (d / spiralPinch.d0 - 1) * 1.4));
+        wake();
+      }
+    },
+    { passive: false }
+  );
+  const endPinch = (e) => {
+    if (spiralPinch && e.touches.length < 2) {
+      if (spiralPinch.committed) snapSpiral(spiralT > 0.5 ? 1 : 0);
+      spiralPinch = null;
+    }
+  };
+  canvas.addEventListener("touchend", endPinch);
+  canvas.addEventListener("touchcancel", endPinch);
+
   // --- Lifecycle ---
   function resize() {
     const w = wrap.clientWidth || 320;
@@ -768,6 +964,10 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
       gestures.clear();
       rimDrag = null;
       doorDrag = null;
+      mirrorHold = null;
+      spiralPinch = null;
+      spiralSnap = null;
+      spiralT = 0;
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
     },
@@ -786,6 +986,8 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
       home: () => H,
       size: () => size,
       trailLength: () => trail.length,
+      spiralT: () => spiralT,
+      mirrorOn: () => mirrorHold != null,
     };
   }
 
