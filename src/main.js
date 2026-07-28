@@ -725,11 +725,20 @@ function setKeyScale(key, scale) {
 // ---------------------------------------------------------------------------
 const sessionEl = document.getElementById("session");
 
+// One home for the mini-bar heights: clipContent builds with them, and
+// paintClipMini writes them in place during a drag-paint.
+const drumBarHeight = (drums, s) =>
+  drums.kick[s] || drums.snare[s] || drums.clap[s] ? 15 : drums.hat[s] ? 8 : 3;
+const noteBarHeight = (slot) => {
+  const notes = noteSlot(slot);
+  return notes.length ? Math.round(4 + slotPeakVel(slot) * 9 + Math.min(4, notes.length - 1) * 2) : 3;
+};
+
 function clipContent(scene, track) {
   if (track === "harmony") {
     if (!scene.harmony || scene.harmony.length === 0) return null;
-    return el("div", { 
-      class: "harmony-mini", 
+    return el("div", {
+      class: "harmony-mini",
       html: scene.harmony.map((ci) => `<div>${chordMarkup(ci)}</div>`).join("")
     });
   }
@@ -737,8 +746,7 @@ function clipContent(scene, track) {
     if (!scene.drums || !Object.values(scene.drums).some(v => v.some(x => x))) return null;
     const mini = el("div", { class: "mini" });
     for (let s = 0; s < 16; s++) {
-      const hit = scene.drums.kick[s] || scene.drums.snare[s] || scene.drums.clap[s];
-      mini.appendChild(el("i", { style: `height:${hit ? 15 : scene.drums.hat[s] ? 8 : 3}px` }));
+      mini.appendChild(el("i", { style: `height:${drumBarHeight(scene.drums, s)}px` }));
     }
     return mini;
   }
@@ -747,9 +755,7 @@ function clipContent(scene, track) {
     const mini = el("div", { class: "mini" });
     const lane = scene[track];
     for (let s = 0; s < 16; s++) {
-      const notes = noteSlot(lane[s]);
-      const height = notes.length ? Math.round(4 + slotPeakVel(lane[s]) * 9 + Math.min(4, notes.length - 1) * 2) : 3;
-      mini.appendChild(el("i", { style: `height:${height}px` }));
+      mini.appendChild(el("i", { style: `height:${noteBarHeight(lane[s])}px` }));
     }
     return mini;
   }
@@ -2193,9 +2199,14 @@ function buildDrumEditor(scene) {
       steps.appendChild(cell);
     }
 
-    // Build a hit-test function: given clientX within the steps row, return step index
+    // Hit-test against a rect read ONCE per gesture: a fresh
+    // getBoundingClientRect per pointermove, interleaved with the paint's
+    // height writes, forced a synchronous layout per painted cell. The row's
+    // geometry can't change mid-drag — the sheet is modal and doesn't scroll
+    // horizontally.
+    let dragRect = null;
     const stepAtX = (clientX) => {
-      const rect = steps.getBoundingClientRect();
+      const rect = dragRect || (dragRect = steps.getBoundingClientRect());
       const idx = Math.floor((clientX - rect.left) / (rect.width / 16));
       return Math.max(0, Math.min(15, idx));
     };
@@ -2204,6 +2215,7 @@ function buildDrumEditor(scene) {
       e.preventDefault();
       await ensureStarted();
       drumDragPre = snapshot();
+      dragRect = null; // fresh read at gesture start, reused for the drag
       const s0 = stepAtX(e.clientX);
       if (s0 >= clipLen) return;
       drumDragMode = scene.drums[v][s0] > 0 ? "delete" : "add";
@@ -2213,7 +2225,7 @@ function buildDrumEditor(scene) {
         audio.previewHit(v);
         buzz();
       }
-      refreshClip(editor.scene, "drums");
+      paintClipMini(editor.scene, "drums");
       if (typeof paintDrums === "function") paintDrums();
       capturePointer(steps, e.pointerId);
     });
@@ -2226,7 +2238,7 @@ function buildDrumEditor(scene) {
       if (isOn !== shouldOn) {
         scene.drums[v][s] = shouldOn ? 0.9 : 0;
         stepsArr[s].classList.toggle("on", shouldOn);
-        refreshClip(editor.scene, "drums");
+        paintClipMini(editor.scene, "drums");
         if (typeof paintDrums === "function") paintDrums();
       }
     });
@@ -2270,13 +2282,20 @@ function buildDrumEditor(scene) {
   sheet.appendChild(vlane);
 
   function paintDrums() {
+    // Dirty-checked: a drag-paint calls this per painted cell, and fifteen of
+    // the sixteen columns haven't moved — unconditional height writes were
+    // sixteen layout-dirtying styles per painted step.
     for (let s = 0; s < 16; s++) {
       let maxVel = 0;
       for (const v of DRUM_VOICES) {
         if (scene.drums[v][s] > maxVel) maxVel = scene.drums[v][s];
       }
-      vbars[s].style.height = maxVel > 0 ? Math.round(maxVel * 100) + "%" : "0%";
-      vbars[s].parentElement.style.opacity = maxVel > 0 ? 1 : 0.3;
+      const h = maxVel > 0 ? Math.round(maxVel * 100) + "%" : "0%";
+      if (vbars[s].__h !== h) {
+        vbars[s].__h = h;
+        vbars[s].style.height = h;
+        vbars[s].parentElement.style.opacity = maxVel > 0 ? 1 : 0.3;
+      }
     }
   }
 
@@ -2302,7 +2321,7 @@ function buildDrumEditor(scene) {
       bar.removeEventListener("pointermove", move);
       bar.removeEventListener("pointerup", up);
       bar.removeEventListener("pointercancel", up);
-      refreshClip(editor.scene, "drums");
+      paintClipMini(editor.scene, "drums");
     };
     bar.addEventListener("pointermove", move);
     bar.addEventListener("pointerup", up);
@@ -2558,7 +2577,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
         removeNoteFromSlot(lane, existing.step, existing.index);
         paint();
       }
-      refreshClip(sceneIndex, track);
+      paintClipMini(sceneIndex, track);
     };
     cell.addEventListener("pointermove", move);
     cell.addEventListener("pointerup", up);
@@ -2583,7 +2602,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
       bar.removeEventListener("pointermove", move);
       bar.removeEventListener("pointerup", up);
       bar.removeEventListener("pointercancel", up);
-      refreshClip(sceneIndex, track);
+      paintClipMini(sceneIndex, track);
     };
     bar.addEventListener("pointermove", move);
     bar.addEventListener("pointerup", up);
@@ -2677,6 +2696,32 @@ function refreshClip(sceneIndex, track) {
   const state = stateBadge(song.scenes[sceneIndex], track);
   if (state) clip.appendChild(state);
   refs.pies[track] = clip.appendChild(el("div", { class: "pie" }));
+}
+
+// The drag-paint repaint: write the 16 mini-bar heights of the session cell
+// in place instead of rebuilding the cell per painted step (the innerHTML
+// path measured 12+ forced layouts a second under a drum sweep). Falls back
+// to the full refreshClip whenever the cell's structure is at stake — the
+// clip filling or emptying, or no mini to write into. Badge changes (launch,
+// steps, motion) keep going through refreshClip; a paint can't cause them.
+function paintClipMini(sceneIndex, track) {
+  const clip = sceneEls[sceneIndex]?.clips[track];
+  if (!clip || track === "harmony") return refreshClip(sceneIndex, track);
+  const scene = song.scenes[sceneIndex];
+  const filled = track === "drums"
+    ? Object.values(scene.drums).some((v) => v.some((x) => x))
+    : scene[track].some((n) => n !== null);
+  const mini = clip.querySelector(".mini");
+  if (!mini || !filled) return refreshClip(sceneIndex, track);
+  const bars = mini.children;
+  for (let s = 0; s < 16; s++) {
+    const h = track === "drums" ? drumBarHeight(scene.drums, s) : noteBarHeight(scene[track][s]);
+    const bar = bars[s];
+    if (bar && bar.__h !== h) {
+      bar.__h = h;
+      bar.style.height = h + "px";
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
