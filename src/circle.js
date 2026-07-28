@@ -61,6 +61,10 @@ const hex = (n) => "#" + (n >>> 0).toString(16).padStart(6, "0");
 const angleOf = (station) => ANG0 + station * STEP;
 const sigLabel = (station) => (station === 0 ? "" : station <= 6 ? `${station}♯` : `${12 - station}♭`);
 
+// The wedge voicing memory, SHARED by every mounted wheel (sheet + editor
+// are one instrument): "ring:station" -> EXT_PADS index.
+const stickyExt = new Map();
+
 // Triad quality straight from the interval structure — the model's pcs are
 // the truth, the name string never gets parsed.
 function quality(pcs) {
@@ -235,7 +239,6 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
   // The wedge remembers its voicing: release the bloom over a pad and plain
   // taps play that stack until a hold releases on empty air. The mirror
   // stays a triad toy - reflection has no root-position law for towers yet.
-  const stickyExt = new Map(); // "ring:station" -> EXT_PADS index
   const stickyKey = (w) => w.ring + ":" + w.station;
   const wedgePcs = (w) => {
     const sel = stickyExt.get(stickyKey(w));
@@ -722,18 +725,16 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
 
   // --- Gestures ---
   function padLayout(x, y) {
-    // Fan the pads away from the wheel's center so the thumb never covers
-    // them, and keep every pad on the canvas. Six pads: a wider, tighter fan.
-    const base = Math.atan2(y - center(), x - center());
-    const r = Math.max(size * 0.056, 27);
-    const dist = r * 2.7;
+    // Pads ride the wheel's own ring around the held point — tangential, so
+    // there is always room (a ring has no edge) and the spacing solves for
+    // no-overlap: the angular step is whatever keeps pad rims 6 px apart.
+    const a0 = Math.atan2(y - center(), x - center());
+    const rf = Math.min(0.72, Math.max(0.52, Math.hypot(x - center(), y - center()) / R()));
+    const r = Math.max(size * 0.052, 24);
+    const dA = 2 * Math.asin(Math.min(0.45, (r + 3) / (R() * rf)));
     return EXT_PADS.map((_, i) => {
-      const a = base + (i - 2.5) * 0.6;
-      return {
-        x: Math.max(r + 2, Math.min(size - r - 2, x + Math.cos(a) * dist)),
-        y: Math.max(r + 2, Math.min(size - r - 2, y + Math.sin(a) * dist)),
-        r,
-      };
+      const p = polar(a0 + (i - 2.5) * dA, rf);
+      return { x: p.x, y: p.y, r };
     });
   }
 
@@ -953,7 +954,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
       if (g.bloomSel != null) {
         stickyExt.set(key, g.bloomSel);
         const pcs = extPcs(g.curWedge, EXT_PADS[g.bloomSel]);
-        if (captureChord({ degree: -1, pcs })) {
+        if (captureChord({ degree: -1, pcs }, { deliberate: true })) {
           flash = { ring: g.curWedge.ring, station: g.curWedge.station, t: nowS() };
           buzz(10);
         }

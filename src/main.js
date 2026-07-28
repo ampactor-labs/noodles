@@ -214,8 +214,11 @@ let editorCircle = null; // the chord editor's mounted wheel, one at a time
 // bar-quantized by construction, since harmony is one chord per bar. Borrowed
 // chords (degree -1) are playable but not storable: the model speaks scale
 // degrees, so the bright region is exactly what the clip can hold.
-function circleCapture(chord) {
-  if (!circleArmed || !audio.playing || audio.mode !== "scene") return false;
+function circleCapture(chord, ctx = {}) {
+  // ● gates casual taps; a bloom release ON a pad is deliberate and writes
+  // regardless — that is what "I changed C to C7" means (empty-air release
+  // stays the escape that writes nothing).
+  if ((!circleArmed && !ctx.deliberate) || !audio.playing || audio.mode !== "scene") return false;
   const si = playingTracks.harmony;
   const scene = song.scenes[si];
   if (!scene?.harmony?.length) return false;
@@ -3301,7 +3304,7 @@ function buildHarmonyEditor(sceneIndex, scene) {
     audio.preview(scene.harmony[selected], scene.harmonyOct);
   };
   sheet.appendChild(
-    el("div", { class: "tfrow" }, [
+    el("div", { class: "tfrow oct-row" }, [
       el("div", { class: "tfbtn", text: "Oct−", onclick: () => setOct(-1) }),
       octVal,
       el("div", { class: "tfbtn", text: "Oct+", onclick: () => setOct(1) }),
@@ -3320,16 +3323,16 @@ function buildHarmonyEditor(sceneIndex, scene) {
   function drawStaff() {
     const w = staffCanvas.clientWidth;
     if (!w || !scene.harmony.length) return;
-    const h = 118;
+    const h = 142;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     staffCanvas.width = Math.round(w * dpr);
     staffCanvas.height = Math.round(h * dpr);
     const c = staffCanvas.getContext("2d");
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.clearRect(0, 0, w, h);
-    const S = 11; // line gap
+    const S = 13; // line gap
     const E4 = 5 * 7 + 2; // diatonic step index of the bottom line
-    const bottomY = h - 30;
+    const bottomY = h - 34;
     const yOf = (step) => bottomY - (step - E4) * (S / 2);
     c.strokeStyle = "rgba(255,255,255,0.34)";
     c.lineWidth = 1;
@@ -3358,14 +3361,13 @@ function buildHarmonyEditor(sceneIndex, scene) {
     }
     const startX = x + S * 1.6;
     const oct = 12 * (scene.harmonyOct || 0);
-    const cRect = staffCanvas.getBoundingClientRect();
     let prev = null;
+    const span = Math.max(40, w - startX - 10);
     scene.harmony.forEach((entry, i) => {
       const ch = harmonyChord(entry);
       const voiced = (prev = voiceLead(ch.pcs.slice(0, 3), prev));
       const tones = spellChordTones(entry);
-      const slotR = slots[i]?.getBoundingClientRect();
-      const cx = Math.max(startX, slotR ? slotR.left - cRect.left + slotR.width / 2 : startX + i * 72);
+      const cx = startX + ((i + 0.5) * span) / scene.harmony.length;
       // The full tower: led triad, then the stack climbing tone over tone —
       // the same shape playback voices — plus the slash bass at its low seat.
       const midis = voiced.slice();
