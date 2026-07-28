@@ -1003,7 +1003,10 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
   g.padHighpass.connect(g.padFilter);
   g.padFilter.connect(g.chorus);
   g.chorus.connect(g.colorIn.harmony);
-  g.padLayers = makeLayers(HARMONY_PRESETS, 4, g.padHighpass, SOURCE_LEVEL_DB.harmonyPad);
+  // Eight voices per layer: a full 13th is seven tones, and the pool must
+  // hold one chord plus the tail of the last. Idle voices are silent
+  // subtrees; the cost is pay-per-chord-size.
+  g.padLayers = makeLayers(HARMONY_PRESETS, 8, g.padHighpass, SOURCE_LEVEL_DB.harmonyPad);
   g.halo = new Tone.Synth({
     oscillator: { type: "sine" },
     envelope: { attack: 0.9, decay: 1, sustain: 0.5, release: 1.6 },
@@ -1300,20 +1303,29 @@ function eachActiveLayer(g, track, patch, fn) {
 // stays register-independent) and moves the pad and its halo together; the
 // low root hint stays anchored — it is the harmonic glue under the chord,
 // and bass owns the register it would otherwise wander into.
-function playChordOn(g, patches, vstate, entry, time, oct = 0) {
-  // entry is a scale degree or a {pcs} chord — harmonyChord speaks both. The
-  // triad voice-leads; a stored fourth tone (a 7th, a 9th) rides above the
-  // voicing, same law as the circle's audition path.
-  const pcs = harmonyChord(entry).pcs;
-  const voiced = voiceLead(pcs.slice(0, 3), vstate.prev);
+// The heard shape of any chord entry: the triad voice-leads for continuity,
+// the stack (7-9-11-13) climbs tone over tone above it, and the bass is the
+// inversion's tone — which is what an inversion IS to the ear.
+function chordVoicing(entry, vstate) {
+  const ch = harmonyChord(entry);
+  const voiced = voiceLead(ch.pcs.slice(0, 3), vstate.prev);
   vstate.prev = voiced;
   const notes = voiced.slice();
-  const top = Math.max(...voiced);
-  for (const pc of pcs.slice(3)) notes.push(pc + 12 * Math.ceil((top + 1 - pc) / 12));
+  let top = Math.max(...voiced);
+  for (const pc of ch.pcs.slice(3)) {
+    const n = pc + 12 * Math.ceil((top + 1 - pc) / 12);
+    notes.push(n);
+    top = n;
+  }
+  return { notes, top, bass: ch.bass ?? ch.pcs[0] };
+}
+
+function playChordOn(g, patches, vstate, entry, time, oct = 0) {
+  const { notes, top, bass } = chordVoicing(entry, vstate);
   const shift = 12 * oct;
   eachActiveLayer(g, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(notes.map((m) => midiToFreq(m + shift)), "1n", time));
   g.halo.triggerAttackRelease(midiToFreq(top + 12 + shift), "1n", time);
-  g.sub.triggerAttackRelease(midiToFreq(48 + pcs[0]), "1n", time);
+  g.sub.triggerAttackRelease(midiToFreq(48 + bass), "1n", time);
 }
 
 function playNoteStackOn(g, patches, track, slot, time) {
@@ -1732,12 +1744,11 @@ export function createAudio(song) {
   };
   function preview(entry, oct = 0) {
     wakeTrack("harmony");
-    const pcs = harmonyChord(entry).pcs;
-    const voiced = voiceLead(pcs, liveVoice.prev);
+    const { notes, bass } = chordVoicing(entry, { prev: liveVoice.prev });
     const shift = 12 * oct;
     const at = tapTime();
-    eachActiveLayer(live, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(voiced.map((m) => midiToFreq(m + shift)), "2n", at));
-    live.sub.triggerAttackRelease(midiToFreq(48 + pcs[0]), "2n", at);
+    eachActiveLayer(live, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(notes.map((m) => midiToFreq(m + shift)), "2n", at));
+    live.sub.triggerAttackRelease(midiToFreq(48 + bass), "2n", at);
   }
   // The circle's audition path: any pitch classes, not just the seven diatonic
   // degrees — a borrowed chord is a place you can visit even when the clip
@@ -1749,15 +1760,11 @@ export function createAudio(song) {
   function previewPcs(pcs, oct = 0) {
     if (!pcs?.length) return;
     wakeTrack("harmony");
-    const voiced = voiceLead(pcs.slice(0, 3), liveVoice.prev);
-    liveVoice.prev = voiced;
-    const notes = voiced.slice();
-    const top = Math.max(...voiced);
-    for (const pc of pcs.slice(3)) notes.push(pc + 12 * Math.ceil((top + 1 - pc) / 12));
+    const { notes, bass } = chordVoicing({ pcs }, liveVoice);
     const shift = 12 * oct;
     const at = tapTime();
     eachActiveLayer(live, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(notes.map((m) => midiToFreq(m + shift)), "2n", at));
-    live.sub.triggerAttackRelease(midiToFreq(48 + ((pcs[0] % 12) + 12) % 12), "2n", at);
+    live.sub.triggerAttackRelease(midiToFreq(48 + bass), "2n", at);
   }
 
   // Transport.

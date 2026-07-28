@@ -238,13 +238,21 @@ export const chordColor = (ci, dl = 0) =>
 const BORROWED = { hue: 285, sat: 24, light: 60 };
 export function normalizeHarmonyEntry(e) {
   if (typeof e === "number" && Number.isFinite(e)) return Math.max(0, Math.min(6, Math.round(e)));
-  // Three pcs are a triad; a fourth is a stored extension (7th, add9).
-  const pcs = Array.isArray(e?.pcs) ? e.pcs.slice(0, 4).map((p) => ((Math.round(Number(p) || 0) % 12) + 12) % 12) : null;
-  return pcs && pcs.length >= 3 ? { pcs } : 0;
+  // Three pcs are a triad; stacked thirds beyond run 7-9-11-13, seven tones
+  // at the full 13th. `inv` picks the bass tone (a slash chord) from the
+  // first four — third inversion is as far as the notation goes.
+  const pcs = Array.isArray(e?.pcs) ? e.pcs.slice(0, 7).map((p) => ((Math.round(Number(p) || 0) % 12) + 12) % 12) : null;
+  if (!pcs || pcs.length < 3) return 0;
+  const out = { pcs };
+  const inv = Math.round(Number(e.inv) || 0);
+  if (inv > 0) out.inv = Math.min(inv, Math.min(3, pcs.length - 1));
+  return out;
 }
 export const normalizeHarmony = (arr) => (Array.isArray(arr) && arr.length ? arr.map(normalizeHarmonyEntry) : [0, 0, 0, 0]);
 export const harmonyEntryEquals = (a, b) =>
-  typeof a === "number" || typeof b === "number" ? a === b : !!a?.pcs && !!b?.pcs && a.pcs.join() === b.pcs.join();
+  typeof a === "number" || typeof b === "number"
+    ? a === b
+    : !!a?.pcs && !!b?.pcs && a.pcs.join() === b.pcs.join() && (a.inv || 0) === (b.inv || 0);
 
 export function harmonyChord(entry) {
   if (typeof entry === "number") return CHORDS[Math.max(0, Math.min(6, entry | 0))];
@@ -256,22 +264,42 @@ export function harmonyChord(entry) {
   const sus = t === 5 ? "sus4" : t <= 2 ? "sus2" : "";
   const dim = !sus && t === 3 && f === 6;
   const minor = !sus && t === 3 && !dim;
+  // Stacked thirds name by their ceiling — a 9 chord CONTAINS the 7th, so
+  // five tones say 9, six say 11, seven say 13; the 7th's quality picks the
+  // family (maj9 vs 9 vs m9), and a lone stacked 2nd stays add9.
   let ext = "";
   if (pcs.length > 3) {
-    const e4 = rel(pcs[3]);
-    ext = e4 === 11 ? "maj7" : e4 === 10 ? (dim ? "ø7" : "7") : dim && e4 === 9 ? "°7" : e4 <= 2 ? "add9" : "7";
+    const seventh = rel(pcs[3]);
+    if (pcs.length === 4 && seventh <= 2) ext = "add9";
+    else {
+      const N = ["7", "9", "11", "13"][Math.min(3, pcs.length - 4)];
+      if (dim) ext = (seventh === 9 ? "°" : "ø") + N;
+      else if (seventh === 11) ext = "maj" + N;
+      else ext = N;
+    }
   }
-  const halfDim = ext === "ø7" || ext === "°7"; // the ° moves into the suffix
-  // A diatonic triad under the extension keeps its degree's roman and
-  // function color; only true visitors wear the violet.
+  const halfDim = ext.startsWith("ø") || ext.startsWith("°"); // ° moves into the suffix
+  const inv = Math.min(entry.inv || 0, pcs.length - 1);
+  const bass = pcs[inv];
+  // The slash spells in the chord's own letters: C/E, A♭/C, G7/B.
+  const slash = inv > 0 ? "/" + (() => {
+    const li0 = LETTERS.indexOf((roman0(pcs, minor, dim) || "").includes("♭") ? FLAT_PC[pcs[0]][0] : spellScalePc(pcs[0])[0]);
+    const off = [0, 2, 4, 6][inv];
+    const letter = (li0 + off) % 7;
+    const acc = ((bass - NATURAL_PC[letter]) % 12 + 18) % 12 - 6;
+    return LETTERS[letter] + accGlyphs(acc);
+  })() : "";
+  // A diatonic triad under the stack keeps its degree's roman and function
+  // color; only true visitors wear the violet.
   const d = sus ? -1 : CHORDS.findIndex((c) => c.pcs.join() === pcs.slice(0, 3).join());
   if (d >= 0) {
     const base = CHORDS[d];
     return {
       ...base,
       pcs,
-      roman: halfDim ? base.roman.replace("°", "") + ext : base.roman + ext,
-      name: halfDim ? base.name.replace(/dim$/, "") + ext : base.name + ext,
+      bass,
+      roman: (halfDim ? base.roman.replace("°", "") : base.roman) + ext,
+      name: (halfDim ? base.name.replace(/dim$/, "") : base.name) + ext + slash,
     };
   }
   const roman = romanFromHome(curKey, pcs[0], minor || dim) + (dim && !halfDim ? "°" : "") + (sus || ext);
@@ -279,7 +307,11 @@ export function harmonyChord(entry) {
   // whatever side the home signature sits on.
   const root = roman.includes("♭") ? FLAT_PC[pcs[0]] : spellScalePc(pcs[0]);
   const suffix = (dim && !halfDim ? "dim" : minor ? "m" : "") + (sus || ext);
-  return { roman, name: root + suffix, pcs, degree: -1, ...BORROWED };
+  return { roman, name: root + suffix + slash, pcs, bass, degree: -1, ...BORROWED };
+}
+// The roman's flatness decides the root letter before the full name exists.
+function roman0(pcs, minor, dim) {
+  return romanFromHome(curKey, pcs[0], minor || dim);
 }
 
 // --- Voice leading: keep common tones, move the rest by the smallest step. ---

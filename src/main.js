@@ -216,7 +216,7 @@ function circleCapture(chord) {
   if (!scene?.harmony?.length) return false;
   // Diatonic wedges store their degree (follows key changes for free);
   // borrowed wedges store pitch classes (D13) — the violet visitors.
-  const entry = chord.degree >= 0 ? chord.degree : { pcs: chord.pcs.slice(0, 4) };
+  const entry = chord.degree >= 0 ? chord.degree : { pcs: chord.pcs.slice(0, 7) };
   const slot = circleBar % scene.harmony.length;
   if (harmonyEntryEquals(scene.harmony[slot], entry)) return false;
   pushUndo();
@@ -3517,7 +3517,7 @@ function buildHarmonyEditor(sceneIndex, scene) {
     commitKeyScale: circleKeyScale,
     commitMode: circleDoorMode,
     captureChord: (chord, ctx = {}) => {
-      const entry = chord.degree >= 0 ? chord.degree : { pcs: chord.pcs.slice(0, 4) };
+      const entry = chord.degree >= 0 ? chord.degree : { pcs: chord.pcs.slice(0, 7) };
       if (harmonyEntryEquals(scene.harmony[selected], entry)) {
         if (ctx.strum) advanceSel();
         return false;

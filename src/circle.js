@@ -142,29 +142,26 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     w.q === "min"
       ? STATION_MINOR[stationOfPc(norm12(w.root + 3))].replace(/^./, (c) => c.toUpperCase()) + "m"
       : STATION_MAJOR[stationOfPc(w.root)] + (w.q === "dim" ? "°" : "");
-  function extPcs(w, pad) {
-    // Diatonic wedges snap the extension to the scale; borrowed ones take the
-    // common-practice intervals (dominant-flavored 7th on either quality).
-    const semis = w.degree >= 0 ? degreeStepSemis(w.degree, pad.steps) : { 6: 10, 8: 14, 3: 5, 1: 2 }[pad.steps];
-    const added = norm12(w.root + semis);
-    if (pad.sus) return [w.pcs[0], added, w.pcs[2]];
-    return [...w.pcs, added];
-  }
-  function extLabel(w, pad) {
-    const base = rootName(w);
-    if (pad.sus) return base.replace(/m$|°$/, "") + pad.id;
-    if (pad.id === "9") return base + "add9";
-    const semis = norm12(w.degree >= 0 ? degreeStepSemis(w.degree, 6) : 10);
-    if (w.q === "dim") return base.replace("°", semis === 10 ? "ø7" : "°7");
-    if (semis === 11) return base + "maj7";
-    return base + "7";
-  }
+  // The ladder: a 9 chord CONTAINS the 7th, an 11 the 9th — each pad is the
+  // whole stack up to its number, diatonically stepped on in-scale wedges
+  // and common-practice on visitors. This is the extended-harmony curriculum
+  // as pads: slide up the ladder, hear the tower grow.
   const EXT_PADS = [
-    { id: "7", steps: 6 },
-    { id: "9", steps: 8 },
-    { id: "sus4", steps: 3, sus: true },
-    { id: "sus2", steps: 1, sus: true },
+    { id: "7", steps: [6] },
+    { id: "9", steps: [6, 8] },
+    { id: "11", steps: [6, 8, 10] },
+    { id: "13", steps: [6, 8, 10, 12] },
+    { id: "sus4", steps: [3], sus: true },
+    { id: "sus2", steps: [1], sus: true },
   ];
+  const CHROME_STEP = { 6: 10, 8: 14, 10: 17, 12: 21, 3: 5, 1: 2 };
+  function extPcs(w, pad) {
+    const semisOf = (st) => (w.degree >= 0 ? degreeStepSemis(w.degree, st) : CHROME_STEP[st]);
+    if (pad.sus) return [w.pcs[0], norm12(w.root + semisOf(pad.steps[0])), w.pcs[2]];
+    return [...w.pcs, ...pad.steps.map((st) => norm12(w.root + semisOf(st)))];
+  }
+  // One namer everywhere: the model spells the stack (Gm11, Cmaj9, Bø7).
+  const extLabel = (w, pad) => harmonyChord({ pcs: extPcs(w, pad) }).name;
 
   // --- Live state: trail, pulses, gestures ---
   const trail = []; // { ring, station, pcs, t } — station -1 means the seam
@@ -697,12 +694,12 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
   // --- Gestures ---
   function padLayout(x, y) {
     // Fan the pads away from the wheel's center so the thumb never covers
-    // them, and keep every pad on the canvas.
+    // them, and keep every pad on the canvas. Six pads: a wider, tighter fan.
     const base = Math.atan2(y - center(), x - center());
-    const r = Math.max(size * 0.052, 26);
-    const dist = r * 2.6;
+    const r = Math.max(size * 0.046, 23);
+    const dist = r * 2.55;
     return EXT_PADS.map((_, i) => {
-      const a = base + (i - 1.5) * 0.62;
+      const a = base + (i - 2.5) * 0.52;
       return {
         x: Math.max(r + 2, Math.min(size - r - 2, x + Math.cos(a) * dist)),
         y: Math.max(r + 2, Math.min(size - r - 2, y + Math.sin(a) * dist)),
