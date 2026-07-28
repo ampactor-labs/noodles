@@ -249,8 +249,10 @@ try {
   await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Chords");
   await page.waitForFunction(() => {
     const s = document.querySelector(".staffview");
-    const w = document.querySelector("#sheet .circle-canvas");
-    return s && s.width > 0 && w && w.width > 0;
+    const w = document.querySelector("#sheet .editor-scroll .circle-canvas");
+    // width > 0 is vacuous for the wheel - a virgin canvas is born 300 wide.
+    // Sized-by-resize means inline style.width is set and hit geometry lives.
+    return s && s.width > 0 && w && w.style.width !== "";
   });
   // The wheel is the palette: a strum across it paints bars in a row. Slots
   // pre-set to the dim degree (no outer wedge writes it), and the strum runs
@@ -258,10 +260,14 @@ try {
   // knob, whose 15 px zone caught a station-0 strum whenever the rolled key
   // put an inner-ring home there (A minor, E dorian: three flakes' worth).
   const strummed = await page.evaluate(() => {
-    window.__noodles.song.scenes[0].harmony = window.__noodles.song.scenes[0].harmony.map(() => 6);
-    const canvas = document.querySelector("#sheet .circle-canvas");
+    // Scene-agnostic: the editor edits whichever scene its clip belongs to,
+    // so pre-set EVERY scene's harmony and accept a write landing anywhere.
+    for (const sc of window.__noodles.song.scenes) if (sc.harmony?.length) sc.harmony = sc.harmony.map(() => 6);
+    const snap = window.__noodles.song.scenes.map((sc) => JSON.stringify(sc.harmony));
+    // The editor's wheel mounts inside .editor-scroll; the key sheet's
+    // full-size instance lands directly under #sheet — target the editor's.
+    const canvas = document.querySelector("#sheet .editor-scroll .circle-canvas");
     const r = canvas.getBoundingClientRect();
-    const before = JSON.stringify(window.__noodles.song.scenes[0].harmony);
     const H = window.__noodlesCircle.home();
     const at = (station) => {
       const a = (station * Math.PI) / 6 - Math.PI / 2;
@@ -275,8 +281,26 @@ try {
     canvas.dispatchEvent(new PointerEvent("pointermove", o(at(H + 4), 81)));
     canvas.dispatchEvent(new PointerEvent("pointermove", o(at(H + 5), 81)));
     canvas.dispatchEvent(new PointerEvent("pointerup", o(at(H + 5), 81)));
-    const after = JSON.stringify(window.__noodles.song.scenes[0].harmony);
-    return { changed: before !== after, after, H, key: window.__noodles.song.key, scale: window.__noodles.song.scale };
+    const r2 = canvas.getBoundingClientRect();
+    const changedScene = window.__noodles.song.scenes.findIndex((sc, i) => JSON.stringify(sc.harmony) !== snap[i]);
+    return {
+      changed: changedScene >= 0,
+      changedScene,
+      after: window.__noodles.song.scenes.map((sc) => JSON.stringify(sc.harmony)).join(" | "),
+      H,
+      key: window.__noodles.song.key,
+      scale: window.__noodles.song.scale,
+      rect: { w: r.width, top: Math.round(r.top) },
+      moved: r.top !== r2.top || r.width !== r2.width,
+      canvases: [...document.querySelectorAll(".circle-canvas")].map((cv) => ({
+        w: cv.getBoundingClientRect().width,
+        styleW: cv.style.width,
+        buf: cv.width,
+        parent: cv.parentElement?.parentElement?.className || cv.parentElement?.className,
+        inSheet: !!cv.closest("#sheet"),
+      })),
+      keySheetSize: window.__noodlesCircle.size(),
+    };
   });
   assertState(strummed.changed, `the editor wheel's strum wrote no bars: ${JSON.stringify(strummed)}`);
   // Voicing chips: "9" on a degree slot writes the five-tone stack and the
@@ -374,6 +398,10 @@ try {
   const [ddx, ddy] = cPoint(doorGeom.d);
   const [dtx, dty] = cPoint(doorGeom.t);
   await page.touchscreen.touchStart(ddx, ddy);
+  // First move right away, like a real finger's 60Hz stream: a synthetic
+  // gap over the knob's hold beat would convert the grab into the home
+  // bloom (the knob-hold affordance) and eat the drag.
+  await page.touchscreen.touchMove(ddx + (dtx - ddx) * 0.15, ddy + (dty - ddy) * 0.15);
   for (let i = 1; i <= 3; i++) {
     await page.touchscreen.touchMove(ddx + ((dtx - ddx) * i) / 3, ddy + ((dty - ddy) * i) / 3);
     await wait(50);

@@ -762,7 +762,36 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
       } catch {
         // synthetic streams can end before capture resolves
       }
-      doorDrag = { id: e.pointerId, cand: null };
+      doorDrag = { id: e.pointerId, cand: null, timer: 0, x0: x, y0: y };
+      // A stationary grab used to just wait; now it blossoms into the HOME
+      // wedge's bloom after the hold beat. The knob sits on the home wedge
+      // and buried its bloom - worst with an inner-ring home, where the
+      // knob zone ate most of the wedge. Movement still means door-drag.
+      // 400ms, not the wedges' 300: a real dragging finger streams moves
+      // within a frame, so only a deliberate rest reaches this - but give
+      // the grab-think-drag pattern the extra beat before converting.
+      doorDrag.timer = window.setTimeout(() => {
+        if (!doorDrag || doorDrag.id !== e.pointerId || doorDrag.cand || doorDrag.movedFar) return;
+        doorDrag = null;
+        const home = homeWedge();
+        const g = {
+          kind: "wedge",
+          down: true,
+          x,
+          y,
+          startX: x,
+          startY: y,
+          curWedge: home,
+          bloom: true,
+          bloomSel: stickyExt.get(stickyKey(home)) ?? null,
+          pads: padLayout(x, y),
+          timer: 0,
+        };
+        gestures.set(e.pointerId, g);
+        soundWedge(home);
+        buzz(6);
+        wake();
+      }, HOLD_MS + 100);
       buzz(6);
       wake();
       return;
@@ -813,10 +842,18 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     if (doorDrag && doorDrag.id === e.pointerId) {
+      // "Still" means still: real travel cancels the hold-to-bloom timer,
+      // whether or not the finger has reached a candidate wedge yet - a
+      // slow door drag must never be hijacked into a bloom.
+      if (!doorDrag.movedFar && Math.hypot(x - doorDrag.x0, y - doorDrag.y0) > 9) {
+        doorDrag.movedFar = true;
+        clearTimeout(doorDrag.timer);
+      }
       const hit = hitTest(x, y);
       if (hit?.kind === "wedge" && hit.wedge.station >= 0 && inSector(hit.wedge.station)) {
         const cand = { ring: hit.wedge.ring, station: hit.wedge.station };
         if (cand.ring !== doorDrag.cand?.ring || cand.station !== doorDrag.cand?.station) {
+          if (!doorDrag.cand) clearTimeout(doorDrag.timer);
           doorDrag.cand = cand;
           buzz(4);
         }
@@ -898,6 +935,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     if (doorDrag && doorDrag.id === e.pointerId) {
       const cand = doorDrag.cand;
       const wasCancel = e.type === "pointercancel";
+      clearTimeout(doorDrag.timer);
       doorDrag = null;
       const home = homeWedge();
       if (!wasCancel && cand && !(cand.ring === home.ring && cand.station === home.station)) {

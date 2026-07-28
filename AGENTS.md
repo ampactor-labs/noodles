@@ -197,10 +197,13 @@ instance only); design reasoning and the bank are in `DESIGN-CIRCLE.md`. The
 component mounts twice: the key sheet (full size, ● arm gates clip writes) and
 the chord editor (small, always armed, `strumWrites` on — a drag across wedges
 paints bars in a row while the selection walks forward). The editor stacks the
-wheel under its two sibling projections (all in main.js): the engraved treble
-staff above the slots (the heard voicing, signature-honest — `DESIGN-STAFF.md`)
-and the voice-leading thread strip (held tones gold and level, moving voices
-sloped). The old seven-block picker is gone; the wheel is the palette. The
+wheel under the engraved grand staff (all in main.js, one module painter,
+`paintChordStaff`): treble + bass with notes routed by ledger economy, real
+clef outlines, note letters inside the heads, the chord slots aligned under
+the engraving's bar columns, and the voice-leading threads drawn between
+the noteheads themselves (held tones gold and level, moving voices sloped;
+the old separate strip is deleted — `DESIGN-STAFF.md`). The old seven-block
+picker is gone; the wheel is the palette. The
 footer's KEY button draws a live mini-wheel compass (sector arc + front-door
 dot, `drawKeyGlyph`).
 
@@ -240,8 +243,13 @@ device memory for user one-shots and the chop kit (IndexedDB, restored at boot);
 global Key + Scale via the playable circle of fifths (the whole app transposes and
 re-snaps in key; keys and every note name wear their honest per-key spelling — E♭,
 not D♯, and F♯ major's E♯; borrowed chords store as violet `{pcs}` entries and the
-front-door knob re-modes without moving a note); the chord editor's engraved staff
-and voice-leading threads; one-tap Transforms;
+front-door knob re-modes without moving a note); the chord editor's engraved grand staff with
+on-staff voice-leading threads, rung chips (triad · 7 · 9 · 11 · 13 · sus4 ·
+sus2 — the model's `ladderPcs`, the same stacks the wheel's bloom writes) and
+inversion chips; send rides (verb/echo knobs on the Sound sheet, captured by
+● ride into motion lanes, mixer state as the restore base — D16); the export
+sheet's Staff PNG (the same painter, engraved to a shareable plate);
+one-tap Transforms;
 undo/redo; groove/swing; WAV export (master + four stems, plus a seamless loop render when
 the arrangement loop is set) through the full-grade graph — since D15 the live grade
 plays a lightened chain (no input comps/chorus/halo, two combs) while exports render

@@ -3736,6 +3736,13 @@ function buildHarmonyEditor(sceneIndex, scene) {
     debugHandle: false,
   });
   scrollContainer.appendChild(editorCircle.el);
+  // Size the wheel NOW, not next frame: a virgin canvas is born 300×150
+  // with zero hit geometry, so a tap landing before a deferred resize was
+  // silently eaten (the smoke's strum caught this ~1 run in 4). clientWidth
+  // reads 0 mid-build and resize's || 320 fallback still respects sizeCap,
+  // so the sync call is safe; the rAF re-measures once layout settles
+  // (resize is idempotent).
+  editorCircle.opened();
   requestAnimationFrame(() => editorCircle?.opened());
   sheet.appendChild(scrollContainer);
 }
