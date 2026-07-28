@@ -4,6 +4,9 @@
 
 import {
   CHORDS,
+  LADDER_RUNGS,
+  ladderPcs,
+  ladderRungOf,
   DRUM_VOICES,
   DRUM_META,
   ARRANGE_TRACKS,
@@ -505,7 +508,7 @@ function openAboutSheet() {
     p("Each row is a scene — a loop and a song section in one. + adds another: blank, a copy, or a fresh magic one. The corner pie on a playing clip shows where it is in its loop. Long-press a clip for launch modes and follow actions, a scene's ▶ for scene moves, a track name for track moves."),
 
     label("editors"),
-    p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key, the staff above writes the lane down as you draw (bass gets its own clef), and each row's name wears its job's color. Chords: the wheel itself is the palette — tap a wedge to set the selected bar, drag across the wheel to paint a run of bars in one stroke, and everything the big wheel does works here too, over its own staff and the threads that show which notes carry over. The lane under any editor has a picker: tap vel to flip through captured rides, redraw them per step, chips pick the bar, ✕ clears one. − / + shortens a clip's loop; a 12-step line against 16-step drums drifts in and out of phase on purpose. ◧ zooms the note grid when your thumbs need bigger targets."),
+    p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key, the staff above writes the lane down as you draw (bass gets its own clef), and each row's name wears its job's color. Chords: the wheel itself is the palette — tap a wedge to set the selected bar, drag across the wheel to paint a run of bars in one stroke, and everything the big wheel does works here too. Above the slots, your line is engraved on a real grand staff — two clefs, your key's signature, every notehead wearing its letter — with gold lines joining the notes that carry over between chords and dim lines showing which voice moves where. The rung chips under the slots grow the selected chord up the ladder (7 · 9 · 11 · 13) or swap in a sus, and the slash chips under those choose which note sits in the bass. The lane under any editor has a picker: tap vel to flip through captured rides, redraw them per step, chips pick the bar, ✕ clears one. − / + shortens a clip's loop; a 12-step line against 16-step drums drifts in and out of phase on purpose. ◧ zooms the note grid when your thumbs need bigger targets."),
 
     label("the circle"),
     p("Tap the key name at the bottom and the circle of fifths opens. The bright neighborhood is your key — tap a wedge to hear its chord, drag across them to strum, and hold one for the ladder: 7, 9, 11, 13, sus. Release on a pad and the wedge keeps that voicing — the little gold number remembers — and it lands in the playing clip; release on empty air to forget. The dim wedges outside are chords you can borrow. Arm ● and plain taps write too. Drag the rim to carry the whole song to a new key and watch the sharps arrive one by one; drag the white dot to call the same notes by another mode's name; hold the middle and everything you tap comes back mirrored; pinch open to see why twelve fifths never quite close."),
@@ -640,45 +643,42 @@ function openAboutSheet() {
 
 
 // --- Drawn clefs and the letter gutter, shared by every staff ---
-// Paths, not glyph fonts (phones don't reliably ship a music font). The G
-// spiral owns the G line, the F dots name the F line, and the tiny letters
-// at the left edge name every line and space — out of the way, always there.
+// Paths, not glyph fonts (phones don't reliably ship a music font). Real
+// engraved outlines via Path2D: the G clef is Wikimedia Commons GClef.svg
+// (public domain), the F clef is FClef.svg by っ (CC BY 2.5) — both minimal
+// single-glyph files, embedded as their path data. The G spiral's eye
+// threads the G line, the F dots flank the F line, and the tiny letters at
+// the left edge name every line and space — out of the way, always there.
+const G_CLEF_PATH = new Path2D(
+  "m12.049 3.5296c0.305 3.1263-2.019 5.6563-4.0772 7.7014-0.9349 0.897-0.155 0.148-0.6437 0.594-0.1022-0.479-0.2986-1.731-0.2802-2.11 0.1304-2.6939 2.3198-6.5875 4.2381-8.0236 0.309 0.5767 0.563 0.6231 0.763 1.8382zm0.651 16.142c-1.232-0.906-2.85-1.144-4.3336-0.885-0.1913-1.255-0.3827-2.51-0.574-3.764 2.3506-2.329 4.9066-5.0322 5.0406-8.5394 0.059-2.232-0.276-4.6714-1.678-6.4836-1.7004 0.12823-2.8995 2.156-3.8019 3.4165-1.4889 2.6705-1.1414 5.9169-0.57 8.7965-0.8094 0.952-1.9296 1.743-2.7274 2.734-2.3561 2.308-4.4085 5.43-4.0046 8.878 0.18332 3.334 2.5894 6.434 5.8702 7.227 1.2457 0.315 2.5639 0.346 3.8241 0.099 0.2199 2.25 1.0266 4.629 0.0925 6.813-0.7007 1.598-2.7875 3.004-4.3325 2.192-0.5994-0.316-0.1137-0.051-0.478-0.252 1.0698-0.257 1.9996-1.036 2.26-1.565 0.8378-1.464-0.3998-3.639-2.1554-3.358-2.262 0.046-3.1904 3.14-1.7356 4.685 1.3468 1.52 3.833 1.312 5.4301 0.318 1.8125-1.18 2.0395-3.544 1.8325-5.562-0.07-0.678-0.403-2.67-0.444-3.387 0.697-0.249 0.209-0.059 1.193-0.449 2.66-1.053 4.357-4.259 3.594-7.122-0.318-1.469-1.044-2.914-2.302-3.792zm0.561 5.757c0.214 1.991-1.053 4.321-3.079 4.96-0.136-0.795-0.172-1.011-0.2626-1.475-0.4822-2.46-0.744-4.987-1.116-7.481 1.6246-0.168 3.4576 0.543 4.0226 2.184 0.244 0.577 0.343 1.197 0.435 1.812zm-5.1486 5.196c-2.5441 0.141-4.9995-1.595-5.6343-4.081-0.749-2.153-0.5283-4.63 0.8207-6.504 1.1151-1.702 2.6065-3.105 4.0286-4.543 0.183 1.127 0.366 2.254 0.549 3.382-2.9906 0.782-5.0046 4.725-3.215 7.451 0.5324 0.764 1.9765 2.223 2.7655 1.634-1.102-0.683-2.0033-1.859-1.8095-3.227-0.0821-1.282 1.3699-2.911 2.6513-3.198 0.4384 2.869 0.9413 6.073 1.3797 8.943-0.5054 0.1-1.0211 0.143-1.536 0.143z"
+);
+const F_CLEF_PATHS = [
+  "M 243.97900,540.86798 C 244.02398,543.69258 242.76360,546.43815 240.76469,548.40449 C 238.27527,550.89277 235.01791,552.47534 231.69762,553.53261 C 231.25590,553.77182 230.58970,553.45643 231.28550,553.13144 C 232.62346,552.52289 234.01319,552.00050 235.24564,551.18080 C 237.96799,549.49750 240.26523,546.84674 240.82279,543.61854 C 241.14771,541.65352 241.05724,539.60795 240.56484,537.67852 C 240.20352,536.25993 239.22033,534.79550 237.66352,534.58587 C 236.25068,534.36961 234.74885,534.85905 233.74057,535.88093 C 233.47541,536.14967 232.95916,536.89403 233.04435,537.74747 C 233.64637,537.27468 233.60528,537.32732 234.09900,537.10717 C 235.23573,536.60031 236.74349,537.32105 237.02700,538.57272 C 237.32909,539.72295 237.09551,541.18638 235.96036,541.79960 C 234.77512,542.44413 233.02612,542.17738 232.36450,540.90866 C 231.26916,538.95418 231.87147,536.28193 233.64202,534.92571 C 235.44514,533.42924 238.07609,533.37089 240.19963,534.13862 C 242.38419,534.95111 243.68629,537.21483 243.89691,539.45694 C 243.95419,539.92492 243.97896,540.39668 243.97900,540.86798 z",
+  "M 248.25999,536.80200 C 248.26766,537.17138 248.11044,537.54065 247.82878,537.78185 C 247.46853,538.11076 246.91933,538.17813 246.47048,538.01071 C 246.02563,537.83894 245.69678,537.39883 245.67145,536.92060 C 245.63767,536.54689 245.75685,536.15479 246.02747,535.88867 C 246.28257,535.61680 246.66244,535.48397 247.03147,535.50645 C 247.41131,535.51452 247.77805,535.70601 248.00489,536.01019 C 248.17962,536.23452 248.26238,536.51954 248.25999,536.80200 z",
+  "M 248.25999,542.64502 C 248.26772,543.01469 248.11076,543.38446 247.82878,543.62585 C 247.46853,543.95476 246.91933,544.02213 246.47048,543.85472 C 246.02537,543.68288 245.69655,543.24237 245.67145,542.76389 C 245.63651,542.38990 245.76354,542.00308 246.02700,541.73300 C 246.27663,541.45454 246.66060,541.32790 247.02845,541.34950 C 247.51230,541.36282 247.95159,541.69251 248.15162,542.12465 C 248.22565,542.28740 248.26043,542.46657 248.25999,542.64502 z",
+].map((d) => new Path2D(d));
+// x is the glyph's left edge; gY/fY are the staff lines the glyphs anchor:
+// the spiral's eye local-y (G) and the dots' midpoint local-y (F), measured
+// from the source viewBoxes, land exactly on them.
+const G_CLEF_EYE_Y = 25.5; // of 40.768 tall, box 15.186 wide
 function drawGClef(c, x, gY, S) {
-  c.lineWidth = S * 0.23;
-  c.lineCap = "round";
-  c.beginPath();
-  c.moveTo(x + S * 1.02, gY - S * 3.2);
-  c.bezierCurveTo(x + S * 1.72, gY - S * 2.55, x + S * 1.6, gY - S * 1.95, x + S * 1.08, gY - S * 1.3);
-  c.lineTo(x + S * 0.72, gY + S * 1.95);
-  c.bezierCurveTo(x + S * 0.66, gY + S * 2.6, x - S * 0.02, gY + S * 2.62, x + S * 0.06, gY + S * 2.05);
-  c.stroke();
-  c.beginPath();
-  c.moveTo(x + S * 1.55, gY - S * 0.95);
-  c.bezierCurveTo(x + S * 0.25, gY - S * 1.3, x - S * 0.32, gY - S * 0.3, x + S * 0.38, gY + S * 0.38);
-  c.bezierCurveTo(x + S * 1.1, gY + S * 1.05, x + S * 2.05, gY + S * 0.5, x + S * 1.82, gY - S * 0.18);
-  c.bezierCurveTo(x + S * 1.62, gY - S * 0.72, x + S * 0.95, gY - S * 0.72, x + S * 0.72, gY - S * 0.3);
-  c.stroke();
-  c.beginPath();
-  c.arc(x + S * 0.56, gY + S * 0.12, S * 0.17, 0, Math.PI * 2);
-  c.fill();
+  const k = (7.0 * S) / 40.768;
+  c.save();
+  c.translate(x, gY - G_CLEF_EYE_Y * k);
+  c.scale(k, k);
+  c.fillStyle = "rgba(240,240,244,0.92)";
+  c.fill(G_CLEF_PATH);
+  c.restore();
 }
 function drawFClef(c, x, fY, S) {
-  c.beginPath();
-  c.arc(x + S * 0.35, fY, S * 0.34, 0, Math.PI * 2);
-  c.fill();
-  c.lineWidth = S * 0.23;
-  c.lineCap = "round";
-  c.beginPath();
-  c.moveTo(x + S * 0.35, fY);
-  c.bezierCurveTo(x + S * 0.45, fY - S * 1.6, x + S * 1.85, fY - S * 1.4, x + S * 1.95, fY - S * 0.2);
-  c.bezierCurveTo(x + S * 2.05, fY + S * 1.4, x + S * 0.95, fY + S * 2.4, x - S * 0.05, fY + S * 2.9);
-  c.stroke();
-  c.beginPath();
-  c.arc(x + S * 2.6, fY - S * 0.5, S * 0.2, 0, Math.PI * 2);
-  c.fill();
-  c.beginPath();
-  c.arc(x + S * 2.6, fY + S * 0.5, S * 0.2, 0, Math.PI * 2);
-  c.fill();
+  const k = S / 5.84; // dot centers sit a space apart, one over one under F
+  c.save();
+  c.translate(x, fY - 6.18 * k);
+  c.scale(k, k);
+  c.translate(-230.9546, -533.6597); // the source file's group offset
+  c.fillStyle = "rgba(240,240,244,0.92)";
+  for (const p of F_CLEF_PATHS) c.fill(p);
+  c.restore();
 }
 function drawStaffLetters(c, yOf, baseStep, bass, S) {
   const letters = bass ? "GABCDEFGA" : "EFGABCDEF";
@@ -691,101 +691,101 @@ function drawStaffLetters(c, yOf, baseStep, bass, S) {
   for (let u = 0; u <= 8; u++) c.fillText(letters[u], u % 2 ? 2.5 + S * 0.8 : 2.5, yOf(baseStep + u));
 }
 
-// Engrave a harmony line onto a 2d context: five lines, G clef, the key
-// signature, then one bar per chord voiced exactly as playback voices it
+// Engrave a harmony line onto a 2d context — as a GRAND STAFF, the way a
+// chart with a real bass register is actually written: treble and bass
+// staves joined by a system line, each note routed to whichever staff needs
+// fewer ledger lines (middle C hangs between them), signatures on both
+// (bass positions sit two steps lower — the standard rule the roll staffs
+// already follow), one bar per chord voiced exactly as playback voices it
 // (led triad, stack climbing tone over tone, slash bass at its seat).
 // Shared by the harmony editor's live staff and the export sheet's PNG
 // engraver — one painter, so what you read is what either surface heard.
-function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyOct = 0, bg = null, title = "", bottom = null }) {
+// Returns { startX, right } so a caller can align its own grid (the chord
+// slots) under the bars; gridGap makes bar centers match a CSS grid's
+// gapped cells exactly.
+function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyOct = 0, bg = null, title = "", gridGap = 0 }) {
   if (bg) {
     c.fillStyle = bg;
     c.fillRect(0, 0, w, h);
   }
-  const E4 = 5 * 7 + 2; // diatonic step index of the bottom line
-  const bottomY = bottom ?? h - 34;
-  const yOf = (step) => bottomY - (step - E4) * (S / 2);
+  const T_BOT = 37; // E4: treble bottom line
+  const B_BOT = 25; // G2: bass bottom line
+  // Vertical plan: 4S treble + 3S gap + 4S bass, centered with at least
+  // 3.5S of air above (three ledger lines plus the head - the 8va guard
+  // caps anything taller) and 2.5S of cellar below (C2 sits two ledgers
+  // under the bass staff and never deeper - the routing guarantees it).
+  const M = Math.max(3.5 * S, (h - 13.5 * S) / 2);
+  const trebleBottom = M + 4 * S;
+  const bassBottom = trebleBottom + 7 * S;
+  const yT = (step) => trebleBottom - (step - T_BOT) * (S / 2);
+  const yB = (step) => bassBottom - (step - B_BOT) * (S / 2);
   c.strokeStyle = "rgba(255,255,255,0.34)";
   c.lineWidth = 1;
   for (let l = 0; l < 5; l++) {
-    const y = bottomY - l * S;
-    c.beginPath();
-    c.moveTo(4, y);
-    c.lineTo(w - 4, y);
-    c.stroke();
+    for (const bot of [trebleBottom, bassBottom]) {
+      const y = bot - l * S;
+      c.beginPath();
+      c.moveTo(4, y);
+      c.lineTo(w - 4, y);
+      c.stroke();
+    }
   }
+  // The system line: one stroke joining the staves at the left edge.
+  c.beginPath();
+  c.moveTo(4, trebleBottom - 4 * S);
+  c.lineTo(4, bassBottom);
+  c.stroke();
   c.fillStyle = "rgba(240,240,244,0.9)";
   c.strokeStyle = "rgba(240,240,244,0.9)";
   c.textBaseline = "middle";
-  drawStaffLetters(c, yOf, E4, false, S);
-  drawGClef(c, S * 2.3, yOf(E4 + 2), S);
+  drawStaffLetters(c, yT, T_BOT, false, S);
+  drawStaffLetters(c, yB, B_BOT, true, S);
+  drawGClef(c, S * 1.8, yT(T_BOT + 2), S);
+  drawFClef(c, S * 1.7, yB(B_BOT + 6), S);
   const sig = keySignature(key, scale);
   const SHARP_UNITS = [8, 5, 9, 6, 3, 7, 4];
   const FLAT_UNITS = [4, 7, 3, 6, 2, 5, 1];
   c.font = `600 ${Math.round(S * 2.2)}px system-ui, sans-serif`;
   c.textAlign = "center";
-  let x = S * 6.0;
+  let x = S * 5.2;
   for (let i = 0; i < Math.abs(sig); i++) {
     const u = (sig > 0 ? SHARP_UNITS : FLAT_UNITS)[i];
-    c.fillText(sig > 0 ? "♯" : "♭", x, yOf(E4 + u) - (sig > 0 ? 0 : S * 0.3));
+    const glyph = sig > 0 ? "\u266f" : "\u266d";
+    const lift = sig > 0 ? 0 : S * 0.3;
+    c.fillText(glyph, x, yT(T_BOT + u) - lift);
+    c.fillText(glyph, x, yB(B_BOT + u - 2) - lift); // bass signature: two steps lower
     x += S * 0.95;
   }
-  const startX = x + S * 1.6;
+  const startX = x + S * 1.0;
+  const right = w - 10;
   const oct = 12 * harmonyOct;
   let prev = null;
-  const span = Math.max(40, w - startX - 10);
-  harmony.forEach((entry, i) => {
-    const ch = harmonyChord(entry);
-    const voiced = (prev = voiceLead(ch.pcs.slice(0, 3), prev));
-    const tones = spellChordTones(entry);
-    const cx = startX + ((i + 0.5) * span) / harmony.length;
-    // The full tower: led triad, then the stack climbing tone over tone —
-    // the same shape playback voices — plus the slash bass at its low seat.
-    const midis = voiced.slice();
-    let topM = Math.max(...voiced);
-    for (const pc of ch.pcs.slice(3)) {
-      const m = pc + 12 * Math.ceil((topM + 1 - pc) / 12);
-      midis.push(m);
-      topM = m;
-    }
-    const inv = (typeof entry === "object" && entry.inv) || 0;
-    if (inv > 0) midis.push(36 + ch.bass);
-    let notes = midis
-      .map((m) => {
-        const midi = m + oct;
-        const pc = ((midi % 12) + 12) % 12;
-        const t = tones.find((tt) => tt.pc === pc) || tones[0];
-        return { step: Math.floor((midi - t.acc) / 12) * 7 + t.letter, acc: t.acc, letter: t.letter };
-      })
-      .sort((a, b) => a.step - b.step);
-    // 8va: if the tower would run off the canvas, write it an octave
-    // lower and say so - engraving's own convention, taught in passing.
-    let octDrop = 0;
-    while (notes.length && yOf(notes[notes.length - 1].step - octDrop * 7) < S * 1.4 && octDrop < 2) octDrop++;
-    if (octDrop) {
-      notes = notes.map((n) => ({ ...n, step: n.step - octDrop * 7 }));
-      c.fillStyle = "rgba(240,240,244,0.7)";
-      c.font = `italic 700 ${Math.round(S * 1.1)}px system-ui, sans-serif`;
-      c.textAlign = "center";
-      c.fillText(octDrop === 1 ? "8va" : "15ma", cx, Math.max(S * 0.8, yOf(notes[notes.length - 1].step) - S * 1.6));
-    }
-    // Clustered seconds sidestep right, the standard rule.
+  const span = Math.max(40, right - startX);
+  const cellW = (span - gridGap * (harmony.length - 1)) / harmony.length;
+  // How many ledger lines a note at rel (steps above a staff's bottom line)
+  // would need; the router sends each note to the cheaper staff, treble on
+  // ties - middle C goes up, exactly the convention.
+  const ledgers = (rel) => (rel < 0 ? Math.floor(-rel / 2) : rel > 8 ? Math.floor((rel - 8) / 2) : 0);
+  // One staff's worth of engraving: ledgers, accidentals against the
+  // signature, open noteheads with their low-key letters inside.
+  function engrave(notes, yOf, base, cx) {
     for (let k = 1; k < notes.length; k++) {
       if (notes[k].step - notes[k - 1].step === 1 && !notes[k - 1].dx) notes[k].dx = S * 0.95;
     }
     let accCount = 0;
     for (const n of notes) {
-      const rel = n.step - E4;
+      const rel = n.step - base;
       c.strokeStyle = "rgba(255,255,255,0.34)";
       c.lineWidth = 1;
       for (let u = -2; u >= rel; u -= 2) {
-        const y = yOf(E4 + u);
+        const y = yOf(base + u);
         c.beginPath();
         c.moveTo(cx - S, y);
         c.lineTo(cx + S, y);
         c.stroke();
       }
       for (let u = 10; u <= rel; u += 2) {
-        const y = yOf(E4 + u);
+        const y = yOf(base + u);
         c.beginPath();
         c.moveTo(cx - S, y);
         c.lineTo(cx + S, y);
@@ -795,7 +795,7 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyOct = 0, bg =
         c.fillStyle = "rgba(240,240,244,0.95)";
         c.font = `600 ${Math.round(S * 1.9)}px system-ui, sans-serif`;
         c.textAlign = "right";
-        const glyph = n.acc > 0 ? "♯" : n.acc < 0 ? "♭" : "♮";
+        const glyph = n.acc > 0 ? "\u266f" : n.acc < 0 ? "\u266d" : "\u266e";
         c.fillText(glyph, cx - S * 0.9 - accCount * S * 0.75, yOf(n.step) - (n.acc < 0 ? S * 0.3 : 0));
         c.textAlign = "left";
         accCount += 1;
@@ -805,17 +805,110 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyOct = 0, bg =
       c.beginPath();
       c.ellipse(cx + (n.dx || 0), yOf(n.step), S * 0.68, S * 0.5, -0.25, 0, Math.PI * 2);
       c.stroke();
+      // Each head carries its letter, low-key, inside the open notehead -
+      // the staff teaches its own spelling without a legend.
+      c.fillStyle = "rgba(240,240,244,0.55)";
+      c.font = `700 ${Math.round(S * 0.6)}px system-ui, sans-serif`;
+      c.textAlign = "center";
+      c.fillText("CDEFGAB"[n.letter], cx + (n.dx || 0), yOf(n.step) + S * 0.04);
     }
+    return accCount;
+  }
+  // Voice leading, drawn where the voices actually live: after every tower
+  // is engraved, gold lines join held tones head-to-head and dim lines
+  // slope where a voice steps - the same chain playback walks (voiceLead
+  // index IS voice identity). Segments run only through the white space
+  // between towers: they start past a head's edge and stop short of the
+  // next bar's accidental column, so nothing overlaps a symbol.
+  const barThreads = [];
+  harmony.forEach((entry, i) => {
+    const ch = harmonyChord(entry);
+    const voiced = (prev = voiceLead(ch.pcs.slice(0, 3), prev));
+    const tones = spellChordTones(entry);
+    const cx = startX + i * (cellW + gridGap) + cellW / 2;
+    // The full tower: led triad, then the stack climbing tone over tone -
+    // the same shape playback voices - plus the slash bass at its low seat.
+    const midis = voiced.slice();
+    let topM = Math.max(...voiced);
+    for (const pc of ch.pcs.slice(3)) {
+      const m = pc + 12 * Math.ceil((topM + 1 - pc) / 12);
+      midis.push(m);
+      topM = m;
+    }
+    const inv = (typeof entry === "object" && entry.inv) || 0;
+    if (inv > 0) midis.push(36 + ch.bass);
+    const notes = midis
+      .map((m, mi) => {
+        const midi = m + oct;
+        const pc = ((midi % 12) + 12) % 12;
+        const t = tones.find((tt) => tt.pc === pc) || tones[0];
+        return { step: Math.floor((midi - t.acc) / 12) * 7 + t.letter, acc: t.acc, letter: t.letter, voiceIdx: mi < 3 ? mi : -1 };
+      })
+      .sort((a, b) => a.step - b.step);
+    let treble = notes.filter((n) => ledgers(n.step - T_BOT) <= ledgers(n.step - B_BOT));
+    const bass = notes.filter((n) => ledgers(n.step - T_BOT) > ledgers(n.step - B_BOT));
+    // 8va, treble only: if a pinched register still towers off the top,
+    // write it an octave lower and say so - the ottava convention, taught
+    // in passing. The bass staff never needs one; routing caps its cellar.
+    let octDrop = 0;
+    while (treble.length && treble[treble.length - 1].step - octDrop * 7 - T_BOT > 14 && octDrop < 2) octDrop++;
+    if (octDrop) {
+      treble = treble.map((n) => ({ ...n, step: n.step - octDrop * 7 }));
+      c.fillStyle = "rgba(240,240,244,0.7)";
+      c.font = `italic 700 ${Math.round(S * 1.1)}px system-ui, sans-serif`;
+      c.textAlign = "center";
+      c.fillText(octDrop === 1 ? "8va" : "15ma", cx, Math.max(S * 0.8, yT(treble[treble.length - 1].step) - S * 1.6));
+    }
+    const accT = engrave(treble, yT, T_BOT, cx);
+    const accB = engrave(bass, yB, B_BOT, cx);
+    const pad = (acc) => S * 0.95 + acc * S * 0.75 + S * 0.85;
+    const voices = [0, 1, 2].map((j) => {
+      const onT = treble.find((n) => n.voiceIdx === j);
+      const n = onT || bass.find((n2) => n2.voiceIdx === j);
+      if (!n) return null;
+      return { x: cx + (n.dx || 0), y: onT ? yT(n.step) : yB(n.step), leftPad: pad(onT ? accT : accB) };
+    });
+    barThreads.push({ voices, midis: voiced.map((v) => v + oct), pcs: ch.pcs.slice(0, 3), raw: voiced });
   });
-  // The plate caption takes the top-left corner: towers clamp at S*1.4 via
-  // the 8va drop and never start left of the first bar, so nothing reaches
-  // this zone.
+  const seg = (x0, y0, x1, y1, held, alpha) => {
+    if (x1 <= x0) return;
+    c.strokeStyle = held ? `rgba(232,184,75,${0.85 * alpha})` : `rgba(210,210,216,${0.34 * alpha})`;
+    c.lineWidth = held ? 2 : 1.2;
+    c.beginPath();
+    c.moveTo(x0, y0);
+    c.lineTo(x1, y1);
+    c.stroke();
+  };
+  for (let i = 1; i < barThreads.length; i++) {
+    const a = barThreads[i - 1];
+    const b = barThreads[i];
+    for (let j = 0; j < 3; j++) {
+      if (!a.voices[j] || !b.voices[j]) continue;
+      seg(a.voices[j].x + S * 0.85, a.voices[j].y, b.voices[j].x - b.voices[j].leftPad, b.voices[j].y, a.midis[j] === b.midis[j], 1);
+    }
+  }
+  // The wrap, as exit stubs: the loop's next voicing continues from the last
+  // bar, so each voice leaves toward where it will actually land on bar one.
+  if (barThreads.length > 1) {
+    const last = barThreads[barThreads.length - 1];
+    const wrapV = voiceLead(barThreads[0].pcs, last.raw);
+    for (let j = 0; j < 3; j++) {
+      if (!last.voices[j] || !wrapV) continue;
+      const dyPerX = 0.12; // gentle exit slope toward the wrap target
+      const dir = Math.sign(wrapV[j] - last.raw[j]);
+      const x0 = last.voices[j].x + S * 0.85;
+      seg(x0, last.voices[j].y, Math.min(right - 2, x0 + S * 2.4), last.voices[j].y - dir * S * dyPerX * 12, wrapV[j] === last.raw[j], 0.5);
+    }
+  }
+  // The plate caption takes the top-left corner: the treble 8va guard keeps
+  // towers off it, and bars never start left of the signature.
   if (title) {
     c.fillStyle = "rgba(240,240,244,0.65)";
     c.font = `600 ${Math.round(S * 1.05)}px system-ui, sans-serif`;
     c.textAlign = "left";
     c.fillText(title, 10, S * 1.1);
   }
+  return { startX, right };
 }
 
 // The compass: twelve station dots, the sector arc, and a bright dot on the
@@ -3467,22 +3560,27 @@ function buildHarmonyEditor(sceneIndex, scene) {
   function drawStaff() {
     const w = staffCanvas.clientWidth;
     if (!w || !scene.harmony.length) return;
-    const h = 142;
+    const h = 190;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     staffCanvas.width = Math.round(w * dpr);
     staffCanvas.height = Math.round(h * dpr);
     const c = staffCanvas.getContext("2d");
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.clearRect(0, 0, w, h);
-    paintChordStaff(c, {
+    const geo = paintChordStaff(c, {
       w,
       h,
-      S: 13,
+      S: 11,
       key: song.key,
       scale: song.scale,
       harmony: scene.harmony,
       harmonyOct: scene.harmonyOct || 0,
+      gridGap: 8, // the chordrow's grid gap: bar centers land on slot centers
     });
+    // One grid: the chord slots adopt the engraving's bar columns, so each
+    // tower sits exactly over the slot it sounds from.
+    row.style.paddingLeft = `${geo.startX}px`;
+    row.style.paddingRight = `${w - geo.right}px`;
   }
   const row = el("div", { class: "chordrow" });
   const slots = scene.harmony.map((ci, idx) => {
@@ -3493,6 +3591,7 @@ function buildHarmonyEditor(sceneIndex, scene) {
       onclick: () => {
         selected = idx;
         slots.forEach((s, k) => s.classList.toggle("sel", k === idx));
+        refreshRungRow();
         refreshInvRow();
       },
     });
@@ -3500,6 +3599,43 @@ function buildHarmonyEditor(sceneIndex, scene) {
   });
   slots.forEach((s) => row.appendChild(s));
   scrollContainer.appendChild(row);
+
+  // The ladder, controllable where arranging happens: rung chips rebuild the
+  // selected bar's stack — triad up the numbers to 13, or a sus swap — with
+  // the exact arithmetic the wheel's bloom pads use (ladderPcs). Collapsing
+  // back to a plain diatonic triad hands the slot its degree number again,
+  // so it keeps following the key.
+  const rungRow = el("div", { class: "lane-ctl rung-row" });
+  scrollContainer.appendChild(rungRow);
+  function refreshRungRow() {
+    rungRow.innerHTML = "";
+    const entry = scene.harmony[selected];
+    const cur = ladderRungOf(entry);
+    for (const rung of LADDER_RUNGS) {
+      rungRow.appendChild(
+        el("div", {
+          class: "lane-bar" + (rung === cur ? " on" : ""),
+          text: rung,
+          "data-action": `rung-${rung}`,
+          onclick: async () => {
+            if (rung === cur) return;
+            pushUndo();
+            const pcs = ladderPcs(entry, rung);
+            const inv = Math.min((typeof entry === "object" && entry.inv) || 0, Math.min(3, pcs.length - 1));
+            const asDegree = CHORDS.findIndex((c) => c.pcs.join() === pcs.join());
+            scene.harmony[selected] = inv === 0 && asDegree >= 0 ? asDegree : inv > 0 ? { pcs, inv } : { pcs };
+            slots[selected].innerHTML = chordMarkup(scene.harmony[selected], { notes: true });
+            refreshRungRow();
+            refreshInvRow();
+            scheduleEditorPaint();
+            await ensureStarted();
+            audio.preview(scene.harmony[selected], scene.harmonyOct);
+          },
+        })
+      );
+    }
+  }
+  refreshRungRow();
 
   // Inversions, controllable where arranging happens: chips under the slots
   // pick the selected bar's bass — root, /3, /5, /7 when the stack has one.
@@ -3541,80 +3677,11 @@ function buildHarmonyEditor(sceneIndex, scene) {
   }
   refreshInvRow();
 
-  // Voice leading, visible: the three voices threading chord to chord, the
-  // handoff's own "common tones light up" promise. Held tones run level and
-  // gold; moving voices slope, dim, as far as they moved. The chain is the
-  // exact voiceLead playback walks, wrap segment included, so what you see
-  // between the slots is what the pad will do at the bar lines.
-  const threads = el("canvas", { class: "vthreads" });
-  scrollContainer.appendChild(threads);
-  function drawThreads() {
-    const w = threads.clientWidth;
-    if (!w || scene.harmony.length < 1) return;
-    const h = 56;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    threads.width = Math.round(w * dpr);
-    threads.height = Math.round(h * dpr);
-    const c = threads.getContext("2d");
-    c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    c.clearRect(0, 0, w, h);
-    const cRect = threads.getBoundingClientRect();
-    const xs = slots.map((s) => {
-      const r = s.getBoundingClientRect();
-      return r.left - cRect.left + r.width / 2;
-    });
-    let prev = null;
-    const chain = scene.harmony.map((e) => (prev = voiceLead(harmonyChord(e).pcs.slice(0, 3), prev)));
-    const wrap = chain.length > 1 ? voiceLead(harmonyChord(scene.harmony[0]).pcs.slice(0, 3), prev) : null;
-    const stacks = scene.harmony.map((e, i) => {
-      const pcs = harmonyChord(e).pcs.slice(3);
-      let topM = Math.max(...chain[i]);
-      return pcs.map((pc) => (topM = pc + 12 * Math.ceil((topM + 1 - pc) / 12)));
-    });
-    const all = chain.flat().concat(wrap || [], stacks.flat());
-    const lo = Math.min(...all) - 1;
-    const hi = Math.max(...all) + 1;
-    const y = (m) => h - ((m - lo) / Math.max(1, hi - lo)) * (h - 10) - 5;
-    const seg = (xa, va, xb, vb, fade) => {
-      for (let v = 0; v < 3; v++) {
-        const held = va[v] === vb[v];
-        c.strokeStyle = held ? `rgba(232,184,75,${0.9 * fade})` : `rgba(255,255,255,${0.34 * fade})`;
-        c.lineWidth = held ? 2.5 : 1.4;
-        c.beginPath();
-        c.moveTo(xa, y(va[v]));
-        c.lineTo(xb, y(vb[v]));
-        c.stroke();
-      }
-    };
-    for (let i = 1; i < chain.length; i++) seg(xs[i - 1], chain[i - 1], xs[i], chain[i], 1);
-    if (wrap) {
-      // The loop's own seam: the last chord resolving into the next cycle's
-      // first, fading off the right edge and onto the left.
-      const step = xs.length > 1 ? xs[1] - xs[0] : 60;
-      seg(xs[xs.length - 1], chain[chain.length - 1], Math.min(w - 2, xs[xs.length - 1] + step * 0.55), wrap, 0.45);
-      seg(Math.max(2, xs[0] - step * 0.55), chain[chain.length - 1], xs[0], wrap, 0.45);
-    }
-    for (let i = 0; i < chain.length; i++) {
-      for (let v = 0; v < 3; v++) {
-        c.beginPath();
-        c.arc(xs[i], y(chain[i][v]), 2.4, 0, Math.PI * 2);
-        c.fillStyle = "#e8e8ec";
-        c.fill();
-      }
-      // Stack tones ride as hollow dots, unthreaded: the triad leads,
-      // the color rides along.
-      for (const m of stacks[i]) {
-        c.beginPath();
-        c.arc(xs[i], y(m), 2.2, 0, Math.PI * 2);
-        c.strokeStyle = "rgba(232,232,236,0.55)";
-        c.lineWidth = 1.2;
-        c.stroke();
-      }
-    }
-  }
   requestAnimationFrame(() => {
     drawStaff();
-    drawThreads();
+    // Once more next frame: the sheet-open transition can hand the first
+    // paint a half-laid-out width; the second pass engraves at rest.
+    scheduleEditorPaint();
   });
 
   // The wheel IS the palette — the same instrument as the key sheet, mounted
@@ -3638,7 +3705,7 @@ function buildHarmonyEditor(sceneIndex, scene) {
     editorPaintRAF = requestAnimationFrame(() => {
       editorPaintRAF = 0;
       drawStaff();
-      drawThreads();
+      refreshRungRow();
       refreshInvRow();
       refreshClip(sceneIndex, "harmony");
     });
@@ -4514,9 +4581,6 @@ function exportStaffPng() {
     harmonyOct: sc.harmonyOct || 0,
     bg: "#0e0e0f",
     title: `${keyDisplayName(song.key, song.scale)} ${song.scale} · ${song.tempo} BPM · scene ${si + 1} · noodles`,
-    // Slash basses sit at midi 36..47 — up to 8 ledger steps under the staff.
-    // h-140 leaves that whole cellar on the plate instead of clipping it.
-    bottom: h - 140,
   });
   canvas.toBlob((blob) => {
     if (!blob) {

@@ -239,16 +239,10 @@
       .circle-scale {
         justify-content: center;
       }
-      .vthreads {
-        display: block;
-        width: 100%;
-        height: 56px;
-        margin: 2px 0 8px;
-      }
       .staffview {
         display: block;
         width: 100%;
-        height: 142px;
+        height: 190px; /* the grand staff: treble + bass at S=11 */
         margin: 0 0 6px;
       }
       .oct-row .tfbtn {
@@ -308,6 +302,18 @@
         display: flex;
         justify-content: center;
         padding: 0 8px 4px;
+      }
+      /* Seven rung chips on a phone width: same chip chrome, tighter cells. */
+      .rung-row {
+        display: flex;
+        justify-content: center;
+        gap: 4px;
+        padding: 2px 8px 0;
+      }
+      .rung-row .lane-bar {
+        min-width: 0;
+        flex: 0 1 auto;
+        padding: 4px 7px;
       }
       .dare-banner {
         position: fixed;
@@ -990,6 +996,17 @@
       }
       .cslot b { font-size: 13px; }
       .cslot span { font-size: 9px; opacity: 0.6; font-weight: 600; margin-top: 1px; }
+      /* Slots share the engraving's bar grid now, so they can run narrow;
+         long stacks ellipsize — the staff's lettered heads carry the full
+         spelling right above. */
+      .cslot { min-width: 0; overflow: hidden; }
+      .cslot span,
+      .cslot .chord-notes {
+        max-width: 100%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
       .chord-notes {
         display: block;
         margin-top: 3px;

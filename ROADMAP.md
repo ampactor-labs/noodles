@@ -10,8 +10,23 @@ headless gates (`npm run smoke`, `npm run calibrate`).
 
 ## Agreed next (in order)
 
-1. **Extension storage in the picker** — the editor wheel already writes 7ths;
-   showing/editing them on the slot faces is the remaining surface.
+The agreed list is clear — everything on it shipped. Named follow-ups, not
+yet agreed: all-scenes sheet music, mixer ∿ badges for send-ride lanes,
+MIDI export.
+
+Voicing chips shipped 2026-07-28: the extension ladder moved into the model
+(`ladderPcs`/`ladderRungOf`), the wheel's bloom pads delegate to it, and the
+chord editor grew a rung row — triad · 7 · 9 · 11 · 13 · sus4 · sus2 — that
+rebuilds the selected bar's stack with the same arithmetic. Collapsing back
+to a plain diatonic triad hands the slot its degree number again, so it
+keeps following the key.
+
+The same day the staff became a grand staff (treble + bass, notes routed by
+ledger economy, both signatures, real engraved clef outlines, note letters
+inside the heads) drawn by one painter for the editor and the Staff PNG,
+with the chord slots adopting the engraving's bar columns and the
+voice-leading threads drawn between the noteheads themselves — the separate
+threads strip is deleted.
 
 Staff PNG shipped 2026-07-28 (the round-trip principle on paper): the harmony
 editor's engraver was factored into one module-level painter both surfaces

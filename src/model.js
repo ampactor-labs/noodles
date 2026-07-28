@@ -323,6 +323,47 @@ function roman0(pcs, minor, dim) {
   return romanFromHome(curKey, pcs[0], minor || dim);
 }
 
+// --- The extension ladder as model arithmetic ---
+// A rung names the whole stack up to its number (a 9 CONTAINS the 7th, an 11
+// the 9th), stepped diatonically when the entry's triad sits on a scale
+// degree and common-practice on visitors; sus4/sus2 swap the third instead
+// of stacking. The wheel's bloom pads and the editor's voicing chips both
+// speak this — one ladder, two surfaces.
+export const LADDER_RUNGS = ["triad", "7", "9", "11", "13", "sus4", "sus2"];
+const LADDER_STEPS = { 7: [6], 9: [6, 8], 11: [6, 8, 10], 13: [6, 8, 10, 12], sus4: [3], sus2: [1] };
+const LADDER_CHROME = { 6: 10, 8: 14, 10: 17, 12: 21, 3: 5, 1: 2 };
+export function ladderPcs(entry, rung) {
+  const n12 = (v) => ((v % 12) + 12) % 12;
+  const e = normalizeHarmonyEntry(entry);
+  const base = typeof e === "number" ? CHORDS[e].pcs : e.pcs;
+  const root = base[0];
+  const susNow = base.length === 3 && [2, 5].includes(n12(base[1] - root));
+  // Diatonic stepping needs the whole triad to be the degree's own — a
+  // borrowed chord sharing a degree's root pc must not borrow its 7th too.
+  const degAt = CHORDS.findIndex((c) => c.pcs[0] === root);
+  const deg =
+    degAt >= 0 && (susNow ? CHORDS[degAt].pcs[2] === base[2] : CHORDS[degAt].pcs.join() === base.slice(0, 3).join())
+      ? degAt
+      : -1;
+  const semisOf = (st) => (deg >= 0 ? degreeStepSemis(deg, st) : LADDER_CHROME[st]);
+  const third = susNow ? n12(root + (deg >= 0 ? degreeStepSemis(deg, 2) : 4)) : base[1];
+  const fifth = base[2];
+  const triad = [root, third, fifth];
+  if (rung === "sus4" || rung === "sus2") return [root, n12(root + semisOf(LADDER_STEPS[rung][0])), fifth];
+  const steps = LADDER_STEPS[rung];
+  if (!steps) return triad; // "triad" and anything unknown
+  return [...triad, ...steps.map((st) => n12(root + semisOf(st)))];
+}
+// The rung an entry currently sits on, for chip highlighting.
+export function ladderRungOf(entry) {
+  const e = normalizeHarmonyEntry(entry);
+  if (typeof e === "number") return "triad";
+  const n12 = (v) => ((v % 12) + 12) % 12;
+  const t = n12(e.pcs[1] - e.pcs[0]);
+  if (e.pcs.length === 3) return t === 5 ? "sus4" : t <= 2 ? "sus2" : "triad";
+  return ["7", "9", "11", "13"][Math.min(3, e.pcs.length - 4)];
+}
+
 // --- Voice leading: keep common tones, move the rest by the smallest step. ---
 const PERMS = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
 const nearestOctave = (pc, ref) => pc + 12 * Math.round((ref - pc) / 12);

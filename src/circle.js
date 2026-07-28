@@ -33,7 +33,7 @@ import {
   relMajorOffset,
   keyDisplayName,
   romanFromHome,
-  degreeStepSemis,
+  ladderPcs,
   sharedPcCount,
   STATION_MAJOR,
   STATION_MINOR,
@@ -150,20 +150,10 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
   // whole stack up to its number, diatonically stepped on in-scale wedges
   // and common-practice on visitors. This is the extended-harmony curriculum
   // as pads: slide up the ladder, hear the tower grow.
-  const EXT_PADS = [
-    { id: "7", steps: [6] },
-    { id: "9", steps: [6, 8] },
-    { id: "11", steps: [6, 8, 10] },
-    { id: "13", steps: [6, 8, 10, 12] },
-    { id: "sus4", steps: [3], sus: true },
-    { id: "sus2", steps: [1], sus: true },
-  ];
-  const CHROME_STEP = { 6: 10, 8: 14, 10: 17, 12: 21, 3: 5, 1: 2 };
-  function extPcs(w, pad) {
-    const semisOf = (st) => (w.degree >= 0 ? degreeStepSemis(w.degree, st) : CHROME_STEP[st]);
-    if (pad.sus) return [w.pcs[0], norm12(w.root + semisOf(pad.steps[0])), w.pcs[2]];
-    return [...w.pcs, ...pad.steps.map((st) => norm12(w.root + semisOf(st)))];
-  }
+  const EXT_PADS = [{ id: "7" }, { id: "9" }, { id: "11" }, { id: "13" }, { id: "sus4" }, { id: "sus2" }];
+  // The ladder arithmetic lives in the model now (ladderPcs) — the editor's
+  // voicing chips speak the same stacks. The wedge keeps only its adapter.
+  const extPcs = (w, pad) => ladderPcs({ pcs: w.pcs }, pad.id);
   // One namer everywhere: the model spells the stack (Gm11, Cmaj9, Bø7).
   const extLabel = (w, pad) => harmonyChord({ pcs: extPcs(w, pad) }).name;
 

@@ -248,10 +248,9 @@ try {
   await tap(page, '.clip.filled[data-track="harmony"]');
   await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Chords");
   await page.waitForFunction(() => {
-    const t = document.querySelector(".vthreads");
     const s = document.querySelector(".staffview");
     const w = document.querySelector("#sheet .circle-canvas");
-    return t && t.width > 0 && s && s.width > 0 && w && w.width > 0;
+    return s && s.width > 0 && w && w.width > 0;
   });
   // The wheel is the palette: a strum across it paints bars in a row. Slots
   // pre-set to the dim degree (no outer wedge writes it), and the strum runs
@@ -276,9 +275,24 @@ try {
     canvas.dispatchEvent(new PointerEvent("pointermove", o(at(H + 4), 81)));
     canvas.dispatchEvent(new PointerEvent("pointermove", o(at(H + 5), 81)));
     canvas.dispatchEvent(new PointerEvent("pointerup", o(at(H + 5), 81)));
-    return before !== JSON.stringify(window.__noodles.song.scenes[0].harmony);
+    const after = JSON.stringify(window.__noodles.song.scenes[0].harmony);
+    return { changed: before !== after, after, H, key: window.__noodles.song.key, scale: window.__noodles.song.scale };
   });
-  assertState(strummed, "the editor wheel's strum wrote no bars");
+  assertState(strummed.changed, `the editor wheel's strum wrote no bars: ${JSON.stringify(strummed)}`);
+  // Voicing chips: "9" on a degree slot writes the five-tone stack and the
+  // slot face names it; "triad" collapses a diatonic stack back to its
+  // degree number, so it keeps following the key.
+  const rung = await page.evaluate(() => {
+    window.__noodles.song.scenes[0].harmony[0] = 4;
+    document.querySelectorAll(".cslot")[0].click(); // reselect: chip rows rebuild on the degree entry
+    document.querySelector('[data-action="rung-9"]').click();
+    const e = window.__noodles.song.scenes[0].harmony[0];
+    const face = document.querySelectorAll(".cslot")[0].textContent;
+    document.querySelector('[data-action="rung-triad"]').click();
+    const e2 = window.__noodles.song.scenes[0].harmony[0];
+    return { five: !!(e?.pcs && e.pcs.length === 5), face, collapsed: e2 === 4 };
+  });
+  assertState(rung.five && rung.face.includes("9") && rung.collapsed, `voicing chips misbehaved: ${JSON.stringify(rung)}`);
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
 
