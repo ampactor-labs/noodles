@@ -32,6 +32,7 @@ import {
   scaleDegreeOfPc,
   spellChordTones,
   signatureAccFor,
+  spellPitch,
   stationOfPc,
   relMajorPc,
 } from "./model.js";
@@ -496,7 +497,7 @@ function openAboutSheet() {
     p("Each row is a scene — a loop and a song section in one. + adds another: blank, a copy, or a fresh magic one. The corner pie on a playing clip shows where it is in its loop. Long-press a clip for launch modes and follow actions, a scene's ▶ for scene moves, a track name for track moves."),
 
     label("editors"),
-    p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key. Chords: the wheel itself is the palette — tap a wedge to set the selected bar, drag across the wheel to paint a run of bars in one stroke, and everything the big wheel does works here too. The staff above writes down exactly what you'll hear; the threads below show which notes carry over. − / + shortens a clip's loop; a 12-step line against 16-step drums drifts in and out of phase on purpose. ◧ zooms the note grid when your thumbs need bigger targets."),
+    p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key, the staff above writes the lane down as you draw (bass gets its own clef), and each row's name wears its job's color. Chords: the wheel itself is the palette — tap a wedge to set the selected bar, drag across the wheel to paint a run of bars in one stroke, and everything the big wheel does works here too, over its own staff and the threads that show which notes carry over. The lane under any editor has a picker: tap vel to flip through captured rides, redraw them per step, chips pick the bar, ✕ clears one. − / + shortens a clip's loop; a 12-step line against 16-step drums drifts in and out of phase on purpose. ◧ zooms the note grid when your thumbs need bigger targets."),
 
     label("the circle"),
     p("Tap the key name at the bottom and the circle of fifths opens. The bright neighborhood is your key — tap a wedge to hear its chord, hold it for sevenths and sus, drag across them to strum. The dim wedges outside are chords you can borrow. Arm ● and a clean tap lands in the playing clip. Drag the rim to carry the whole song to a new key and watch the sharps arrive one by one; drag the white dot to call the same notes by another mode's name; hold the middle and everything you tap comes back mirrored; pinch open to see why twelve fifths never quite close."),
@@ -514,7 +515,7 @@ function openAboutSheet() {
     p("View flips to the timeline. Drag clips around, pull a right edge to resize, sweep the strip under the bar numbers to set a loop — tap the loop to switch it on and off. Arm ● in the top bar while you jam: scene changes and your mute moves both write into the timeline, and the hatched bars play silent everywhere, exports included."),
 
     label("keep it"),
-    p("File saves the project to a file or keeps it on this device, and exports a WAV — master or four stems, named for your key — through the exact chain you're hearing. Mic recordings last until the tab closes; save the project to keep everything else."),
+    p("File saves the project to a file or keeps it on this device, and exports a WAV — master or four stems, named for your key — through the exact chain you're hearing. Loaded samples and mouth-drums now stay on this device between visits. And you can write a dare into File before saving: the words travel with the project and greet whoever loads it — nothing checks, nothing grades, the dare is between you two."),
     p("Install it and noodles leaves the browser behind: full screen, its own icon, and everything — sounds, samples, exports — works with no signal at all."),
 
     p("Made for couches and phone speakers. Tell your friends."),
@@ -2570,9 +2571,25 @@ function buildDrumEditor(scene) {
   sheet.appendChild(scrollContainer);
 
   // .drums variant: match the 54px pad column so bars sit under their steps.
+  // Same lane picker as the piano editors: velocity or a captured ride.
+  let laneParam = "vel";
+  let laneBar = 0;
+  const laneParams = () => ["vel", ...Object.keys(scene.motion?.drums || {})];
   const vlane = el("div", { class: "vlane drums" });
   const vbars = [];
-  vlane.appendChild(el("div", { class: "vkey", text: "vel" }));
+  const vkey = el("div", {
+    class: "vkey vkey-pick",
+    role: "button",
+    text: "vel",
+    onclick: () => {
+      const ps = laneParams();
+      laneParam = ps[(ps.indexOf(laneParam) + 1) % ps.length];
+      laneBar = 0;
+      laneChrome();
+      paintDrums();
+    },
+  });
+  vlane.appendChild(vkey);
   const vsteps = el("div", { class: "vsteps" });
   for (let s = 0; s < 16; s++) {
     const fill = el("i", { style: `--tc:${trackColor("drums")}` });
@@ -2583,8 +2600,62 @@ function buildDrumEditor(scene) {
   }
   vlane.appendChild(vsteps);
   sheet.appendChild(vlane);
+  const barChips = el("div", { class: "lane-bars" });
+  const clearChip = el("div", {
+    class: "lane-clear",
+    text: "✕ clear ride",
+    onclick: () => {
+      if (laneParam === "vel" || !scene.motion?.drums) return;
+      pushUndo();
+      delete scene.motion.drums[laneParam];
+      if (!Object.keys(scene.motion.drums).length) delete scene.motion.drums;
+      laneParam = "vel";
+      laneChrome();
+      paintDrums();
+      refreshClip(editor.scene, "drums");
+    },
+  });
+  const laneCtl = el("div", { class: "lane-ctl" }, [barChips, clearChip]);
+  sheet.appendChild(laneCtl);
+  function laneChrome() {
+    vkey.textContent = laneParam;
+    vkey.classList.toggle("on", laneParam !== "vel");
+    laneCtl.style.display = laneParam === "vel" ? "none" : "";
+    const arr = scene.motion?.drums?.[laneParam];
+    barChips.innerHTML = "";
+    const nBars = arr ? Math.round(arr.length / 16) : 1;
+    if (laneParam !== "vel" && nBars > 1) {
+      for (let b = 0; b < nBars; b++) {
+        barChips.appendChild(
+          el("div", {
+            class: "lane-bar" + (b === laneBar ? " on" : ""),
+            text: String(b + 1),
+            onclick: () => {
+              laneBar = b;
+              laneChrome();
+              paintDrums();
+            },
+          })
+        );
+      }
+    }
+  }
+  laneChrome();
 
   function paintDrums() {
+    // A picked motion ride owns the lane; velocity painting resumes on vel.
+    const marr = laneParam === "vel" ? null : scene.motion?.drums?.[laneParam];
+    if (marr) {
+      for (let s = 0; s < 16; s++) {
+        const h = Math.round(marr[(laneBar * 16 + s) % marr.length] * 100) + "%";
+        if (vbars[s].__h !== h) {
+          vbars[s].__h = h;
+          vbars[s].style.height = h;
+          vbars[s].parentElement.style.opacity = 1;
+        }
+      }
+      return;
+    }
     // Dirty-checked: a drag-paint calls this per painted cell, and fifteen of
     // the sixteen columns haven't moved — unconditional height writes were
     // sixteen layout-dirtying styles per painted step.
@@ -2604,6 +2675,28 @@ function buildDrumEditor(scene) {
 
   async function onDrumVelDown(e, s, bar) {
     e.preventDefault();
+    if (laneParam !== "vel") {
+      const arr = scene.motion?.drums?.[laneParam];
+      if (!arr) return;
+      pushUndo();
+      const mrect = bar.getBoundingClientRect();
+      const mset = (ev) => {
+        arr[(laneBar * 16 + s) % arr.length] = Math.max(0, Math.min(1, 1 - (ev.clientY - mrect.top) / mrect.height));
+        paintDrums();
+      };
+      mset(e);
+      capturePointer(bar, e.pointerId);
+      const mmove = (ev) => mset(ev);
+      const mup = () => {
+        bar.removeEventListener("pointermove", mmove);
+        bar.removeEventListener("pointerup", mup);
+        bar.removeEventListener("pointercancel", mup);
+      };
+      bar.addEventListener("pointermove", mmove);
+      bar.addEventListener("pointerup", mup);
+      bar.addEventListener("pointercancel", mup);
+      return;
+    }
     let hasNotes = false;
     for (const v of DRUM_VOICES) if (scene.drums[v][s] > 0) hasNotes = true;
     if (!hasNotes) return;
@@ -2767,6 +2860,128 @@ function buildPianoEditor(sceneIndex, scene, track) {
   const viewOff = pianoView === 2 ? 8 : 0;
   const viewCount = pianoView === 0 ? 16 : 8;
 
+  // The roll's own staff (DESIGN-STAFF): noteheads on the step grid, treble
+  // for melody, a drawn F clef for bass — per-track clef IS the grand-staff
+  // call, since the tracks are separate editors. Hidden in chops mode:
+  // slices aren't pitches.
+  const rollStaff = chops ? null : el("canvas", { class: "rollstaff" });
+  if (rollStaff) sheet.appendChild(rollStaff);
+  function drawRollStaff() {
+    if (!rollStaff) return;
+    const w = rollStaff.clientWidth;
+    if (!w) return;
+    const h = 84;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    rollStaff.width = Math.round(w * dpr);
+    rollStaff.height = Math.round(h * dpr);
+    const c = rollStaff.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, w, h);
+    const S = 7;
+    const bass = track === "bass";
+    const baseStep = bass ? 25 : 37; // bottom line: G2 on the bass staff, E4 on the treble
+    const bottomY = h - 24;
+    const yOf = (step) => bottomY - (step - baseStep) * (S / 2);
+    c.strokeStyle = "rgba(255,255,255,0.3)";
+    c.lineWidth = 1;
+    for (let l = 0; l < 5; l++) {
+      const y = bottomY - l * S;
+      c.beginPath();
+      c.moveTo(4, y);
+      c.lineTo(w - 4, y);
+      c.stroke();
+    }
+    c.fillStyle = "rgba(240,240,244,0.85)";
+    c.strokeStyle = "rgba(240,240,244,0.85)";
+    c.lineCap = "round";
+    if (bass) {
+      // F clef: the curl off the F line and the two dots that name it.
+      const fY = yOf(baseStep + 6);
+      c.beginPath();
+      c.arc(S * 1.1, fY, 2.4, 0, Math.PI * 2);
+      c.fill();
+      c.lineWidth = 1.6;
+      c.beginPath();
+      c.moveTo(S * 1.1, fY);
+      c.bezierCurveTo(S * 1.2, fY - S * 1.6, S * 2.6, fY - S * 1.4, S * 2.7, fY - S * 0.2);
+      c.bezierCurveTo(S * 2.8, fY + S * 1.4, S * 1.7, fY + S * 2.4, S * 0.7, fY + S * 2.9);
+      c.stroke();
+      c.beginPath();
+      c.arc(S * 3.6, fY - S * 0.5, 1.4, 0, Math.PI * 2);
+      c.fill();
+      c.beginPath();
+      c.arc(S * 3.6, fY + S * 0.5, 1.4, 0, Math.PI * 2);
+      c.fill();
+    } else {
+      // The same drawn G clef as the chord staff, at this gap.
+      const gY = yOf(baseStep + 2);
+      const cx0 = S * 1.5;
+      c.lineWidth = 1.5;
+      c.beginPath();
+      c.moveTo(cx0 + S * 0.1, gY + S * 2.1);
+      c.bezierCurveTo(cx0 + S * 1.6, gY + S * 1.7, cx0 + S * 1.7, gY + S * 0.4, cx0 + S * 0.75, gY);
+      c.bezierCurveTo(cx0 - S * 0.55, gY - S * 0.55, cx0 - S * 0.35, gY - S * 1.9, cx0 + S * 0.75, gY - S * 1.95);
+      c.bezierCurveTo(cx0 + S * 1.6, gY - S * 2.0, cx0 + S * 1.85, gY - S * 1.1, cx0 + S * 1.1, gY - S * 0.75);
+      c.stroke();
+      c.beginPath();
+      c.moveTo(cx0 + S * 0.55, gY - S * 3.4);
+      c.bezierCurveTo(cx0 + S * 1.4, gY - S * 2.9, cx0 + S * 1.3, gY - S * 2.3, cx0 + S * 0.95, gY - S * 1.5);
+      c.lineTo(cx0 + S * 0.35, gY + S * 1.7);
+      c.stroke();
+    }
+    const sig = keySignature(song.key, song.scale);
+    const units = sig > 0 ? [8, 5, 9, 6, 3, 7, 4] : [4, 7, 3, 6, 2, 5, 1];
+    c.textAlign = "center";
+    c.textBaseline = "middle";
+    c.font = `600 ${Math.round(S * 2)}px system-ui, sans-serif`;
+    let sx = S * 4.8;
+    for (let i = 0; i < Math.abs(sig); i++) {
+      const u = units[i] - (bass ? 2 : 0);
+      c.fillText(sig > 0 ? "♯" : "♭", sx, yOf(baseStep + u) - (sig < 0 ? S * 0.3 : 0));
+      sx += S * 0.9;
+    }
+    const cell0 = rowCells[0]?.[viewOff];
+    if (!cell0) return;
+    const cRect = rollStaff.getBoundingClientRect();
+    const gRect = cell0.getBoundingClientRect();
+    const colW = gRect.width;
+    const x0 = gRect.left - cRect.left + colW / 2;
+    for (let s = viewOff; s < viewOff + viewCount; s++) {
+      const x = x0 + (s - viewOff) * colW;
+      for (const n of noteSlot(lane[s])) {
+        const sp = spellPitch(n.midi);
+        const rel = sp.step - baseStep;
+        c.strokeStyle = "rgba(255,255,255,0.3)";
+        c.lineWidth = 1;
+        for (let u = -2; u >= rel; u -= 2) {
+          const y = yOf(baseStep + u);
+          c.beginPath();
+          c.moveTo(x - S, y);
+          c.lineTo(x + S, y);
+          c.stroke();
+        }
+        for (let u = 10; u <= rel; u += 2) {
+          const y = yOf(baseStep + u);
+          c.beginPath();
+          c.moveTo(x - S, y);
+          c.lineTo(x + S, y);
+          c.stroke();
+        }
+        if (sp.acc !== signatureAccFor(sp.letter, sig)) {
+          c.fillStyle = "rgba(240,240,244,0.9)";
+          c.font = `600 ${Math.round(S * 1.7)}px system-ui, sans-serif`;
+          c.textAlign = "right";
+          c.fillText(sp.acc > 0 ? "♯" : sp.acc < 0 ? "♭" : "♮", x - S * 0.75, yOf(sp.step) - (sp.acc < 0 ? S * 0.25 : 0));
+          c.textAlign = "center";
+        }
+        c.fillStyle = "#f0f0f4";
+        c.beginPath();
+        c.ellipse(x, yOf(sp.step), S * 0.55, S * 0.42, -0.25, 0, Math.PI * 2);
+        c.fill();
+      }
+    }
+  }
+
   const scrollContainer = el("div", { class: "editor-scroll" });
   const grid = el("div", { class: "proll" });
   const rowCells = []; // [rowIndex][step]
@@ -2794,9 +3009,16 @@ function buildPianoEditor(sceneIndex, scene, track) {
       rowSteps.appendChild(cell);
     }
     rowCells.push(cells);
+    // Row labels wear their degree's function hue — the wheel's color
+    // language under the note editors, quiet enough to ignore.
+    const deg = chops ? -1 : scaleDegreeOfPc(midi % 12);
     grid.appendChild(
       el("div", { class: "prow" }, [
-        el("div", { class: "pkey" + (!chops && midi % 12 === 0 ? " c" : ""), text: rowLabel(midi) }),
+        el("div", {
+          class: "pkey" + (!chops && midi % 12 === 0 ? " c" : ""),
+          text: rowLabel(midi),
+          style: deg >= 0 ? `color:${hex(hslInt(CHORDS[deg].hue, 34, 66))}` : "",
+        }),
         rowSteps,
       ])
     );
@@ -2804,10 +3026,27 @@ function buildPianoEditor(sceneIndex, scene, track) {
   scrollContainer.appendChild(grid);
   sheet.appendChild(scrollContainer);
 
-  // Velocity lane.
+  // The lane below the grid, with a picker (D5's second half): velocity, or
+  // any motion ride the ● captured — tap the label to cycle, chips pick the
+  // bar of a long lane, ✕ clears the picked ride.
+  let laneParam = "vel";
+  let laneBar = 0;
+  const laneParams = () => ["vel", ...Object.keys(scene.motion?.[track] || {})];
   const vlane = el("div", { class: "vlane" });
   const vbars = [];
-  vlane.appendChild(el("div", { class: "vkey", text: "vel" }));
+  const vkey = el("div", {
+    class: "vkey vkey-pick",
+    role: "button",
+    text: "vel",
+    onclick: () => {
+      const ps = laneParams();
+      laneParam = ps[(ps.indexOf(laneParam) + 1) % ps.length];
+      laneBar = 0;
+      laneChrome();
+      paint();
+    },
+  });
+  vlane.appendChild(vkey);
   const vsteps = el("div", { class: "vsteps", style: `grid-template-columns: repeat(${viewCount}, 1fr)` });
   for (let s = viewOff; s < viewOff + viewCount; s++) {
     const fill = el("i", { style: `--tc:${tc}` });
@@ -2818,6 +3057,47 @@ function buildPianoEditor(sceneIndex, scene, track) {
   }
   vlane.appendChild(vsteps);
   sheet.appendChild(vlane);
+  const barChips = el("div", { class: "lane-bars" });
+  const clearChip = el("div", {
+    class: "lane-clear",
+    text: "✕ clear ride",
+    onclick: () => {
+      if (laneParam === "vel" || !scene.motion?.[track]) return;
+      pushUndo();
+      delete scene.motion[track][laneParam];
+      if (!Object.keys(scene.motion[track]).length) delete scene.motion[track];
+      laneParam = "vel";
+      laneChrome();
+      paint();
+      refreshClip(sceneIndex, track);
+    },
+  });
+  const laneCtl = el("div", { class: "lane-ctl" }, [barChips, clearChip]);
+  sheet.appendChild(laneCtl);
+  function laneChrome() {
+    vkey.textContent = laneParam;
+    vkey.classList.toggle("on", laneParam !== "vel");
+    laneCtl.style.display = laneParam === "vel" ? "none" : "";
+    const arr = scene.motion?.[track]?.[laneParam];
+    barChips.innerHTML = "";
+    const nBars = arr ? Math.round(arr.length / 16) : 1;
+    if (laneParam !== "vel" && nBars > 1) {
+      for (let b = 0; b < nBars; b++) {
+        barChips.appendChild(
+          el("div", {
+            class: "lane-bar" + (b === laneBar ? " on" : ""),
+            text: String(b + 1),
+            onclick: () => {
+              laneBar = b;
+              laneChrome();
+              paint();
+            },
+          })
+        );
+      }
+    }
+  }
+  laneChrome();
 
   function paint() {
     rows.forEach((midi, ri) => {
@@ -2826,11 +3106,18 @@ function buildPianoEditor(sceneIndex, scene, track) {
         rowCells[ri][s].className = `pcell${Math.floor(s / 4) % 2 ? "" : " g"}${hit ? " on" : ""}${hit && hit.step === s ? " nstart" : ""}${s >= clipLen ? " off" : ""}`;
       }
     });
+    const arr = laneParam === "vel" ? null : scene.motion?.[track]?.[laneParam];
     for (let s = viewOff; s < viewOff + viewCount; s++) {
-      const notes = noteSlot(lane[s]);
-      vbars[s].style.height = notes.length ? Math.round(slotPeakVel(lane[s]) * 100) + "%" : "0%";
-      vbars[s].parentElement.style.opacity = notes.length ? 1 : 0.3;
+      if (arr) {
+        vbars[s].style.height = Math.round(arr[(laneBar * 16 + s) % arr.length] * 100) + "%";
+        vbars[s].parentElement.style.opacity = 1;
+      } else {
+        const notes = noteSlot(lane[s]);
+        vbars[s].style.height = notes.length ? Math.round(slotPeakVel(lane[s]) * 100) + "%" : "0%";
+        vbars[s].parentElement.style.opacity = notes.length ? 1 : 0.3;
+      }
     }
+    drawRollStaff();
   }
 
   const scrollToNotes = () => {
@@ -2896,6 +3183,29 @@ function buildPianoEditor(sceneIndex, scene, track) {
 
   function onVelDown(e, s, bar) {
     e.preventDefault();
+    // A picked motion ride draws straight into its lane, same gesture.
+    if (laneParam !== "vel") {
+      const arr = scene.motion?.[track]?.[laneParam];
+      if (!arr) return;
+      pushUndo();
+      const mrect = bar.getBoundingClientRect();
+      const mset = (ev) => {
+        arr[(laneBar * 16 + s) % arr.length] = Math.max(0, Math.min(1, 1 - (ev.clientY - mrect.top) / mrect.height));
+        paint();
+      };
+      mset(e);
+      capturePointer(bar, e.pointerId);
+      const mmove = (ev) => mset(ev);
+      const mup = () => {
+        bar.removeEventListener("pointermove", mmove);
+        bar.removeEventListener("pointerup", mup);
+        bar.removeEventListener("pointercancel", mup);
+      };
+      bar.addEventListener("pointermove", mmove);
+      bar.addEventListener("pointerup", mup);
+      bar.addEventListener("pointercancel", mup);
+      return;
+    }
     if (!noteSlot(lane[s]).length) return;
     ensureStarted(); // warm the context; the drag itself makes no sound
     pushUndo();
@@ -3876,6 +4186,19 @@ function applyProject(rawProject) {
   playingScene = -1;
   for (const t of TRACKS) playingTracks[t.key] = -1;
   refreshAll();
+  // A dare rides the file: someone's words, shown once per load, never
+  // enforced — the constraint is social, the app just remembers it.
+  if (typeof song.dare === "string" && song.dare.trim()) showDareBanner(song.dare.trim().slice(0, 200));
+}
+
+// The dare banner: her words over your session, dismissible, nothing graded.
+function showDareBanner(text) {
+  document.querySelector(".dare-banner")?.remove();
+  const card = el("div", { class: "dare-banner" }, [
+    el("span", { class: "dare-text", text }),
+    el("div", { class: "dare-x", text: "✕", onclick: () => card.remove() }),
+  ]);
+  document.getElementById("app").appendChild(card);
 }
 
 async function loadProjectFile(file, status) {
@@ -4015,6 +4338,36 @@ function openExport() {
         el("div", { class: "exp-btn", text: "Load from device", "data-action": "load-local-project", onclick: () => loadLocalProject(status) }),
       ]),
       fileInput,
+      // The dare: write a line, save the project, hand it over. Homework that
+      // feels like a game of HORSE — the words travel with the file and greet
+      // whoever loads it. The app never checks; that's the teacher's job.
+      el("div", { class: "dare-row" }, [
+        el("input", {
+          class: "dare-input",
+          type: "text",
+          maxlength: "200",
+          placeholder: song.dare ? song.dare : "write a dare… (“stay in E♭, one step per voice”)",
+          "data-action": "dare-input",
+        }),
+        el("div", {
+          class: "exp-btn",
+          text: "Save Dare",
+          "data-action": "save-dare",
+          onclick: (e) => {
+            const input = e.target.parentElement.querySelector(".dare-input");
+            const text = input.value.trim() || song.dare || "";
+            if (!text) {
+              input.focus();
+              return;
+            }
+            pushUndo();
+            song.dare = text.slice(0, 200);
+            const json = JSON.stringify(captureProject(), null, 2);
+            downloadBlob(new Blob([json], { type: "application/json" }), "noodles-dare.noodles");
+            status.textContent = "Dare saved — send it to someone.";
+          },
+        }),
+      ]),
     ])
   );
   // Loop-first: when a loop is set on the arrangement, it IS the backing track

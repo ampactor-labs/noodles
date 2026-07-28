@@ -209,6 +209,24 @@ try {
     return Math.max(...(window.__noodles.song.scenes[0].melody[4] || []).map((n) => n.len), 0);
   });
   assertState(dragLen === 4, `press-drag did not stretch the new note to 4 steps (got len ${dragLen})`);
+  // The roll staff painted, and the motion-lane picker cycles + clears.
+  const rollStaffOk = await page.evaluate(() => {
+    const s = document.querySelector(".rollstaff");
+    return !!s && s.width > 0;
+  });
+  assertState(rollStaffOk, "roll staff missing or unpainted");
+  const laneOk = await page.evaluate(() => {
+    window.__noodles.song.scenes[0].motion ||= {};
+    window.__noodles.song.scenes[0].motion.melody = { x: new Array(64).fill(0.3) };
+    const vkey = document.querySelector(".vkey-pick");
+    vkey.click();
+    const picked = vkey.textContent;
+    const chips = document.querySelectorAll(".lane-bar").length;
+    document.querySelector(".lane-clear").click();
+    const cleared = !window.__noodles.song.scenes[0].motion?.melody;
+    return { picked, chips, cleared, back: vkey.textContent };
+  });
+  assertState(laneOk.picked === "x" && laneOk.chips === 4 && laneOk.cleared && laneOk.back === "vel", `motion lane picker misbehaved: ${JSON.stringify(laneOk)}`);
   // Editor dice: rolled melody notes stay inside a 2-octave in-scale window
   // between octave 2 and octave 5 (the old roll scattered across ~8 octaves).
   await page.evaluate(() => [...document.querySelectorAll(".tfbtn")].find((b) => b.textContent === "🎲")?.click());
@@ -702,6 +720,21 @@ try {
   // conditional rows (install prompt, waiting update), so asserting overflow
   // itself was a coin flip — the invariant is the hint matching it.
   assertState(about.hint === about.overflows, `scroll hint (${about.hint}) disagrees with overflow (${about.overflows})`);
+  // A dare rides the project file and greets the loader, dismissibly.
+  const dared = await page.evaluate(() => {
+    const snap = JSON.parse(JSON.stringify(window.__noodles.song));
+    snap.dare = "stay in Eb, one step per voice";
+    window.__noodles.applyProject(snap); // schema-less input IS the song
+
+    const banner = document.querySelector(".dare-banner");
+    const text = banner?.querySelector(".dare-text")?.textContent || "";
+    banner?.querySelector(".dare-x")?.click();
+    return { shown: !!banner, text, gone: !document.querySelector(".dare-banner") };
+  });
+  assertState(dared.shown && dared.text.includes("stay in Eb") && dared.gone, `dare banner misbehaved: ${JSON.stringify(dared)}`);
+  await tap(page, "#about-btn");
+  await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "noodles");
+
   // The buried perf overlay: toggling it in the guide shows and hides the HUD.
   await clickAction(page, "perf-toggle");
   await page.waitForSelector("#perf-hud");

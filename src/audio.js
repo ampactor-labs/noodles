@@ -317,8 +317,80 @@ function loadSamples() {
   return samplesLoading;
 }
 
-// User-loaded one-shots, one per voice, session-scoped.
+// User-loaded one-shots, one per voice.
 const userSamples = {};
+
+// --- Device memory (DECISIONS D14): user one-shots and the chop kit
+// survive reloads via IndexedDB — raw Float32 channels, so project files
+// stay small, portable JSON while the phone remembers its own sounds.
+// Every path is try/caught: private mode degrades to session-scoped, which
+// is exactly what the app was yesterday.
+const IDB_NAME = "noodles-samples";
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const rq = indexedDB.open(IDB_NAME, 1);
+    rq.onupgradeneeded = () => rq.result.createObjectStore("samples");
+    rq.onsuccess = () => resolve(rq.result);
+    rq.onerror = () => reject(rq.error);
+  });
+}
+async function idbPut(key, value) {
+  try {
+    const db = await idbOpen();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("samples", "readwrite");
+      tx.objectStore("samples").put(value, key);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    // private mode or quota: this sound stays session-scoped
+  }
+}
+async function idbEntries() {
+  try {
+    const db = await idbOpen();
+    const out = await new Promise((resolve, reject) => {
+      const tx = db.transaction("samples", "readonly");
+      const store = tx.objectStore("samples");
+      const keys = store.getAllKeys();
+      const vals = store.getAll();
+      tx.oncomplete = () => resolve(keys.result.map((k, i) => [k, vals.result[i]]));
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+    return out;
+  } catch {
+    return [];
+  }
+}
+const packBuffer = (buffer) => ({
+  sampleRate: buffer.sampleRate,
+  channels: Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c).slice()),
+});
+function unpackBuffer(packed) {
+  const b = new AudioBuffer({ length: packed.channels[0].length, numberOfChannels: packed.channels.length, sampleRate: packed.sampleRate });
+  packed.channels.forEach((ch, c) => b.copyToChannel(ch, c));
+  return b;
+}
+async function restoreSavedSamples() {
+  for (const [key, v] of await idbEntries()) {
+    if (!v?.channels?.length) continue;
+    try {
+      if (key === "chop" && !chopKit) {
+        const buffer = unpackBuffer(v);
+        const mode = v.mode === "grid" ? "grid" : "auto";
+        chopKit = { buffer, slices: sliceChops(buffer, mode), name: v.name || "sample", mode };
+      } else if (key.startsWith("drum:")) {
+        const voice = key.slice(5);
+        if (!userSamples[voice]) userSamples[voice] = { buffer: new Tone.ToneAudioBuffer(unpackBuffer(v)), name: v.name || "saved" };
+      }
+    } catch {
+      // one bad row never blocks the rest
+    }
+  }
+}
 
 // --- The chop deck (DECISIONS D6, shape per P4): one sample, sliced onto
 // the melody rows. Session-scoped like the user drum one-shots — the same
@@ -371,6 +443,7 @@ async function decodeChop(arrayBuffer, name, mode) {
     for (let i = 0; i < src.length; i++) dst[i] = src[i] * gain;
   }
   chopKit = { buffer, slices: sliceChops(buffer, mode), name, mode };
+  idbPut("chop", { name, mode, ...packBuffer(buffer) });
   return { name, count: chopKit.slices.length };
 }
 
@@ -1505,6 +1578,7 @@ export function createAudio(song) {
   setMetersActive(false); // boot state: the mixer sheet is closed
 
   loadSamples();
+  restoreSavedSamples(); // device memory: saved one-shots + chop kit (D14)
   const patches = Object.fromEntries(TRACK_KEYS.map((t) => [t, defaultPatch(t)]));
   for (const t of TRACK_KEYS) applyPatchTo(live, t, patches[t]);
   // The master bus's own patch. Defaults equal the compiled chain, so a graph
@@ -2168,11 +2242,13 @@ export function createAudio(song) {
       if (!chopKit) return;
       chopKit.mode = mode === "grid" ? "grid" : "auto";
       chopKit.slices = sliceChops(chopKit.buffer, chopKit.mode);
+      idbPut("chop", { name: chopKit.name, mode: chopKit.mode, ...packBuffer(chopKit.buffer) });
     },
     userSampleName: (voice) => userSamples[voice]?.name || null,
     async loadUserSample(voice, arrayBuffer, name) {
       const audioBuf = await Tone.getContext().rawContext.decodeAudioData(arrayBuffer);
       userSamples[voice] = { buffer: new Tone.ToneAudioBuffer(conditionOneShot(voice, audioBuf)), name };
+      idbPut("drum:" + voice, { name, ...packBuffer(userSamples[voice].buffer.get()) });
       return name;
     },
     // Beatbox capture: record the mic straight into a voice slot. Raw-ish
@@ -2194,6 +2270,7 @@ export function createAudio(song) {
             const audioBuf = await Tone.getContext().rawContext.decodeAudioData(raw);
             const name = `mic ${voice}`;
             userSamples[voice] = { buffer: new Tone.ToneAudioBuffer(conditionOneShot(voice, audioBuf)), name };
+            idbPut("drum:" + voice, { name, ...packBuffer(userSamples[voice].buffer.get()) });
             resolve(name);
           } catch (err) {
             reject(err);

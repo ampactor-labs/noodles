@@ -127,6 +127,26 @@ export function spelledDegree(d) {
 }
 export const scaleDegreeOfPc = (pc) => SPELLED.findIndex((s) => s.pc === (((pc % 12) + 12) % 12));
 
+// A single pitch spelled for a staff: in-scale notes wear their degree
+// letter, visitors the signature side's. `step` is the diatonic staff index
+// (letter plus its octave run), the unit the staves draw in — E♯4 shares
+// E4's step because the letter owns the line.
+export function spellPitch(midi) {
+  const p = ((midi % 12) + 12) % 12;
+  const deg = SPELLED.find((s) => s.pc === p);
+  let letter;
+  let acc;
+  if (deg) {
+    letter = deg.letter;
+    acc = deg.acc;
+  } else {
+    const name = keySignature(curKey, curScale) < 0 ? FLAT_PC[p] : SHARP_PC[p];
+    letter = LETTERS.indexOf(name[0]);
+    acc = name.length > 1 ? (name[1] === "♯" ? 1 : -1) : 0;
+  }
+  return { letter, acc, step: Math.floor((midi - acc) / 12) * 7 + letter };
+}
+
 // A triad's tones spelled for engraving: thirds stack in letters, so the
 // third is two letters up from the root and the fifth four, with whatever
 // accidental closes each gap. The root's letter comes from harmonyChord's

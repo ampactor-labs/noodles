@@ -149,6 +149,26 @@ gesture. Old projects load untouched (numbers normalize as before; unknown
 shapes coerce to I). Receipts: the D13 block in .tmp/dbg-circle-theory.mjs
 and the borrowed-punch assertion in npm run smoke.
 
+### D14 — The phone remembers its own sounds: IndexedDB, not project embedding
+
+User one-shots (loaded WAVs, mouth-drums) and the chop kit were session-scoped
+because JSON project files can't reasonably carry minutes of Float32 audio.
+The fork is settled toward IndexedDB: raw channels stored per voice plus one
+chop entry (name + slice mode; slices re-derive deterministically on restore),
+written on every load/record and restored at boot. Project files stay small,
+portable JSON — a project you send someone still references sounds by name,
+which is honest: the dare you hand a friend describes the game, not your
+kitchen. Every IDB path is try/caught; private browsing degrades to exactly
+yesterday's session-scoped behavior. Revertable by deleting the restore call.
+
+The dare itself shipped alongside (the vision's partner channel, v1): a line
+of text on the song, written in the File sheet, saved into the project, shown
+once as a dismissible banner on load. Never parsed, never enforced — the
+constraint is social, the app just remembers the words. And the melody/bass
+rolls gained their staffs: per-track clef (treble for melody, a drawn F clef
+for bass) IS the grand-staff decision, since the tracks are separate editors
+(DESIGN-STAFF.md carries the reasoning).
+
 ## Provisional (my recommendation, argue against it)
 
 ### P4 — The chop deck lives on the melody track, as a source toggle

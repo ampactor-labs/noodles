@@ -40,13 +40,18 @@ synthesized drums.
 
 ## Scope and the bank
 
-v1 is read-only engraving in the chord editor. Deliberately not built:
-note entry on the staff (the roll and picker are the editors; the staff is
-a mirror), rhythm values (whole-note chords match the one-chord-per-bar
-model), and the melody/bass staff — the piano roll's opacity-dial slide
-toward notation — which is the natural next reveal and needs the same
-voicing-free treatment (notes are already absolute) plus a grand-staff
-decision for bass. Banked with it: key-signature courtesy accidentals
-across bar lines if harmony ever gets sub-bar chords, and printing/export
-of the engraving (round-trip principle says a sketch should leave the app;
-a rendered staff PNG in the export sheet would honor it).
+v1 was read-only engraving in the chord editor; the roll staffs landed the
+same week. Each piano roll now draws its lane as noteheads on the step grid
+— x aligned to the cells below, zoom window included, redrawn with every
+edit — with the grand-staff question answered by the editors' own shape:
+melody gets the treble clef, bass gets a drawn F clef, and no grand staff
+is needed because the tracks are separate surfaces. Accidentals print
+per note where they break the signature (a bar-long lane makes that noisy
+in principle and fine in practice at sixteen steps). Chops mode hides the
+staff: slices aren't pitches.
+
+Still deliberately not built: note entry on the staff (the roll and picker
+are the editors; the staff is a mirror), rhythm values (noteheads sit where
+the grid says; duration is the grid's job), courtesy accidentals, and
+printing/export of the engraving (round-trip principle says a sketch should
+leave the app; a rendered staff PNG in the export sheet would honor it).

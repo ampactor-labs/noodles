@@ -230,6 +230,11 @@ the chop deck (melody's second source: load any sample, sliced at hits or grid,
 piano-roll rows become slices, upper rows replay at double speed); stored chord
 extensions (arm ● and release the bloom on a pad — diatonic 7ths keep their function
 color, only visitors go violet); a HUMAN slider (per-hit timing drift, live = export);
+roll staffs over the note editors (treble for melody, drawn F clef for bass,
+noteheads on the step grid, rows spelled per key and tinted by degree hue); the
+motion-lane picker on every velocity lane (draw captured rides per step, bar chips,
+✕ clears); dares (a text line riding project files, banner on load — D14 note);
+device memory for user one-shots and the chop kit (IndexedDB, restored at boot);
 global Key + Scale via the playable circle of fifths (the whole app transposes and
 re-snaps in key; keys and every note name wear their honest per-key spelling — E♭,
 not D♯, and F♯ major's E♯; borrowed chords store as violet `{pcs}` entries and the

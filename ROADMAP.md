@@ -10,15 +10,22 @@ headless gates (`npm run smoke`, `npm run calibrate`).
 
 ## Agreed next (in order)
 
-1. **Motion lane editing** — the velocity-lane surface gains a param picker so recorded
-   rides (DECISIONS D5) can be drawn and tweaked per step, plus send automation once
-   the base-restore story against mixer state is decided.
-2. **The melody staff** — the piano roll's slide toward notation; needs the
-   grand-staff call for bass (DESIGN-STAFF.md).
-3. **Partner dares** — constraint clips a teacher hands you; needs the sharing-model
-   design before any build (DESIGN-CIRCLE.md bank).
-4. **User-sample persistence** — one story covering drum one-shots AND the chop
-   buffer (IndexedDB vs project-file embedding, the open fork from the sample loader).
+1. **Send automation** — the one remaining gated fork: motion lanes for verb/echo
+   sends need the base-restore story against mixer state decided first (D5's
+   deliberate deferral; everything else from that list has shipped).
+2. **Staff export** — a rendered engraving PNG in the export sheet (round-trip
+   principle; DESIGN-STAFF.md names it).
+3. **Extension storage in the picker** — the editor wheel already writes 7ths;
+   showing/editing them on the slot faces is the remaining surface.
+
+Shipped 2026-07-28 late: motion-lane EDITING (the lane picker — vel plus any
+captured ride, drawn per step, bar chips for long lanes, ✕ clears; both piano
+editors and the drum rack); the roll staffs (per-track clef — treble/melody,
+drawn F clef/bass — noteheads on the step grid, signature-honest, rows spelled
+per key and tinted by degree function); dares v1 (a line of text riding the
+project file, dismissible banner on load, never enforced); and D14 sample
+persistence (user one-shots + chop kit in IndexedDB, restored at boot,
+private-mode-safe).
 
 The wheel unified the harmony surfaces 2026-07-28 evening: the chord editor's
 seven-block picker is replaced by the circle itself (same component, small
