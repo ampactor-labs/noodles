@@ -244,13 +244,23 @@ try {
     return { left: r.left, top: r.top, a: C.point("outer", H), b: C.point("outer", (H + 1) % 12), rim: C.rimPoint(H), rim2: C.rimPoint((H + 1) % 12) };
   });
   const cPoint = (p) => [circleGeom.left + p.x, circleGeom.top + p.y];
-  const harmonyBefore = await page.evaluate(() => JSON.stringify(window.__noodles.song.scenes[0].harmony));
+  const readHarmony = () => page.evaluate(() => JSON.stringify(window.__noodles.song.scenes[0].harmony));
+  const harmonyBefore = await readHarmony();
   await clickAction(page, "circle-arm");
+  // Two taps on different degrees always net a change — unless the slot's
+  // original chord equals the second degree, in which case the pair writes
+  // and then bounces back to the starting value. A third tap on the first
+  // degree breaks the tie (its degree now differs from the slot for sure).
   await page.touchscreen.tap(...cPoint(circleGeom.a));
   await wait(150);
   await page.touchscreen.tap(...cPoint(circleGeom.b));
   await wait(250);
-  const harmonyAfter = await page.evaluate(() => JSON.stringify(window.__noodles.song.scenes[0].harmony));
+  let harmonyAfter = await readHarmony();
+  if (harmonyAfter === harmonyBefore) {
+    await page.touchscreen.tap(...cPoint(circleGeom.a));
+    await wait(250);
+    harmonyAfter = await readHarmony();
+  }
   assertState(harmonyAfter !== harmonyBefore, "armed circle tap did not land in the playing clip");
   await clickAction(page, "circle-arm"); // disarm before traveling
   const keyBeforeTravel = await page.evaluate(() => window.__noodles.song.key);
@@ -267,9 +277,9 @@ try {
   assertState(trailLen >= 1, "circle trail stayed empty during playback");
   await page.screenshot({ path: circleShotPath });
   await closeSheet(page);
-  // Undo the excursion: travel plus up to two punched chords.
+  // Undo the excursion: travel plus up to three punched chords.
   let harmonyRestored = false;
-  for (let i = 0; i < 3 && !harmonyRestored; i++) {
+  for (let i = 0; i < 5 && !harmonyRestored; i++) {
     await tap(page, ".tbtn.undo");
     await wait(120);
     harmonyRestored = (await page.evaluate(() => JSON.stringify(window.__noodles.song.scenes[0].harmony))) === harmonyBefore;
