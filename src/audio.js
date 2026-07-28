@@ -1533,6 +1533,26 @@ export function createAudio(song) {
     eachActiveLayer(live, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(voiced.map((m) => midiToFreq(m + shift)), "2n", at));
     live.sub.triggerAttackRelease(midiToFreq(48 + CHORDS[ci].pcs[0]), "2n", at);
   }
+  // The circle's audition path: any pitch classes, not just the seven diatonic
+  // degrees — a borrowed chord is a place you can visit even when the clip
+  // can't store it. The first three pcs are the triad and go through voiceLead;
+  // a fourth (an extension) rides above the voicing, color on top of
+  // continuity. Unlike preview this DOES advance the voice-leading memory:
+  // the circle is an instrument, and consecutive taps — and the loop's next
+  // bar — should each move by the smallest step from wherever you just were.
+  function previewPcs(pcs, oct = 0) {
+    if (!pcs?.length) return;
+    wakeTrack("harmony");
+    const voiced = voiceLead(pcs.slice(0, 3), liveVoice.prev);
+    liveVoice.prev = voiced;
+    const notes = voiced.slice();
+    const top = Math.max(...voiced);
+    for (const pc of pcs.slice(3)) notes.push(pc + 12 * Math.ceil((top + 1 - pc) / 12));
+    const shift = 12 * oct;
+    const at = tapTime();
+    eachActiveLayer(live, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(notes.map((m) => midiToFreq(m + shift)), "2n", at));
+    live.sub.triggerAttackRelease(midiToFreq(48 + ((pcs[0] % 12) + 12) % 12), "2n", at);
+  }
 
   // Transport.
   let mode = "scene";
@@ -1903,6 +1923,10 @@ export function createAudio(song) {
     preview(ci, oct = 0) {
       wakeContext();
       preview(ci, oct);
+    },
+    previewPcs(pcs, oct = 0) {
+      wakeContext();
+      previewPcs(pcs, oct);
     },
     previewHit(v) {
       wakeContext();
