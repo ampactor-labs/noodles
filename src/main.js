@@ -29,6 +29,8 @@ import {
   spellScalePc,
   harmonyChord,
   harmonyEntryEquals,
+  voiceLead,
+  scaleDegreeOfPc,
 } from "./model.js";
 import { createAudio, KIT_NAMES, SAMPLE_KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, colorNamesFor, DRUM_BANKS, drumCornerNames, MASTER_DEFAULTS } from "./audio.js";
 import { createCircleView } from "./circle.js";
@@ -218,11 +220,35 @@ function circleCapture(chord) {
   refreshClip(si, "harmony");
   return true;
 }
+// The front door moves, the house stays: a mode change within the sector
+// keeps every sounding pitch. Stored degrees re-index around the new tonic
+// (the chord that was degree d is the same chord at a new number) and
+// borrowed pcs already sit still — no transposition, so playback before and
+// after is bit-identical. Only the names re-light.
+function circleDoorMode(tonicPc, scaleName) {
+  if (tonicPc === song.key && scaleName === song.scale) return;
+  const shift = scaleDegreeOfPc(tonicPc); // the new tonic's degree in the OLD scale
+  if (shift < 0) return;
+  pushUndo();
+  for (const sc of song.scenes) {
+    sc.harmony = sc.harmony.map((e) => (typeof e === "number" ? (e - shift + 7) % 7 : e));
+  }
+  song.key = ((tonicPc % 12) + 12) % 12;
+  song.scale = scaleName;
+  setScaleContext(song.key, song.scale);
+  renderTransport();
+  renderSession();
+  if (view === "arrangement") renderArrangement();
+  updateUndoButtons();
+  circleView.refreshStatic();
+  updateCircleChrome();
+}
 const circleView = createCircleView({
   song,
   audio,
   ensureStarted,
   commitKeyScale: circleKeyScale,
+  commitMode: circleDoorMode,
   captureChord: circleCapture,
   getHarmonyOct: () => (playingTracks.harmony >= 0 ? song.scenes[playingTracks.harmony]?.harmonyOct || 0 : 0),
   buzz,
@@ -2783,6 +2809,65 @@ function buildHarmonyEditor(sceneIndex, scene) {
   slots.forEach((s) => row.appendChild(s));
   scrollContainer.appendChild(row);
 
+  // Voice leading, visible: the three voices threading chord to chord, the
+  // handoff's own "common tones light up" promise. Held tones run level and
+  // gold; moving voices slope, dim, as far as they moved. The chain is the
+  // exact voiceLead playback walks, wrap segment included, so what you see
+  // between the slots is what the pad will do at the bar lines.
+  const threads = el("canvas", { class: "vthreads" });
+  scrollContainer.appendChild(threads);
+  function drawThreads() {
+    const w = threads.clientWidth;
+    if (!w || scene.harmony.length < 1) return;
+    const h = 56;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    threads.width = Math.round(w * dpr);
+    threads.height = Math.round(h * dpr);
+    const c = threads.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, w, h);
+    const cRect = threads.getBoundingClientRect();
+    const xs = slots.map((s) => {
+      const r = s.getBoundingClientRect();
+      return r.left - cRect.left + r.width / 2;
+    });
+    let prev = null;
+    const chain = scene.harmony.map((e) => (prev = voiceLead(harmonyChord(e).pcs, prev)));
+    const wrap = chain.length > 1 ? voiceLead(harmonyChord(scene.harmony[0]).pcs, prev) : null;
+    const all = chain.flat().concat(wrap || []);
+    const lo = Math.min(...all) - 1;
+    const hi = Math.max(...all) + 1;
+    const y = (m) => h - ((m - lo) / Math.max(1, hi - lo)) * (h - 10) - 5;
+    const seg = (xa, va, xb, vb, fade) => {
+      for (let v = 0; v < 3; v++) {
+        const held = va[v] === vb[v];
+        c.strokeStyle = held ? `rgba(232,184,75,${0.9 * fade})` : `rgba(255,255,255,${0.34 * fade})`;
+        c.lineWidth = held ? 2.5 : 1.4;
+        c.beginPath();
+        c.moveTo(xa, y(va[v]));
+        c.lineTo(xb, y(vb[v]));
+        c.stroke();
+      }
+    };
+    for (let i = 1; i < chain.length; i++) seg(xs[i - 1], chain[i - 1], xs[i], chain[i], 1);
+    if (wrap) {
+      // The loop's own seam: the last chord resolving into the next cycle's
+      // first, fading off the right edge and onto the left.
+      const step = xs.length > 1 ? xs[1] - xs[0] : 60;
+      seg(xs[xs.length - 1], chain[chain.length - 1], Math.min(w - 2, xs[xs.length - 1] + step * 0.55), wrap, 0.45);
+      seg(Math.max(2, xs[0] - step * 0.55), chain[chain.length - 1], xs[0], wrap, 0.45);
+    }
+    for (let i = 0; i < chain.length; i++) {
+      for (let v = 0; v < 3; v++) {
+        c.beginPath();
+        c.arc(xs[i], y(chain[i][v]), 2.4, 0, Math.PI * 2);
+        c.fillStyle = "#e8e8ec";
+        c.fill();
+      }
+    }
+  }
+  requestAnimationFrame(drawThreads);
+
   const picker = el("div", { class: "picker" });
   CHORDS.forEach((ch, ci) => {
     picker.appendChild(
@@ -2797,6 +2882,7 @@ function buildHarmonyEditor(sceneIndex, scene) {
           slots[selected].innerHTML = chordMarkup(ci, { notes: true });
           audio.preview(ci);
           refreshClip(sceneIndex, "harmony");
+          drawThreads();
         },
       })
     );

@@ -69,7 +69,7 @@ function quality(pcs) {
   return t === 3 && f === 6 ? "dim" : t === 3 ? "min" : "maj";
 }
 
-export function createCircleView({ song, audio, ensureStarted, commitKeyScale, captureChord, getHarmonyOct, buzz }) {
+export function createCircleView({ song, audio, ensureStarted, commitKeyScale, commitMode, captureChord, getHarmonyOct, buzz }) {
   const wrap = document.createElement("div");
   wrap.className = "circle-wrap";
   const canvas = document.createElement("canvas");
@@ -166,7 +166,21 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
   let flash = null; // { ring, station, t } — a captured write's white blink
   const gestures = new Map(); // pointerId -> gesture
   let rimDrag = null; // { startAngle, delta, cand } — one at a time
+  let doorDrag = null; // { id, cand: {ring, station} } — dragging the front door
   const nowS = () => performance.now() / 1000;
+
+  // The six in-sector wedges ARE the six shipped modes: same pitch content,
+  // six front doors (the seam would be locrian, which the app doesn't ship —
+  // the door that isn't there). Keyed by station relative to H.
+  const MODE_OF_WEDGE = {
+    outer: { 11: "lydian", 0: "major", 1: "mixolydian" },
+    inner: { 11: "dorian", 0: "minor", 1: "phrygian" },
+  };
+  function doorPoint() {
+    const home = homeWedge();
+    if (home.station < 0) return polar(seamAngle(), R_OUT - 0.05);
+    return polar(angleOf(home.station), (home.ring === "outer" ? R_OUT : R_MID) - 0.055);
+  }
 
   function pushTrail(w) {
     const t = nowS();
@@ -290,6 +304,16 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
       drawWedgePath(sctx, home.station, home.ring === "outer" ? R_MID : R_HOLE, home.ring === "outer" ? R_OUT : R_MID, 0.02);
       sctx.strokeStyle = "rgba(255,255,255,0.85)";
       sctx.lineWidth = 2;
+      sctx.stroke();
+      // The door knob: grab it and carry the front door to another wedge in
+      // the sector — same house, different mode, nothing about the sound moves.
+      const dp = doorPoint();
+      sctx.beginPath();
+      sctx.arc(dp.x, dp.y, Math.max(4, size * 0.012), 0, TAU);
+      sctx.fillStyle = "#fff";
+      sctx.fill();
+      sctx.strokeStyle = "rgba(0,0,0,0.55)";
+      sctx.lineWidth = 1;
       sctx.stroke();
     }
     // Labels. Case is quality; the sector's wedges add their roman numeral —
@@ -470,11 +494,29 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
       }
     }
 
-    // The hole is the one name surface, three moments: traveling shows where
-    // you'd land, holding names what you're touching, idle says you are here.
+    // Carrying the front door: dash the candidate wedge and let the hole read
+    // out the mode you'd land in — same signature, spelled out as such.
+    if (doorDrag?.cand) {
+      const cw = doorDrag.cand;
+      drawWedgePath(ctx, cw.station, cw.ring === "outer" ? R_MID : R_HOLE, cw.ring === "outer" ? R_OUT : R_MID, 0.02);
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.setLineDash([5, 4]);
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // The hole is the one name surface: traveling shows where you'd land,
+    // door-dragging the mode you'd rename into, holding names what you're
+    // touching, idle says you are here.
     if (rimDrag) {
       const candTonic = norm12(pcOfStation(rimDrag.cand) - relMajorOffset(song.scale));
       drawHole(ctx, keyDisplayName(candTonic, song.scale), song.scale, sigLabel(rimDrag.cand));
+    } else if (doorDrag?.cand) {
+      const cw = doorDrag.cand;
+      const mode = MODE_OF_WEDGE[cw.ring]?.[norm12(cw.station - H)] || song.scale;
+      const tonic = cw.ring === "outer" ? pcOfStation(cw.station) : norm12(pcOfStation(cw.station) + 9);
+      drawHole(ctx, keyDisplayName(tonic, mode), mode, "same " + (sigLabel(H) || "♮"));
     } else if (held) {
       const w = held.curWedge;
       const name = held.bloom && held.bloomSel != null ? extLabel(w, EXT_PADS[held.bloomSel]) : rootName(w);
@@ -489,7 +531,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
   }
 
   function needsAnim(t = nowS()) {
-    if (gestures.size || rimDrag || flash) return true;
+    if (gestures.size || rimDrag || doorDrag || flash) return true;
     return trail.some((e) => t - e.t < TRAIL_FADE);
   }
   function wake() {
@@ -517,6 +559,22 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+    // The door knob outranks the wedge under it — but only just: its zone is
+    // kept tight, and a stationary grab falls through to full tap semantics,
+    // so the home wedge has no dead spots and no capture holes.
+    const dp = doorPoint();
+    if (!doorDrag && Math.hypot(x - dp.x, y - dp.y) < Math.max(15, size * 0.042)) {
+      e.preventDefault();
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        // synthetic streams can end before capture resolves
+      }
+      doorDrag = { id: e.pointerId, cand: null };
+      buzz(6);
+      wake();
+      return;
+    }
     const hit = hitTest(x, y);
     if (!hit) return;
     e.preventDefault();
@@ -561,6 +619,18 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+    if (doorDrag && doorDrag.id === e.pointerId) {
+      const hit = hitTest(x, y);
+      if (hit?.kind === "wedge" && hit.wedge.station >= 0 && inSector(hit.wedge.station)) {
+        const cand = { ring: hit.wedge.ring, station: hit.wedge.station };
+        if (cand.ring !== doorDrag.cand?.ring || cand.station !== doorDrag.cand?.station) {
+          doorDrag.cand = cand;
+          buzz(4);
+        }
+      }
+      wake();
+      return;
+    }
     if (rimDrag && rimDrag.id === e.pointerId) {
       const angle = Math.atan2(y - center(), x - center());
       let d = angle - rimDrag.startAngle;
@@ -616,6 +686,26 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
   });
 
   function endPointer(e) {
+    if (doorDrag && doorDrag.id === e.pointerId) {
+      const cand = doorDrag.cand;
+      const wasCancel = e.type === "pointercancel";
+      doorDrag = null;
+      const home = homeWedge();
+      if (!wasCancel && cand && !(cand.ring === home.ring && cand.station === home.station)) {
+        const mode = MODE_OF_WEDGE[cand.ring]?.[norm12(cand.station - H)];
+        if (mode) {
+          const tonic = cand.ring === "outer" ? pcOfStation(cand.station) : norm12(pcOfStation(cand.station) + 9);
+          buzz(12);
+          commitMode(tonic, mode);
+        }
+      } else if (!wasCancel && !cand) {
+        // A grab that never left is a clean tap on home: sound AND capture.
+        soundWedge(home);
+        tryCapture(home);
+      }
+      wake();
+      return;
+    }
     if (rimDrag && rimDrag.id === e.pointerId) {
       const cand = rimDrag.cand;
       const wasCancel = e.type === "pointercancel";
@@ -677,6 +767,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
       open = false;
       gestures.clear();
       rimDrag = null;
+      doorDrag = null;
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
     },
@@ -691,6 +782,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     window.__noodlesCircle = {
       point: (ring, station) => wedgePoint(ring, station),
       rimPoint: (station) => polar(angleOf(station), (R_OUT + R_RIM) / 2),
+      doorPoint: () => doorPoint(),
       home: () => H,
       size: () => size,
       trailLength: () => trail.length,

@@ -217,6 +217,16 @@ try {
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
 
+  // The chord editor's voice-leading threads: the strip exists and painted.
+  await tap(page, '.clip.filled[data-track="harmony"]');
+  await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Chords");
+  await page.waitForFunction(() => {
+    const t = document.querySelector(".vthreads");
+    return t && t.width > 0;
+  });
+  await closeSheet(page);
+  await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
+
   await tap(page, ".tbtn.play");
   await page.waitForFunction(() => document.querySelectorAll(".clip.playing").length >= 4);
   const playOn = await page.$eval(".tbtn.play", (el) => el.classList.contains("on"));
@@ -281,11 +291,33 @@ try {
   await page.waitForFunction((want) => window.__noodles.song.key === want, {}, (keyBeforeTravel + 7) % 12);
   const trailLen = await page.evaluate(() => window.__noodlesCircle.trailLength());
   assertState(trailLen >= 1, "circle trail stayed empty during playback");
+  // The front door: drag the knob to another in-sector wedge. The mode
+  // renames; the stored notes hold still — that stillness IS the assertion.
+  const doorFrom = await page.evaluate(() => ({
+    scale: window.__noodles.song.scale,
+    bass: JSON.stringify(window.__noodles.song.scenes[0].bass),
+  }));
+  const doorTargetScale = doorFrom.scale === "minor" ? "major" : "minor";
+  const doorGeom = await page.evaluate((ring) => {
+    const C = window.__noodlesCircle;
+    return { d: C.doorPoint(), t: C.point(ring, C.home()) };
+  }, doorTargetScale === "major" ? "outer" : "inner");
+  const [ddx, ddy] = cPoint(doorGeom.d);
+  const [dtx, dty] = cPoint(doorGeom.t);
+  await page.touchscreen.touchStart(ddx, ddy);
+  for (let i = 1; i <= 3; i++) {
+    await page.touchscreen.touchMove(ddx + ((dtx - ddx) * i) / 3, ddy + ((dty - ddy) * i) / 3);
+    await wait(50);
+  }
+  await page.touchscreen.touchEnd();
+  await page.waitForFunction((want) => window.__noodles.song.scale === want, {}, doorTargetScale);
+  const doorAfterBass = await page.evaluate(() => JSON.stringify(window.__noodles.song.scenes[0].bass));
+  assertState(doorAfterBass === doorFrom.bass, "the door drag moved notes — re-mode must be a pure renaming");
   await page.screenshot({ path: circleShotPath });
   await closeSheet(page);
-  // Undo the excursion: travel plus up to three punched chords.
+  // Undo the excursion: door, travel, and up to four punched chords.
   let harmonyRestored = false;
-  for (let i = 0; i < 5 && !harmonyRestored; i++) {
+  for (let i = 0; i < 7 && !harmonyRestored; i++) {
     await tap(page, ".tbtn.undo");
     await wait(120);
     harmonyRestored = (await page.evaluate(() => JSON.stringify(window.__noodles.song.scenes[0].harmony))) === harmonyBefore;
@@ -563,16 +595,24 @@ try {
   // section, and the sheet hints that it scrolls.
   await tap(page, "#about-btn");
   await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "noodles");
-  const about = await page.evaluate(() => ({
-    text: document.querySelector("#sheet").textContent,
-    sections: [...document.querySelectorAll("#sheet .about-label")].map((el) => el.textContent),
-    hint: !!document.querySelector("#sheet .scroll-hint"),
-  }));
+  await wait(200); // the hint lands one rAF after open; measure after it
+  const about = await page.evaluate(() => {
+    const body = document.querySelector("#sheet .editor-scroll");
+    return {
+      text: document.querySelector("#sheet").textContent,
+      sections: [...document.querySelectorAll("#sheet .about-label")].map((el) => el.textContent),
+      hint: !!document.querySelector("#sheet .scroll-hint"),
+      overflows: !!body && body.scrollHeight > body.clientHeight + 8,
+    };
+  });
   assertState(about.text.includes("instrument"), "about sheet missing its one job");
   for (const section of ["start here", "the grid", "sound", "mix", "arrange", "keep it"]) {
     assertState(about.sections.includes(section), `about guide missing the "${section}" section`);
   }
-  assertState(about.hint, "about guide scroll hint missing (or the guide stopped overflowing)");
+  // Hint iff overflow: the guide's height legitimately varies with the
+  // conditional rows (install prompt, waiting update), so asserting overflow
+  // itself was a coin flip — the invariant is the hint matching it.
+  assertState(about.hint === about.overflows, `scroll hint (${about.hint}) disagrees with overflow (${about.overflows})`);
   // The buried perf overlay: toggling it in the guide shows and hides the HUD.
   await clickAction(page, "perf-toggle");
   await page.waitForSelector("#perf-hud");
