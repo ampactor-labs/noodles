@@ -2003,6 +2003,12 @@ export function createAudio(song) {
       if (!playing && raw.state === "running") raw.suspend();
     }, IDLE_PARK_MS);
   }
+  // Arm the park at boot, not just after gestures. The wake/stop paths assume
+  // a fresh context sits suspended until the first tap — but on an installed
+  // PWA with high media engagement Chrome auto-starts it at page load, and an
+  // unarmed park left the whole graph burning audio CPU while the app just
+  // sat there (caught by the builder reading aud× ~1.0x, idle after boot).
+  parkContextSoon();
 
   return {
     async init() {
