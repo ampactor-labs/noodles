@@ -327,21 +327,43 @@ function roman0(pcs, minor, dim) {
 const PERMS = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
 const nearestOctave = (pc, ref) => pc + 12 * Math.round((ref - pc) / 12);
 
+// Minimal motion INSIDE a tessitura. Pure nearest-octave minimal motion has
+// no register anchor: a looping progression with any net drift per cycle
+// walks the voicing up or down the octaves forever (heard, reported, real —
+// and a penalty can't fix it, because every nearest-octave candidate drifts
+// along with the voicing it follows). So the candidates themselves are
+// pinned: each tone may sit only at octave placements within ±9 semitones
+// of the chord's home center, and the smoothest assignment from the
+// previous voicing is chosen among those. Common tones still hold, steps
+// still step, and the register cannot leave home by construction.
+const VOICE_WINDOW = 9;
 export function voiceLead(pcs, prev) {
   if (!prev) return pcs.map((pc) => 60 + pc);
+  const center = pcs.reduce((a, pc) => a + 60 + pc, 0) / pcs.length;
+  const options = pcs.map((pc) => {
+    const opts = [];
+    for (let m = pc + 48; m <= pc + 84; m += 12) {
+      if (Math.abs(m - center) <= VOICE_WINDOW) opts.push(m);
+    }
+    return opts.length ? opts : [pc + 60];
+  });
   let best = null;
   let bestCost = Infinity;
   for (const perm of PERMS) {
-    let cost = 0;
-    const cand = [0, 0, 0];
-    for (let v = 0; v < 3; v++) {
-      const m = nearestOctave(pcs[perm[v]], prev[v]);
-      cost += Math.abs(m - prev[v]);
-      cand[v] = m;
-    }
-    if (cost < bestCost) {
-      bestCost = cost;
-      best = cand;
+    // Try every in-window octave placement for this voice order.
+    const o0 = options[perm[0]];
+    const o1 = options[perm[1]];
+    const o2 = options[perm[2]];
+    for (const a of o0) {
+      for (const b of o1) {
+        for (const c of o2) {
+          const cost = Math.abs(a - prev[0]) + Math.abs(b - prev[1]) + Math.abs(c - prev[2]);
+          if (cost < bestCost) {
+            bestCost = cost;
+            best = [a, b, c];
+          }
+        }
+      }
     }
   }
   return best;
