@@ -297,7 +297,7 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
   }
 
   // --- Static layer ---
-  function drawWedgePath(c, station, r0, r1, gap = 0.012) {
+  function drawWedgePath(c, station, r0, r1, gap = 0.005) {
     const a0 = angleOf(station) - STEP / 2 + gap;
     const a1 = angleOf(station) + STEP / 2 - gap;
     c.beginPath();
@@ -358,8 +358,8 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     // fixed 2 px that reads chunky at phone density and small mounts.
     sctx.strokeStyle = "rgba(232,184,75,0.9)";
     sctx.lineWidth = Math.max(1, size * 0.0042);
-    const a0 = angleOf(H - 1.5) + 0.012;
-    const a1 = angleOf(H + 1.5) - 0.012;
+    const a0 = angleOf(H - 1.5) + 0.005;
+    const a1 = angleOf(H + 1.5) - 0.005;
     sctx.beginPath();
     sctx.arc(center(), center(), R() * R_OUT, a0, a1);
     sctx.arc(center(), center(), R() * R_HOLE, a1, a0, true);
