@@ -523,7 +523,7 @@ function openAboutSheet() {
     p("View flips to the timeline. Drag clips around, pull a right edge to resize, sweep the strip under the bar numbers to set a loop — tap the loop to switch it on and off. Arm ● in the top bar while you jam: scene changes and your mute moves both write into the timeline, and the hatched bars play silent everywhere, exports included."),
 
     label("keep it"),
-    p("File saves the project to a file or keeps it on this device, and exports a WAV — master or four stems, named for your key — through the full studio chain (your phone plays a lightened live mix to stay smooth; exports always render everything). Loaded samples and mouth-drums now stay on this device between visits. And you can write a dare into File before saving: the words travel with the project and greet whoever loads it — nothing checks, nothing grades, the dare is between you two."),
+    p("File saves the project to a file or keeps it on this device, and exports a WAV — master or four stems, named for your key — through the full studio chain (your phone plays a lightened live mix to stay smooth; exports always render everything). Staff PNG engraves your chord line onto real staff paper — signature, accidentals, the exact voicing you hear — ready to send to whoever's teaching you. Loaded samples and mouth-drums now stay on this device between visits. And you can write a dare into File before saving: the words travel with the project and greet whoever loads it — nothing checks, nothing grades, the dare is between you two."),
     p("Install it and noodles leaves the browser behind: full screen, its own icon, and everything — sounds, samples, exports — works with no signal at all."),
 
     p("Made for couches and phone speakers. Tell your friends."),
@@ -689,6 +689,133 @@ function drawStaffLetters(c, yOf, baseStep, bass, S) {
   // Two staggered columns - lines left, spaces right - because at a
   // half-gap pitch one column buries itself.
   for (let u = 0; u <= 8; u++) c.fillText(letters[u], u % 2 ? 2.5 + S * 0.8 : 2.5, yOf(baseStep + u));
+}
+
+// Engrave a harmony line onto a 2d context: five lines, G clef, the key
+// signature, then one bar per chord voiced exactly as playback voices it
+// (led triad, stack climbing tone over tone, slash bass at its seat).
+// Shared by the harmony editor's live staff and the export sheet's PNG
+// engraver — one painter, so what you read is what either surface heard.
+function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyOct = 0, bg = null, title = "", bottom = null }) {
+  if (bg) {
+    c.fillStyle = bg;
+    c.fillRect(0, 0, w, h);
+  }
+  const E4 = 5 * 7 + 2; // diatonic step index of the bottom line
+  const bottomY = bottom ?? h - 34;
+  const yOf = (step) => bottomY - (step - E4) * (S / 2);
+  c.strokeStyle = "rgba(255,255,255,0.34)";
+  c.lineWidth = 1;
+  for (let l = 0; l < 5; l++) {
+    const y = bottomY - l * S;
+    c.beginPath();
+    c.moveTo(4, y);
+    c.lineTo(w - 4, y);
+    c.stroke();
+  }
+  c.fillStyle = "rgba(240,240,244,0.9)";
+  c.strokeStyle = "rgba(240,240,244,0.9)";
+  c.textBaseline = "middle";
+  drawStaffLetters(c, yOf, E4, false, S);
+  drawGClef(c, S * 2.3, yOf(E4 + 2), S);
+  const sig = keySignature(key, scale);
+  const SHARP_UNITS = [8, 5, 9, 6, 3, 7, 4];
+  const FLAT_UNITS = [4, 7, 3, 6, 2, 5, 1];
+  c.font = `600 ${Math.round(S * 2.2)}px system-ui, sans-serif`;
+  c.textAlign = "center";
+  let x = S * 6.0;
+  for (let i = 0; i < Math.abs(sig); i++) {
+    const u = (sig > 0 ? SHARP_UNITS : FLAT_UNITS)[i];
+    c.fillText(sig > 0 ? "♯" : "♭", x, yOf(E4 + u) - (sig > 0 ? 0 : S * 0.3));
+    x += S * 0.95;
+  }
+  const startX = x + S * 1.6;
+  const oct = 12 * harmonyOct;
+  let prev = null;
+  const span = Math.max(40, w - startX - 10);
+  harmony.forEach((entry, i) => {
+    const ch = harmonyChord(entry);
+    const voiced = (prev = voiceLead(ch.pcs.slice(0, 3), prev));
+    const tones = spellChordTones(entry);
+    const cx = startX + ((i + 0.5) * span) / harmony.length;
+    // The full tower: led triad, then the stack climbing tone over tone —
+    // the same shape playback voices — plus the slash bass at its low seat.
+    const midis = voiced.slice();
+    let topM = Math.max(...voiced);
+    for (const pc of ch.pcs.slice(3)) {
+      const m = pc + 12 * Math.ceil((topM + 1 - pc) / 12);
+      midis.push(m);
+      topM = m;
+    }
+    const inv = (typeof entry === "object" && entry.inv) || 0;
+    if (inv > 0) midis.push(36 + ch.bass);
+    let notes = midis
+      .map((m) => {
+        const midi = m + oct;
+        const pc = ((midi % 12) + 12) % 12;
+        const t = tones.find((tt) => tt.pc === pc) || tones[0];
+        return { step: Math.floor((midi - t.acc) / 12) * 7 + t.letter, acc: t.acc, letter: t.letter };
+      })
+      .sort((a, b) => a.step - b.step);
+    // 8va: if the tower would run off the canvas, write it an octave
+    // lower and say so - engraving's own convention, taught in passing.
+    let octDrop = 0;
+    while (notes.length && yOf(notes[notes.length - 1].step - octDrop * 7) < S * 1.4 && octDrop < 2) octDrop++;
+    if (octDrop) {
+      notes = notes.map((n) => ({ ...n, step: n.step - octDrop * 7 }));
+      c.fillStyle = "rgba(240,240,244,0.7)";
+      c.font = `italic 700 ${Math.round(S * 1.1)}px system-ui, sans-serif`;
+      c.textAlign = "center";
+      c.fillText(octDrop === 1 ? "8va" : "15ma", cx, Math.max(S * 0.8, yOf(notes[notes.length - 1].step) - S * 1.6));
+    }
+    // Clustered seconds sidestep right, the standard rule.
+    for (let k = 1; k < notes.length; k++) {
+      if (notes[k].step - notes[k - 1].step === 1 && !notes[k - 1].dx) notes[k].dx = S * 0.95;
+    }
+    let accCount = 0;
+    for (const n of notes) {
+      const rel = n.step - E4;
+      c.strokeStyle = "rgba(255,255,255,0.34)";
+      c.lineWidth = 1;
+      for (let u = -2; u >= rel; u -= 2) {
+        const y = yOf(E4 + u);
+        c.beginPath();
+        c.moveTo(cx - S, y);
+        c.lineTo(cx + S, y);
+        c.stroke();
+      }
+      for (let u = 10; u <= rel; u += 2) {
+        const y = yOf(E4 + u);
+        c.beginPath();
+        c.moveTo(cx - S, y);
+        c.lineTo(cx + S, y);
+        c.stroke();
+      }
+      if (n.acc !== signatureAccFor(n.letter, sig)) {
+        c.fillStyle = "rgba(240,240,244,0.95)";
+        c.font = `600 ${Math.round(S * 1.9)}px system-ui, sans-serif`;
+        c.textAlign = "right";
+        const glyph = n.acc > 0 ? "♯" : n.acc < 0 ? "♭" : "♮";
+        c.fillText(glyph, cx - S * 0.9 - accCount * S * 0.75, yOf(n.step) - (n.acc < 0 ? S * 0.3 : 0));
+        c.textAlign = "left";
+        accCount += 1;
+      }
+      c.strokeStyle = "#f0f0f4";
+      c.lineWidth = 1.8;
+      c.beginPath();
+      c.ellipse(cx + (n.dx || 0), yOf(n.step), S * 0.68, S * 0.5, -0.25, 0, Math.PI * 2);
+      c.stroke();
+    }
+  });
+  // The plate caption takes the top-left corner: towers clamp at S*1.4 via
+  // the 8va drop and never start left of the first bar, so nothing reaches
+  // this zone.
+  if (title) {
+    c.fillStyle = "rgba(240,240,244,0.65)";
+    c.font = `600 ${Math.round(S * 1.05)}px system-ui, sans-serif`;
+    c.textAlign = "left";
+    c.fillText(title, 10, S * 1.1);
+  }
 }
 
 // The compass: twelve station dots, the sector arc, and a bright dot on the
@@ -3347,112 +3474,14 @@ function buildHarmonyEditor(sceneIndex, scene) {
     const c = staffCanvas.getContext("2d");
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.clearRect(0, 0, w, h);
-    const S = 13; // line gap
-    const E4 = 5 * 7 + 2; // diatonic step index of the bottom line
-    const bottomY = h - 34;
-    const yOf = (step) => bottomY - (step - E4) * (S / 2);
-    c.strokeStyle = "rgba(255,255,255,0.34)";
-    c.lineWidth = 1;
-    for (let l = 0; l < 5; l++) {
-      const y = bottomY - l * S;
-      c.beginPath();
-      c.moveTo(4, y);
-      c.lineTo(w - 4, y);
-      c.stroke();
-    }
-    c.fillStyle = "rgba(240,240,244,0.9)";
-    c.strokeStyle = "rgba(240,240,244,0.9)";
-    c.textBaseline = "middle";
-    drawStaffLetters(c, yOf, E4, false, S);
-    drawGClef(c, S * 2.3, yOf(E4 + 2), S);
-    const sig = keySignature(song.key, song.scale);
-    const SHARP_UNITS = [8, 5, 9, 6, 3, 7, 4];
-    const FLAT_UNITS = [4, 7, 3, 6, 2, 5, 1];
-    c.font = `600 ${Math.round(S * 2.2)}px system-ui, sans-serif`;
-    c.textAlign = "center";
-    let x = S * 6.0;
-    for (let i = 0; i < Math.abs(sig); i++) {
-      const u = (sig > 0 ? SHARP_UNITS : FLAT_UNITS)[i];
-      c.fillText(sig > 0 ? "♯" : "♭", x, yOf(E4 + u) - (sig > 0 ? 0 : S * 0.3));
-      x += S * 0.95;
-    }
-    const startX = x + S * 1.6;
-    const oct = 12 * (scene.harmonyOct || 0);
-    let prev = null;
-    const span = Math.max(40, w - startX - 10);
-    scene.harmony.forEach((entry, i) => {
-      const ch = harmonyChord(entry);
-      const voiced = (prev = voiceLead(ch.pcs.slice(0, 3), prev));
-      const tones = spellChordTones(entry);
-      const cx = startX + ((i + 0.5) * span) / scene.harmony.length;
-      // The full tower: led triad, then the stack climbing tone over tone —
-      // the same shape playback voices — plus the slash bass at its low seat.
-      const midis = voiced.slice();
-      let topM = Math.max(...voiced);
-      for (const pc of ch.pcs.slice(3)) {
-        const m = pc + 12 * Math.ceil((topM + 1 - pc) / 12);
-        midis.push(m);
-        topM = m;
-      }
-      const inv = (typeof entry === "object" && entry.inv) || 0;
-      if (inv > 0) midis.push(36 + ch.bass);
-      let notes = midis
-        .map((m) => {
-          const midi = m + oct;
-          const pc = ((midi % 12) + 12) % 12;
-          const t = tones.find((tt) => tt.pc === pc) || tones[0];
-          return { step: Math.floor((midi - t.acc) / 12) * 7 + t.letter, acc: t.acc, letter: t.letter };
-        })
-        .sort((a, b) => a.step - b.step);
-      // 8va: if the tower would run off the canvas, write it an octave
-      // lower and say so - engraving's own convention, taught in passing.
-      let octDrop = 0;
-      while (notes.length && yOf(notes[notes.length - 1].step - octDrop * 7) < S * 1.4 && octDrop < 2) octDrop++;
-      if (octDrop) {
-        notes = notes.map((n) => ({ ...n, step: n.step - octDrop * 7 }));
-        c.fillStyle = "rgba(240,240,244,0.7)";
-        c.font = `italic 700 ${Math.round(S * 1.1)}px system-ui, sans-serif`;
-        c.textAlign = "center";
-        c.fillText(octDrop === 1 ? "8va" : "15ma", cx, Math.max(S * 0.8, yOf(notes[notes.length - 1].step) - S * 1.6));
-      }
-      // Clustered seconds sidestep right, the standard rule.
-      for (let k = 1; k < notes.length; k++) {
-        if (notes[k].step - notes[k - 1].step === 1 && !notes[k - 1].dx) notes[k].dx = S * 0.95;
-      }
-      let accCount = 0;
-      for (const n of notes) {
-        const rel = n.step - E4;
-        c.strokeStyle = "rgba(255,255,255,0.34)";
-        c.lineWidth = 1;
-        for (let u = -2; u >= rel; u -= 2) {
-          const y = yOf(E4 + u);
-          c.beginPath();
-          c.moveTo(cx - S, y);
-          c.lineTo(cx + S, y);
-          c.stroke();
-        }
-        for (let u = 10; u <= rel; u += 2) {
-          const y = yOf(E4 + u);
-          c.beginPath();
-          c.moveTo(cx - S, y);
-          c.lineTo(cx + S, y);
-          c.stroke();
-        }
-        if (n.acc !== signatureAccFor(n.letter, sig)) {
-          c.fillStyle = "rgba(240,240,244,0.95)";
-          c.font = `600 ${Math.round(S * 1.9)}px system-ui, sans-serif`;
-          c.textAlign = "right";
-          const glyph = n.acc > 0 ? "♯" : n.acc < 0 ? "♭" : "♮";
-          c.fillText(glyph, cx - S * 0.9 - accCount * S * 0.75, yOf(n.step) - (n.acc < 0 ? S * 0.3 : 0));
-          c.textAlign = "left";
-          accCount += 1;
-        }
-        c.strokeStyle = "#f0f0f4";
-        c.lineWidth = 1.8;
-        c.beginPath();
-        c.ellipse(cx + (n.dx || 0), yOf(n.step), S * 0.68, S * 0.5, -0.25, 0, Math.PI * 2);
-        c.stroke();
-      }
+    paintChordStaff(c, {
+      w,
+      h,
+      S: 13,
+      key: song.key,
+      scale: song.scale,
+      harmony: scene.harmony,
+      harmonyOct: scene.harmonyOct || 0,
     });
   }
   const row = el("div", { class: "chordrow" });
@@ -4407,7 +4436,7 @@ function renderExportOffers() {
     const a = el("a", { class: "exp-btn save", href: o.url, download: o.name, text: `\u2913  ${o.label}` });
     a.addEventListener("click", async (e) => {
       try {
-        const file = new File([o.blob], o.name, { type: "audio/wav" });
+        const file = new File([o.blob], o.name, { type: o.name.endsWith(".png") ? "image/png" : "audio/wav" });
         if (navigator.canShare?.({ files: [file] })) {
           e.preventDefault();
           await navigator.share({ files: [file], title: o.name });
@@ -4455,6 +4484,48 @@ async function doExport(mode) {
     setExportStatus("Export failed: " + e.message);
   }
   exporting = false;
+}
+
+// The round-trip principle, on paper: the same painter the harmony editor
+// reads from engraves the playing line into a PNG you can set on a music
+// stand — or send to the lady teaching you 9th chords. v1 is one scene's
+// harmony line: the first scene that has one.
+function exportStaffPng() {
+  const si = song.scenes.findIndex((sc) => sc.harmony?.length);
+  if (si < 0) {
+    setExportStatus("Nothing to engrave yet — write a chord line first.");
+    return;
+  }
+  const sc = song.scenes[si];
+  const keySlug = `${keyDisplayName(song.key, song.scale).replace("♯", "#").replace("♭", "b")}-${song.scale}`;
+  const w = 1400;
+  const h = 360;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const c = canvas.getContext("2d");
+  paintChordStaff(c, {
+    w,
+    h,
+    S: 16,
+    key: song.key,
+    scale: song.scale,
+    harmony: sc.harmony,
+    harmonyOct: sc.harmonyOct || 0,
+    bg: "#0e0e0f",
+    title: `${keyDisplayName(song.key, song.scale)} ${song.scale} · ${song.tempo} BPM · scene ${si + 1} · noodles`,
+    // Slash basses sit at midi 36..47 — up to 8 ledger steps under the staff.
+    // h-140 leaves that whole cellar on the plate instead of clipping it.
+    bottom: h - 140,
+  });
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      setExportStatus("Engraving failed.");
+      return;
+    }
+    offerSave(blob, `noodles-${keySlug}-staff.png`, "Save staff PNG");
+    setExportStatus("Engraving ready — tap to save:");
+  }, "image/png");
 }
 
 function openExport() {
@@ -4526,6 +4597,7 @@ function openExport() {
   audioSection.push(el("div", { class: "exp-grid" }, [
     el("div", { class: "exp-btn", text: "\uD83C\uDFB5  Master WAV", "data-action": "export-master-wav", onclick: () => doExport("master") }),
     el("div", { class: "exp-btn", text: "\uD83C\uDFDA  Stems (4\u00d7)", "data-action": "export-stems", onclick: () => doExport("stems") }),
+    el("div", { class: "exp-btn", text: "\uD83C\uDFBC  Staff PNG", "data-action": "export-staff", onclick: exportStaffPng }),
   ]));
   body.appendChild(el("div", { class: "propsection" }, audioSection));
   body.appendChild(status);

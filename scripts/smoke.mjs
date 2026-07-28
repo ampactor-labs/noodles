@@ -718,6 +718,20 @@ try {
     return { bytes: buf.byteLength, tag, peakDb: Math.round(20 * Math.log10(Math.max(peak, 1e-9)) * 10) / 10, nzPct: Math.round((nz / n) * 100) };
   });
   assertState(wav.tag === "RIFF" && wav.bytes > 100000 && wav.peakDb > -6 && wav.nzPct > 50, `exported WAV empty/silent: ${JSON.stringify(wav)}`);
+  // Staff PNG: the engraver runs the first harmony scene through the same
+  // painter the editor reads; the offer must be a real, non-blank PNG.
+  await page.evaluate(() => document.querySelector('[data-action="export-staff"]').click());
+  await page.waitForFunction(
+    () => [...document.querySelectorAll(".exp-links a.save")].some((a) => (a.getAttribute("download") || "").endsWith("-staff.png")),
+    { timeout: 15000 }
+  );
+  const staffPng = await page.evaluate(async () => {
+    const a = [...document.querySelectorAll(".exp-links a.save")].find((x) => (x.getAttribute("download") || "").endsWith("-staff.png"));
+    const buf = await fetch(a.href).then((r) => r.arrayBuffer());
+    const b = new Uint8Array(buf);
+    return { bytes: buf.byteLength, sig: b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 };
+  });
+  assertState(staffPng.sig && staffPng.bytes > 4000, `staff PNG export wrong: ${JSON.stringify(staffPng)}`);
   await page.screenshot({ path: exportShotPath, fullPage: true });
   await closeSheet(page);
   await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));

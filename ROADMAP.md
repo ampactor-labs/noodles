@@ -10,10 +10,15 @@ headless gates (`npm run smoke`, `npm run calibrate`).
 
 ## Agreed next (in order)
 
-1. **Staff export** — a rendered engraving PNG in the export sheet (round-trip
-   principle; DESIGN-STAFF.md names it).
-2. **Extension storage in the picker** — the editor wheel already writes 7ths;
+1. **Extension storage in the picker** — the editor wheel already writes 7ths;
    showing/editing them on the slot faces is the remaining surface.
+
+Staff PNG shipped 2026-07-28 (the round-trip principle on paper): the harmony
+editor's engraver was factored into one module-level painter both surfaces
+call, and the export sheet grew a Staff PNG button — 1400×360 plate, key
+signature, per-bar accidentals, the towers playback voices, the slash-bass
+cellar left unclipped, caption top-left. v1 engraves the first scene with a
+harmony line; all-scenes sheet music is named follow-up, not scope.
 
 Send rides shipped 2026-07-28 (D16, closing D5's last deferral): verb/echo
 knobs live on the Sound sheet next to amount/motion, the ● ride arm captures
