@@ -329,6 +329,14 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     sctx.fill();
     sctx.strokeStyle = "#0a0a0c";
     sctx.stroke();
+    // The sliver wears the diminished symbol — one glyph, not a name; the
+    // hold still does the naming.
+    const seamP = polar(seamAngle(), (R_MID + R_OUT) / 2 + 0.09);
+    sctx.textAlign = "center";
+    sctx.textBaseline = "middle";
+    sctx.font = `700 ${Math.round(size * 0.034)}px ${FONT}`;
+    sctx.fillStyle = "rgba(255,255,255,0.85)";
+    sctx.fillText("°", seamP.x, seamP.y);
     // Sector outline + the home front door.
     sctx.strokeStyle = "rgba(232,184,75,0.9)";
     sctx.lineWidth = 2;
@@ -514,23 +522,29 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     }
     if (spiralT > 0.02) drawSpiral(ctx);
 
-    // Trail: the progression drawn as chords of the circle, each segment's
+    // Trail: the progression drawn as curves between wedges, each one's
     // weight the number of tones the two chords share — near means smooth,
-    // and you can see it.
+    // and you can see it. Curves bow outward around the hole so a leap
+    // across the wheel arcs around the name card instead of through it;
+    // alpha is recency times fade, nothing fancier.
     ctx.lineCap = "round";
     for (let i = 1; i < trail.length; i++) {
       const a = trail[i - 1];
       const b = trail[i];
       const age = t - b.t;
       if (age > TRAIL_FADE) continue;
-      const alpha = 0.55 * (1 - age / TRAIL_FADE) * (0.35 + (0.65 * (i + 1)) / trail.length);
+      const alpha = (0.18 + (0.42 * i) / (trail.length - 1)) * (1 - age / TRAIL_FADE);
       const pA = wedgePoint(a.ring, a.station);
       const pB = wedgePoint(b.ring, b.station);
+      const mx = (pA.x + pB.x) / 2 - center();
+      const my = (pA.y + pB.y) / 2 - center();
+      const mr = Math.hypot(mx, my) || 1;
+      const bow = Math.max(mr, R() * 0.6) / mr;
       ctx.strokeStyle = `rgba(232,184,75,${alpha.toFixed(3)})`;
-      ctx.lineWidth = 1 + sharedPcCount(a.pcs, b.pcs) * 2.1;
+      ctx.lineWidth = 1.5 + Math.min(2, sharedPcCount(a.pcs, b.pcs)) * 1.5;
       ctx.beginPath();
       ctx.moveTo(pA.x, pA.y);
-      ctx.lineTo(pB.x, pB.y);
+      ctx.quadraticCurveTo(center() + mx * bow, center() + my * bow, pB.x, pB.y);
       ctx.stroke();
     }
     // Pulses on freshly sounded wedges.
