@@ -631,6 +631,56 @@ function openAboutSheet() {
 }
 
 
+// --- Drawn clefs and the letter gutter, shared by every staff ---
+// Paths, not glyph fonts (phones don't reliably ship a music font). The G
+// spiral owns the G line, the F dots name the F line, and the tiny letters
+// at the left edge name every line and space — out of the way, always there.
+function drawGClef(c, x, gY, S) {
+  c.lineWidth = S * 0.23;
+  c.lineCap = "round";
+  c.beginPath();
+  c.moveTo(x + S * 1.02, gY - S * 3.2);
+  c.bezierCurveTo(x + S * 1.72, gY - S * 2.55, x + S * 1.6, gY - S * 1.95, x + S * 1.08, gY - S * 1.3);
+  c.lineTo(x + S * 0.72, gY + S * 1.95);
+  c.bezierCurveTo(x + S * 0.66, gY + S * 2.6, x - S * 0.02, gY + S * 2.62, x + S * 0.06, gY + S * 2.05);
+  c.stroke();
+  c.beginPath();
+  c.moveTo(x + S * 1.55, gY - S * 0.95);
+  c.bezierCurveTo(x + S * 0.25, gY - S * 1.3, x - S * 0.32, gY - S * 0.3, x + S * 0.38, gY + S * 0.38);
+  c.bezierCurveTo(x + S * 1.1, gY + S * 1.05, x + S * 2.05, gY + S * 0.5, x + S * 1.82, gY - S * 0.18);
+  c.bezierCurveTo(x + S * 1.62, gY - S * 0.72, x + S * 0.95, gY - S * 0.72, x + S * 0.72, gY - S * 0.3);
+  c.stroke();
+  c.beginPath();
+  c.arc(x + S * 0.56, gY + S * 0.12, S * 0.17, 0, Math.PI * 2);
+  c.fill();
+}
+function drawFClef(c, x, fY, S) {
+  c.beginPath();
+  c.arc(x + S * 0.35, fY, S * 0.34, 0, Math.PI * 2);
+  c.fill();
+  c.lineWidth = S * 0.23;
+  c.lineCap = "round";
+  c.beginPath();
+  c.moveTo(x + S * 0.35, fY);
+  c.bezierCurveTo(x + S * 0.45, fY - S * 1.6, x + S * 1.85, fY - S * 1.4, x + S * 1.95, fY - S * 0.2);
+  c.bezierCurveTo(x + S * 2.05, fY + S * 1.4, x + S * 0.95, fY + S * 2.4, x - S * 0.05, fY + S * 2.9);
+  c.stroke();
+  c.beginPath();
+  c.arc(x + S * 2.6, fY - S * 0.5, S * 0.2, 0, Math.PI * 2);
+  c.fill();
+  c.beginPath();
+  c.arc(x + S * 2.6, fY + S * 0.5, S * 0.2, 0, Math.PI * 2);
+  c.fill();
+}
+function drawStaffLetters(c, yOf, baseStep, bass, S) {
+  const letters = bass ? "GABCDEFGA" : "EFGABCDEF";
+  c.textAlign = "left";
+  c.textBaseline = "middle";
+  c.font = `600 ${Math.max(6, Math.round(S * 0.95))}px system-ui, sans-serif`;
+  c.fillStyle = "rgba(255,255,255,0.32)";
+  for (let u = 0; u <= 8; u++) c.fillText(letters[u], 2.5, yOf(baseStep + u));
+}
+
 // The compass: twelve station dots, the sector arc, and a bright dot on the
 // front door — the wheel's whole story at sixteen pixels, always in the
 // footer. Redrawn with the footer on every key move.
@@ -2911,48 +2961,15 @@ function buildPianoEditor(sceneIndex, scene, track) {
     }
     c.fillStyle = "rgba(240,240,244,0.85)";
     c.strokeStyle = "rgba(240,240,244,0.85)";
-    c.lineCap = "round";
-    if (bass) {
-      // F clef: the curl off the F line and the two dots that name it.
-      const fY = yOf(baseStep + 6);
-      c.beginPath();
-      c.arc(S * 1.1, fY, 2.4, 0, Math.PI * 2);
-      c.fill();
-      c.lineWidth = 1.6;
-      c.beginPath();
-      c.moveTo(S * 1.1, fY);
-      c.bezierCurveTo(S * 1.2, fY - S * 1.6, S * 2.6, fY - S * 1.4, S * 2.7, fY - S * 0.2);
-      c.bezierCurveTo(S * 2.8, fY + S * 1.4, S * 1.7, fY + S * 2.4, S * 0.7, fY + S * 2.9);
-      c.stroke();
-      c.beginPath();
-      c.arc(S * 3.6, fY - S * 0.5, 1.4, 0, Math.PI * 2);
-      c.fill();
-      c.beginPath();
-      c.arc(S * 3.6, fY + S * 0.5, 1.4, 0, Math.PI * 2);
-      c.fill();
-    } else {
-      // The same drawn G clef as the chord staff, at this gap.
-      const gY = yOf(baseStep + 2);
-      const cx0 = S * 1.5;
-      c.lineWidth = 1.5;
-      c.beginPath();
-      c.moveTo(cx0 + S * 0.1, gY + S * 2.1);
-      c.bezierCurveTo(cx0 + S * 1.6, gY + S * 1.7, cx0 + S * 1.7, gY + S * 0.4, cx0 + S * 0.75, gY);
-      c.bezierCurveTo(cx0 - S * 0.55, gY - S * 0.55, cx0 - S * 0.35, gY - S * 1.9, cx0 + S * 0.75, gY - S * 1.95);
-      c.bezierCurveTo(cx0 + S * 1.6, gY - S * 2.0, cx0 + S * 1.85, gY - S * 1.1, cx0 + S * 1.1, gY - S * 0.75);
-      c.stroke();
-      c.beginPath();
-      c.moveTo(cx0 + S * 0.55, gY - S * 3.4);
-      c.bezierCurveTo(cx0 + S * 1.4, gY - S * 2.9, cx0 + S * 1.3, gY - S * 2.3, cx0 + S * 0.95, gY - S * 1.5);
-      c.lineTo(cx0 + S * 0.35, gY + S * 1.7);
-      c.stroke();
-    }
+    c.textBaseline = "middle";
+    drawStaffLetters(c, yOf, baseStep, bass, S);
+    if (bass) drawFClef(c, S * 1.8, yOf(baseStep + 6), S);
+    else drawGClef(c, S * 1.9, yOf(baseStep + 2), S);
     const sig = keySignature(song.key, song.scale);
     const units = sig > 0 ? [8, 5, 9, 6, 3, 7, 4] : [4, 7, 3, 6, 2, 5, 1];
     c.textAlign = "center";
-    c.textBaseline = "middle";
     c.font = `600 ${Math.round(S * 2)}px system-ui, sans-serif`;
-    let sx = S * 4.8;
+    let sx = S * 5.5;
     for (let i = 0; i < Math.abs(sig); i++) {
       const u = units[i] - (bass ? 2 : 0);
       c.fillText(sig > 0 ? "♯" : "♭", sx, yOf(baseStep + u) - (sig < 0 ? S * 0.3 : 0));
@@ -3317,34 +3334,16 @@ function buildHarmonyEditor(sceneIndex, scene) {
       c.stroke();
     }
     c.fillStyle = "rgba(240,240,244,0.9)";
-    c.textAlign = "left";
-    c.textBaseline = "middle";
-    // A drawn G clef, not U+1D11E: music glyphs need a music font, and
-    // neither headless Chrome nor a stock phone reliably has one — a path
-    // renders the same everywhere. Stylized: the spiral owns the G line.
-    const gY = yOf(E4 + 2);
-    const cx0 = S * 1.35;
     c.strokeStyle = "rgba(240,240,244,0.9)";
-    c.lineWidth = 1.7;
-    c.lineCap = "round";
-    c.beginPath();
-    c.moveTo(cx0 + S * 0.1, gY + S * 2.1);
-    c.bezierCurveTo(cx0 + S * 1.6, gY + S * 1.7, cx0 + S * 1.7, gY + S * 0.4, cx0 + S * 0.75, gY);
-    c.bezierCurveTo(cx0 - S * 0.55, gY - S * 0.55, cx0 - S * 0.35, gY - S * 1.9, cx0 + S * 0.75, gY - S * 1.95);
-    c.bezierCurveTo(cx0 + S * 1.6, gY - S * 2.0, cx0 + S * 1.85, gY - S * 1.1, cx0 + S * 1.1, gY - S * 0.75);
-    c.bezierCurveTo(cx0 + S * 0.5, gY - S * 0.5, cx0 + S * 0.3, gY - S * 1.1, cx0 + S * 0.8, gY - S * 1.25);
-    c.stroke();
-    c.beginPath();
-    c.moveTo(cx0 + S * 0.55, gY - S * 3.4);
-    c.bezierCurveTo(cx0 + S * 1.4, gY - S * 2.9, cx0 + S * 1.3, gY - S * 2.3, cx0 + S * 0.95, gY - S * 1.5);
-    c.lineTo(cx0 + S * 0.35, gY + S * 1.7);
-    c.bezierCurveTo(cx0 + S * 0.25, gY + S * 2.35, cx0 - S * 0.55, gY + S * 2.35, cx0 - S * 0.5, gY + S * 1.75);
-    c.stroke();
+    c.textBaseline = "middle";
+    drawStaffLetters(c, yOf, E4, false, S);
+    drawGClef(c, S * 1.9, yOf(E4 + 2), S);
     const sig = keySignature(song.key, song.scale);
     const SHARP_UNITS = [8, 5, 9, 6, 3, 7, 4];
     const FLAT_UNITS = [4, 7, 3, 6, 2, 5, 1];
     c.font = `600 ${Math.round(S * 2.2)}px system-ui, sans-serif`;
-    let x = S * 3.6;
+    c.textAlign = "center";
+    let x = S * 5.2;
     for (let i = 0; i < Math.abs(sig); i++) {
       const u = (sig > 0 ? SHARP_UNITS : FLAT_UNITS)[i];
       c.fillText(sig > 0 ? "♯" : "♭", x, yOf(E4 + u) - (sig > 0 ? 0 : S * 0.3));
@@ -3416,12 +3415,49 @@ function buildHarmonyEditor(sceneIndex, scene) {
       onclick: () => {
         selected = idx;
         slots.forEach((s, k) => s.classList.toggle("sel", k === idx));
+        refreshInvRow();
       },
     });
     return slot;
   });
   slots.forEach((s) => row.appendChild(s));
   scrollContainer.appendChild(row);
+
+  // Inversions, controllable where arranging happens: chips under the slots
+  // pick the selected bar's bass — root, /3, /5, /7 when the stack has one.
+  // A degree entry stays a degree at root position (key-following intact)
+  // and materializes to pcs only when a slash is chosen; the sub voices the
+  // chosen bass, which is the inversion made audible.
+  const invRow = el("div", { class: "lane-ctl inv-row" });
+  scrollContainer.appendChild(invRow);
+  function refreshInvRow() {
+    invRow.innerHTML = "";
+    const entry = scene.harmony[selected];
+    const ch = harmonyChord(entry);
+    const n = Math.min(4, ch.pcs.length);
+    const cur = (typeof entry === "object" && entry.inv) || 0;
+    ["root", "/3", "/5", "/7"].slice(0, n).forEach((label, k) => {
+      invRow.appendChild(
+        el("div", {
+          class: "lane-bar" + (k === cur ? " on" : ""),
+          text: label,
+          "data-action": `inv-${k}`,
+          onclick: async () => {
+            if (k === cur) return;
+            pushUndo();
+            scene.harmony[selected] =
+              k === 0 && typeof entry === "number" ? entry : k === 0 ? { pcs: ch.pcs.slice() } : { pcs: ch.pcs.slice(), inv: k };
+            slots[selected].innerHTML = chordMarkup(scene.harmony[selected], { notes: true });
+            refreshInvRow();
+            scheduleEditorPaint();
+            await ensureStarted();
+            audio.preview(scene.harmony[selected], scene.harmonyOct);
+          },
+        })
+      );
+    });
+  }
+  refreshInvRow();
 
   // Voice leading, visible: the three voices threading chord to chord, the
   // handoff's own "common tones light up" promise. Held tones run level and
@@ -3507,6 +3543,7 @@ function buildHarmonyEditor(sceneIndex, scene) {
       editorPaintRAF = 0;
       drawStaff();
       drawThreads();
+      refreshInvRow();
       refreshClip(sceneIndex, "harmony");
     });
   };
