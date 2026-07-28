@@ -169,7 +169,29 @@ rolls gained their staffs: per-track clef (treble for melody, a drawn F clef
 for bass) IS the grand-staff decision, since the tracks are separate editors
 (DESIGN-STAFF.md carries the reasoning).
 
-## Provisional (my recommendation, argue against it)
+### D15 — The builder suspends the live-sound law; the live grade goes minimal
+
+"We need to do all possible perf gains exhaustively regardless of prior
+rules" — the builder's words, overriding his own never-thin-the-sound
+standing rule after audible breakup on the A16. The live grade now cuts
+everything cuttable while exports keep the entire chain: the three melodic
+input compressors bypass (level-neutral by D11's subtracted makeup — only
+the squeeze is gone), the drum parallel compressor and its alignment delay
+bypass (+1.2 dB dry approximation), the chorus is never constructed, the
+halo never sounds, the live Freeverb runs two combs (+7.5 dB makeup), and
+the phaser color runs two stages. A top-1 morph cut rode the first wave and
+was pulled back within the hour — the XY blend is a flagship feel, and the
+builder's "hmm" outranked its share of the saving.
+
+Measured on the dense-wet probe (.tmp/dbg-dsp-cost.mjs): 14.76 s → 10.66 s
+render wall with the morph cut in, ~28% off the live DSP bill; restoring
+the blend gives a few points back and the rest stands. The honest cost: live is now
+audibly drier and plainer than the export — "export sounds like the app,
+plus mastering polish" stretches to "plus the width, the shimmer, and the
+squeeze." Every cut is an independent exportGrade branch in buildGraph;
+reverting any one is deleting its else-arm. If the A16 breathes again and
+the builder misses the width, the halo and chorus are the first two to
+bring back.
 
 ### P4 — The chop deck lives on the melody track, as a source toggle
 

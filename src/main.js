@@ -95,7 +95,12 @@ const meterLevel = (db) => {
 // wears its function hue everywhere this markup lands — session minis,
 // arrangement minis, editor slots — so a borrowed chord's violet reads as
 // "not from here" straight off the grid.
-const chordNotes = (entry) => harmonyChord(entry).pcs.map(spellScalePc).join(" ");
+// Chord tones spell by the CHORD's letters (thirds stack: D F♯ A C♯ E),
+// never by the key's accidental side — Dmaj9 in D minor is not "D G♭ A".
+const chordNotes = (entry) =>
+  spellChordTones(entry)
+    .map((t) => "CDEFGAB"[t.letter] + (t.acc > 0 ? "♯".repeat(t.acc) : "♭".repeat(-t.acc)))
+    .join(" ");
 function chordMarkup(entry, { notes = false } = {}) {
   const ch = harmonyChord(entry);
   if (!ch) return "";
@@ -3354,11 +3359,23 @@ function buildHarmonyEditor(sceneIndex, scene) {
     const cRect = staffCanvas.getBoundingClientRect();
     let prev = null;
     scene.harmony.forEach((entry, i) => {
-      const voiced = (prev = voiceLead(harmonyChord(entry).pcs, prev));
+      const ch = harmonyChord(entry);
+      const voiced = (prev = voiceLead(ch.pcs.slice(0, 3), prev));
       const tones = spellChordTones(entry);
       const slotR = slots[i]?.getBoundingClientRect();
       const cx = Math.max(startX, slotR ? slotR.left - cRect.left + slotR.width / 2 : startX + i * 72);
-      const notes = voiced
+      // The full tower: led triad, then the stack climbing tone over tone —
+      // the same shape playback voices — plus the slash bass at its low seat.
+      const midis = voiced.slice();
+      let topM = Math.max(...voiced);
+      for (const pc of ch.pcs.slice(3)) {
+        const m = pc + 12 * Math.ceil((topM + 1 - pc) / 12);
+        midis.push(m);
+        topM = m;
+      }
+      const inv = (typeof entry === "object" && entry.inv) || 0;
+      if (inv > 0) midis.push(36 + ch.bass);
+      const notes = midis
         .map((m) => {
           const midi = m + oct;
           const pc = ((midi % 12) + 12) % 12;
@@ -3436,7 +3453,11 @@ function buildHarmonyEditor(sceneIndex, scene) {
     const ch = harmonyChord(entry);
     const n = Math.min(4, ch.pcs.length);
     const cur = (typeof entry === "object" && entry.inv) || 0;
-    ["root", "/3", "/5", "/7"].slice(0, n).forEach((label, k) => {
+    // Chips wear the actual note that would be the bass — C/E's E, not an
+    // interval numeral — so choosing an inversion teaches what it chooses.
+    const tones = spellChordTones(entry);
+    const chipLabel = (k) => (k === 0 ? "root" : "/" + "CDEFGAB"[tones[k].letter] + (tones[k].acc > 0 ? "♯" : tones[k].acc < 0 ? "♭" : ""));
+    Array.from({ length: n }, (_, k) => chipLabel(k)).forEach((label, k) => {
       invRow.appendChild(
         el("div", {
           class: "lane-bar" + (k === cur ? " on" : ""),
@@ -3482,9 +3503,14 @@ function buildHarmonyEditor(sceneIndex, scene) {
       return r.left - cRect.left + r.width / 2;
     });
     let prev = null;
-    const chain = scene.harmony.map((e) => (prev = voiceLead(harmonyChord(e).pcs, prev)));
-    const wrap = chain.length > 1 ? voiceLead(harmonyChord(scene.harmony[0]).pcs, prev) : null;
-    const all = chain.flat().concat(wrap || []);
+    const chain = scene.harmony.map((e) => (prev = voiceLead(harmonyChord(e).pcs.slice(0, 3), prev)));
+    const wrap = chain.length > 1 ? voiceLead(harmonyChord(scene.harmony[0]).pcs.slice(0, 3), prev) : null;
+    const stacks = scene.harmony.map((e, i) => {
+      const pcs = harmonyChord(e).pcs.slice(3);
+      let topM = Math.max(...chain[i]);
+      return pcs.map((pc) => (topM = pc + 12 * Math.ceil((topM + 1 - pc) / 12)));
+    });
+    const all = chain.flat().concat(wrap || [], stacks.flat());
     const lo = Math.min(...all) - 1;
     const hi = Math.max(...all) + 1;
     const y = (m) => h - ((m - lo) / Math.max(1, hi - lo)) * (h - 10) - 5;
@@ -3513,6 +3539,15 @@ function buildHarmonyEditor(sceneIndex, scene) {
         c.arc(xs[i], y(chain[i][v]), 2.4, 0, Math.PI * 2);
         c.fillStyle = "#e8e8ec";
         c.fill();
+      }
+      // Stack tones ride as hollow dots, unthreaded: the triad leads,
+      // the color rides along.
+      for (const m of stacks[i]) {
+        c.beginPath();
+        c.arc(xs[i], y(m), 2.2, 0, Math.PI * 2);
+        c.strokeStyle = "rgba(232,232,236,0.55)";
+        c.lineWidth = 1.2;
+        c.stroke();
       }
     }
   }

@@ -595,12 +595,12 @@ function cornerWeights(patch) {
 // params, which cost nothing. This caps the morph's voice bill at 2x a
 // single synth instead of 4x — the difference between a Dimensity 6300
 // keeping up and choking.
-function activeLayerWeights(patch) {
+function activeLayerWeights(patch, top = 2) {
   const w = cornerWeights(patch);
   const kept = [0, 1, 2, 3]
     .filter((i) => w[i] > 0.02)
     .sort((a, b) => w[b] - w[a])
-    .slice(0, 2);
+    .slice(0, top);
   const sum = kept.reduce((s, i) => s + w[i], 0) || 1;
   return kept.map((i) => ({ i, w: w[i] / sum }));
 }
@@ -840,13 +840,20 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
   // bass were 130 degrees apart at 60 Hz on the same downbeat.
   g.musicDuck = new Tone.Gain(1).connect(g.master);
   g.drumBus = new Tone.Gain(1).connect(g.master);
-  g.drumAlign = new Tone.Delay({ delayTime: COMP_LATENCY, maxDelay: 0.05 });
-  g.drumDry = new Tone.Gain(DRUM_DRY_GAIN).connect(g.drumAlign);
-  g.drumAlign.connect(g.drumBus);
-  const drumParallel = makeComp(COMP_SPECS.drumParallel);
-  g.drumParallel = drumParallel.input;
-  g.drumParallelReturn = new Tone.Gain(DRUM_PARALLEL_GAIN).connect(g.drumBus);
-  drumParallel.output.connect(g.drumParallelReturn);
+  if (exportGrade) {
+    g.drumAlign = new Tone.Delay({ delayTime: COMP_LATENCY, maxDelay: 0.05 });
+    g.drumDry = new Tone.Gain(DRUM_DRY_GAIN).connect(g.drumAlign);
+    g.drumAlign.connect(g.drumBus);
+    const drumParallel = makeComp(COMP_SPECS.drumParallel);
+    g.drumParallel = drumParallel.input;
+    g.drumParallelReturn = new Tone.Gain(DRUM_PARALLEL_GAIN).connect(g.drumBus);
+    drumParallel.output.connect(g.drumParallelReturn);
+  } else {
+    // Live: dry bus straight in, parallel weight approximated by +1.2 dB
+    // (the comb-alignment delay goes with the comps that made it necessary).
+    g.drumDry = new Tone.Gain(DRUM_DRY_GAIN * Tone.dbToGain(1.2)).connect(g.drumBus);
+    g.drumParallel = new Tone.Gain(0); // scheduled sends land on a dead end
+  }
 
   // Sends. Algorithmic (Freeverb) instead of convolution — far cheaper per
   // sample on a low-end mobile CPU, and fine for a send reverb. The highpass
@@ -869,8 +876,8 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
     // measured against the full Freeverb on the wet reference (.tmp probe)
     // so a send level chosen live translates to the export.
     g.reverb = new Tone.Gain(1);
-    g.reverbOut = new Tone.Gain(Tone.dbToGain(4.5)).connect(g.musicDuck);
-    const tunings = [0.0253, 0.02896, 0.03224, 0.03667];
+    g.reverbOut = new Tone.Gain(Tone.dbToGain(7.5)).connect(g.musicDuck);
+    const tunings = [0.0253, 0.03667];
     tunings.forEach((delayTime, i) => {
       // Native feedback combs, NOT Tone.LowpassCombFilter: that class is an
       // AudioWorklet whose processor runs its JS on the audio thread FOREVER
@@ -925,10 +932,16 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
       // Preset level trims land AFTER the input compressor: pre-comp (and
       // pre-drive) gain shapes tone and gets eaten by the nonlinearities,
       // so leveling there never converges. Drive for tone, trim for level.
-      const input = makeComp(COMP_SPECS.input);
-      g.inputs[k] = input.input;
       g.trims[k] = new Tone.Gain(1);
-      input.output.connect(g.trims[k]);
+      if (exportGrade) {
+        const input = makeComp(COMP_SPECS.input);
+        g.inputs[k] = input.input;
+        input.output.connect(g.trims[k]);
+      } else {
+        // Live bypass: the comp's makeup is already subtracted (D11), so the
+        // level holds; only the squeeze is gone.
+        g.inputs[k] = g.trims[k];
+      }
       g.trims[k].connect(g.channels[k]);
       g.channels[k].connect(g.musicDuck);
     }
@@ -992,7 +1005,7 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
 
   // Harmony: morphing pad + mono shimmer an octave up + a quiet low-mid root
   // hint. Bass owns the low end, so the pad and the hint are highpassed.
-  g.chorus = new Tone.Chorus({ frequency: 0.4, delayTime: 4, depth: 0.6, wet: 0.35 }).start();
+  g.chorus = exportGrade ? new Tone.Chorus({ frequency: 0.4, delayTime: 4, depth: 0.6, wet: 0.35 }).start() : null;
   g.padHighpass = new Tone.Filter({ type: "highpass", frequency: 170, Q: 0.6 });
   g.padFilter = new Tone.Filter({ type: "lowpass", frequency: 1500, Q: 0.7 });
   // The LFO OWNS the pad cutoff (a signal connected to a param overrides it —
@@ -1001,13 +1014,17 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
   g.padLfo = new Tone.LFO({ frequency: 0.05, min: 850, max: 2600 }).connect(g.padFilter.frequency);
   g.padLfo.start();
   g.padHighpass.connect(g.padFilter);
-  g.padFilter.connect(g.chorus);
-  g.chorus.connect(g.colorIn.harmony);
+  if (g.chorus) {
+    g.padFilter.connect(g.chorus);
+    g.chorus.connect(g.colorIn.harmony);
+  } else {
+    g.padFilter.connect(g.colorIn.harmony);
+  }
   // Eight voices per layer: a full 13th is seven tones, and the pool must
   // hold one chord plus the tail of the last. Idle voices are silent
   // subtrees; the cost is pay-per-chord-size.
   g.padLayers = makeLayers(HARMONY_PRESETS, 8, g.padHighpass, SOURCE_LEVEL_DB.harmonyPad);
-  g.halo = new Tone.Synth({
+  g.halo = !exportGrade ? null : new Tone.Synth({
     oscillator: { type: "sine" },
     envelope: { attack: 0.9, decay: 1, sustain: 0.5, release: 1.6 },
     volume: SOURCE_LEVEL_DB.harmonyHalo,
@@ -1144,7 +1161,7 @@ function applyMorphTo(g, track, patch, { ramp = false, at } = {}) {
     const filter = blendLog(table.map((p) => p.filter), w);
     g.padLfo.min = filter * 0.5;
     g.padLfo.max = filter * 1.5;
-    g.chorus.set({ wet: blendLin(table.map((p) => p.chorusWet), w), depth: blendLin(table.map((p) => p.chorusDepth), w) });
+    g.chorus?.set({ wet: blendLin(table.map((p) => p.chorusWet), w), depth: blendLin(table.map((p) => p.chorusDepth), w) });
   } else {
     const cutoff = blendLog(table.map((p) => p.cutoff), w);
     const node = track === "bass" ? g.bassFilter : g.leadFilter;
@@ -1179,7 +1196,7 @@ const COLOR_MAKERS = {
   phase(amount, motion, exportGrade) {
     // Ten allpass stages per channel is mastering-grade sweep density; four
     // keeps the character live at a fraction of the audio-thread bill.
-    const phaser = new Tone.Phaser({ frequency: 0.1 + motion * 1.9, octaves: 2 + amount * 3, baseFrequency: 300, stages: exportGrade ? 10 : 4 });
+    const phaser = new Tone.Phaser({ frequency: 0.1 + motion * 1.9, octaves: 2 + amount * 3, baseFrequency: 300, stages: exportGrade ? 10 : 2 });
     phaser.wet.value = Math.min(1, 0.3 + amount * 0.7);
     return {
       nodes: [phaser],
@@ -1324,7 +1341,7 @@ function playChordOn(g, patches, vstate, entry, time, oct = 0) {
   const { notes, top, bass } = chordVoicing(entry, vstate);
   const shift = 12 * oct;
   eachActiveLayer(g, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(notes.map((m) => midiToFreq(m + shift)), "1n", time));
-  g.halo.triggerAttackRelease(midiToFreq(top + 12 + shift), "1n", time);
+  g.halo?.triggerAttackRelease(midiToFreq(top + 12 + shift), "1n", time);
   g.sub.triggerAttackRelease(midiToFreq(48 + bass), "1n", time);
 }
 
@@ -2060,7 +2077,7 @@ export function createAudio(song) {
           try { layer.releaseAll(at); } catch {}
         }
       }
-      try { live.halo.triggerRelease(at); } catch {}
+      try { live.halo?.triggerRelease(at); } catch {}
       try { live.sub.triggerRelease(at); } catch {}
       liveVoice.prev = null;
       parkContextSoon();
