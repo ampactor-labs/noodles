@@ -220,6 +220,10 @@ hatched bars replay silent in playback and every export); four clip editors, eac
 velocity lane; vertical mixer strips (fader, pan, reverb + echo sends, live meters with peak
 hold, preset pickers); loudness-matched device presets per track; randomized-but-balanced
 cold open (key, scale, tempo, presets, magic scene) plus a 🎲 button that rerolls it all;
+the chop deck (melody's second source: load any sample, sliced at hits or grid,
+piano-roll rows become slices, upper rows replay at double speed); stored chord
+extensions (arm ● and release the bloom on a pad — diatonic 7ths keep their function
+color, only visitors go violet); a HUMAN slider (per-hit timing drift, live = export);
 global Key + Scale via the playable circle of fifths (the whole app transposes and
 re-snaps in key; keys and every note name wear their honest per-key spelling — E♭,
 not D♯, and F♯ major's E♯; borrowed chords store as violet `{pcs}` entries and the

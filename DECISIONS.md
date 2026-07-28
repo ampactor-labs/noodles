@@ -153,6 +153,11 @@ and the borrowed-punch assertion in npm run smoke.
 
 ### P4 — The chop deck lives on the melody track, as a source toggle
 
+*Ratified 2026-07-28 by the builder's "build out the remaining" and shipped
+as recommended the same day: source chips in the melody Sound sheet, load +
+hits/grid slicing, rows as slices with the upper run at double speed, and
+the key-travel guard that leaves slice rows untransposed.*
+
 D6 settled WHAT the chop deck is (load a WAV, slice at transients or grid,
 slices on pads, sequence on the 16 steps, repitch via playbackRate) but not
 WHERE it lives, and that fork shapes everything downstream. My

@@ -136,8 +136,15 @@ export const scaleDegreeOfPc = (pc) => SPELLED.findIndex((s) => s.pc === (((pc %
 export function spellChordTones(entry) {
   const ch = harmonyChord(entry);
   const li0 = LETTERS.indexOf(ch.name[0]);
+  // The interval decides the letter distance — a 7th is six letters up, a
+  // 9th one, a 4th three — so sus tones and extensions engrave on their own
+  // lines. The triad's tritone fifth stays a diminished fifth (four letters).
+  const LETTER_OF_SEMIS = [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6];
   return ch.pcs.map((pc, i) => {
-    const letter = (li0 + 2 * i) % 7;
+    const semis = (((pc - ch.pcs[0]) % 12) + 12) % 12;
+    let off = i === 0 ? 0 : LETTER_OF_SEMIS[semis];
+    if (i === 2 && semis === 6) off = 4;
+    const letter = (li0 + off) % 7;
     const acc = ((pc - NATURAL_PC[letter]) % 12 + 18) % 12 - 6;
     return { letter, acc, pc };
   });
@@ -211,8 +218,9 @@ export const chordColor = (ci, dl = 0) =>
 const BORROWED = { hue: 285, sat: 24, light: 60 };
 export function normalizeHarmonyEntry(e) {
   if (typeof e === "number" && Number.isFinite(e)) return Math.max(0, Math.min(6, Math.round(e)));
-  const pcs = Array.isArray(e?.pcs) ? e.pcs.slice(0, 3).map((p) => ((Math.round(Number(p) || 0) % 12) + 12) % 12) : null;
-  return pcs && pcs.length === 3 ? { pcs } : 0;
+  // Three pcs are a triad; a fourth is a stored extension (7th, add9).
+  const pcs = Array.isArray(e?.pcs) ? e.pcs.slice(0, 4).map((p) => ((Math.round(Number(p) || 0) % 12) + 12) % 12) : null;
+  return pcs && pcs.length >= 3 ? { pcs } : 0;
 }
 export const normalizeHarmony = (arr) => (Array.isArray(arr) && arr.length ? arr.map(normalizeHarmonyEntry) : [0, 0, 0, 0]);
 export const harmonyEntryEquals = (a, b) =>
@@ -222,15 +230,35 @@ export function harmonyChord(entry) {
   if (typeof entry === "number") return CHORDS[Math.max(0, Math.min(6, entry | 0))];
   const pcs = entry?.pcs;
   if (!pcs?.length) return CHORDS[0];
-  const t = (pcs[1] - pcs[0] + 12) % 12;
-  const f = (pcs[2] - pcs[0] + 12) % 12;
-  const minor = t === 3 && f !== 6;
-  const dim = t === 3 && f === 6;
-  const roman = romanFromHome(curKey, pcs[0], minor || dim) + (dim ? "°" : "");
+  const rel = (v) => (((v - pcs[0]) % 12) + 12) % 12;
+  const t = rel(pcs[1]);
+  const f = rel(pcs[2]);
+  const sus = t === 5 ? "sus4" : t <= 2 ? "sus2" : "";
+  const dim = !sus && t === 3 && f === 6;
+  const minor = !sus && t === 3 && !dim;
+  let ext = "";
+  if (pcs.length > 3) {
+    const e4 = rel(pcs[3]);
+    ext = e4 === 11 ? "maj7" : e4 === 10 ? (dim ? "ø7" : "7") : dim && e4 === 9 ? "°7" : e4 <= 2 ? "add9" : "7";
+  }
+  const halfDim = ext === "ø7" || ext === "°7"; // the ° moves into the suffix
+  // A diatonic triad under the extension keeps its degree's roman and
+  // function color; only true visitors wear the violet.
+  const d = sus ? -1 : CHORDS.findIndex((c) => c.pcs.join() === pcs.slice(0, 3).join());
+  if (d >= 0) {
+    const base = CHORDS[d];
+    return {
+      ...base,
+      pcs,
+      roman: halfDim ? base.roman.replace("°", "") + ext : base.roman + ext,
+      name: halfDim ? base.name.replace(/dim$/, "") + ext : base.name + ext,
+    };
+  }
+  const roman = romanFromHome(curKey, pcs[0], minor || dim) + (dim && !halfDim ? "°" : "") + (sus || ext);
   // A borrowed chord spells by its FUNCTION: the ♭VI of C is A♭, never G♯,
   // whatever side the home signature sits on.
   const root = roman.includes("♭") ? FLAT_PC[pcs[0]] : spellScalePc(pcs[0]);
-  const suffix = dim ? "dim" : minor ? "m" : "";
+  const suffix = (dim && !halfDim ? "dim" : minor ? "m" : "") + (sus || ext);
   return { roman, name: root + suffix, pcs, degree: -1, ...BORROWED };
 }
 
@@ -812,6 +840,7 @@ export function makeSong() {
     mutes: {},
     loop: { on: false, start: 0, len: 4 },
     swing: vibe.swing, // global groove, rolled inside the archetype's pocket
+    humanize: 0, // per-hit timing drift, 0..1 — the HUMAN slider
   };
 }
 

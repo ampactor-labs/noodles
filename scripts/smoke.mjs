@@ -342,6 +342,59 @@ try {
   }
   assertState(harmonyRestored, "undo did not restore the punched harmony");
 
+  // --- The chop deck: build a tiny WAV in-page (8 blips), load it, slice
+  // both ways, flip melody to chops. Same public API the sound sheet uses.
+  const chop = await page.evaluate(async () => {
+    const sr = 44100;
+    const n = sr;
+    const pcm = new Int16Array(n);
+    for (let i = 0; i < n; i++) {
+      const env = Math.exp(-((i % (sr / 8)) / 1600));
+      pcm[i] = Math.round(Math.sin(i * 0.35) * env * 20000);
+    }
+    const bytes = new ArrayBuffer(44 + pcm.length * 2);
+    const v = new DataView(bytes);
+    const w = (o, s) => {
+      for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i));
+    };
+    w(0, "RIFF");
+    v.setUint32(4, 36 + pcm.length * 2, true);
+    w(8, "WAVEfmt ");
+    v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true);
+    v.setUint16(22, 1, true);
+    v.setUint32(24, sr, true);
+    v.setUint32(28, sr * 2, true);
+    v.setUint16(32, 2, true);
+    v.setUint16(34, 16, true);
+    w(36, "data");
+    v.setUint32(40, pcm.length * 2, true);
+    new Int16Array(bytes, 44).set(pcm);
+    const audio = window.__noodles.audio;
+    const grid = await audio.loadChopSample(bytes, "smoke", "grid");
+    audio.setChopMode("auto");
+    const auto = audio.chopInfo();
+    audio.setPatch("melody", { source: "chops" });
+    return { gridCount: grid.count, autoCount: auto.count, source: audio.patch("melody").source };
+  });
+  assertState(chop.gridCount === 16, `grid slicing gave ${chop.gridCount} slices`);
+  assertState(chop.autoCount >= 4, `auto slicing found only ${chop.autoCount} slices`);
+  assertState(chop.source === "chops", "melody source did not flip to chops");
+  await tap(page, '.clip.filled[data-track="melody"]');
+  await page.waitForFunction(() => document.querySelector(".sheet-bar .title")?.textContent === "Piano Roll");
+  const sliceLabel = await page.$eval(".pkey", (el) => el.textContent);
+  assertState(/^s\d+/.test(sliceLabel), `top roll row is "${sliceLabel}", wanted a slice label`);
+  await closeSheet(page);
+  await page.waitForFunction(() => !document.querySelector("#sheet")?.classList.contains("open"));
+
+  // The humanizer slider writes through.
+  await page.$eval(".humanslider", (el) => {
+    el.value = "0.4";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const humanized = await page.evaluate(() => window.__noodles.song.humanize);
+  assertState(Math.abs(humanized - 0.4) < 1e-6, `humanize did not apply (${humanized})`);
+
   await tap(page, "#view-toggle-btn");
   const stillPlayingAfterView = await page.$eval(".tbtn.play", (el) => el.classList.contains("on"));
   assertState(stillPlayingAfterView, "view switch stopped playback");

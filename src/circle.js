@@ -882,6 +882,18 @@ export function createCircleView({ song, audio, ensureStarted, commitKeyScale, c
     g.down = false;
     gestures.delete(e.pointerId);
     if (e.type === "pointerup" && !g.bloom && !g.strummed) tryCapture(g.curWedge);
+    else if (e.type === "pointerup" && g.bloom && g.bloomSel != null) {
+      // Releasing ON a pad is as deliberate as a tap: the chosen extension
+      // can land in the clip. Stored as {pcs} even when diatonic — the model
+      // recognizes the triad underneath and keeps its function color. The
+      // mirror is deliberately not applied here: a reflected seventh has no
+      // root-position law yet.
+      const pcs = extPcs(g.curWedge, EXT_PADS[g.bloomSel]);
+      if (captureChord({ degree: -1, pcs })) {
+        flash = { ring: g.curWedge.ring, station: g.curWedge.station, t: nowS() };
+        buzz(10);
+      }
+    }
     wake();
   }
   canvas.addEventListener("pointerup", endPointer);

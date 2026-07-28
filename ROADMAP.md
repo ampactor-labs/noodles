@@ -10,12 +10,23 @@ headless gates (`npm run smoke`, `npm run calibrate`).
 
 ## Agreed next (in order)
 
-1. **Chop deck** — the noodles-native warp (DECISIONS D6): load a WAV, auto-slice at
-   transients or grid divisions, slices on pads sequenced on the same 16 steps,
-   per-slice repitch via playbackRate. Extends the sample system that shipped.
-2. **Motion lane editing** — the velocity-lane surface gains a param picker so recorded
+1. **Motion lane editing** — the velocity-lane surface gains a param picker so recorded
    rides (DECISIONS D5) can be drawn and tweaked per step, plus send automation once
    the base-restore story against mixer state is decided.
+2. **The melody staff** — the piano roll's slide toward notation; needs the
+   grand-staff call for bass (DESIGN-STAFF.md).
+3. **Partner dares** — constraint clips a teacher hands you; needs the sharing-model
+   design before any build (DESIGN-CIRCLE.md bank).
+4. **User-sample persistence** — one story covering drum one-shots AND the chop
+   buffer (IndexedDB vs project-file embedding, the open fork from the sample loader).
+
+The chop deck shipped 2026-07-28 (DECISIONS D6 + P4): melody's second source —
+load a sample, sliced at hits or on the grid, rows as slices, the upper run
+replaying at double speed, normalized once at load, session-scoped like the
+user drum WAVs, identical offline. Alongside it: stored extensions (the bloom's
+7/9/sus4/sus2 land in clips when armed, diatonic ones keeping their function
+color), and the HUMAN slider — up to ±8 ms of per-hit drift through the same
+swing path live and export.
 
 Shipped since the last revision: the playable circle of fifths as the key selector
 (DECISIONS D12, design + bank in DESIGN-CIRCLE.md) — sector-lit diatonic palette,

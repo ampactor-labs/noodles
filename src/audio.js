@@ -32,7 +32,11 @@ import { CHORDS, DRUM_VOICES, voiceLead, harmonyChord, clipAt, arrangeLength, cl
 // song.tempo: a cached transport lookup only refreshed when a melodic note
 // played, so drums-only grooves swung on the wrong tempo.
 const swingOffsetFor = (song, track, laneStep) =>
-  laneStep % 2 === 1 ? ((((song.trackSwing?.[track] ?? song.swing) || 0) * (15 / song.tempo)) / 3) : 0;
+  (laneStep % 2 === 1 ? ((((song.trackSwing?.[track] ?? song.swing) || 0) * (15 / song.tempo)) / 3) : 0) +
+  // The humanizer: up to ±8 ms of per-hit drift at full depth — a player's
+  // hands, not a machine's. Living here means both the live clock and the
+  // offline render breathe the same way.
+  (song.humanize ? (Math.random() * 2 - 1) * song.humanize * 0.008 : 0);
 
 // Debug handles for the headless harnesses; lets calibrate/smoke/audit build
 // Tone graphs without reaching into the bundle. __noodlesGraph is buildGraph
@@ -316,6 +320,90 @@ function loadSamples() {
 // User-loaded one-shots, one per voice, session-scoped.
 const userSamples = {};
 
+// --- The chop deck (DECISIONS D6, shape per P4): one sample, sliced onto
+// the melody rows. Session-scoped like the user drum one-shots — the same
+// open persistence fork covers both. The buffer is normalized ONCE at load
+// (RMS to -16 dBFS under a -1 dB peak cap, baked into a copy) so any chop
+// sits in the mix like a preset instead of at the mercy of the file.
+let chopKit = null; // { buffer, slices: [{start, dur}], name, mode }
+const CHOP_TARGET_RMS = Math.pow(10, -16 / 20);
+
+function sliceChops(buffer, mode) {
+  const dur = buffer.length / buffer.sampleRate;
+  if (mode === "grid") return Array.from({ length: 16 }, (_, i) => ({ start: (dur * i) / 16, dur: dur / 16 }));
+  // Transients: frame RMS jumping past its running floor, 60 ms refractory.
+  const data = buffer.getChannelData(0);
+  const frame = 512;
+  const sr = buffer.sampleRate;
+  const onsets = [];
+  let floor = 0.003;
+  for (let i = 0; i + frame <= data.length; i += frame) {
+    let sum = 0;
+    for (let j = i; j < i + frame; j++) sum += data[j] * data[j];
+    const rms = Math.sqrt(sum / frame);
+    const t = i / sr;
+    const last = onsets.length ? onsets[onsets.length - 1] : -1;
+    if (rms > 0.02 && rms > floor * 2.4 && t - last > 0.06 && onsets.length < 16) onsets.push(t);
+    floor = floor * 0.92 + rms * 0.08;
+  }
+  // Too few hits to be a groove: fall back to the grid, never to nothing.
+  if (onsets.length < 4) return sliceChops(buffer, "grid");
+  if (onsets[0] > 0.02) onsets.unshift(0);
+  return onsets.slice(0, 16).map((start, i, a) => ({ start, dur: (i + 1 < a.length ? a[i + 1] : dur) - start }));
+}
+
+async function decodeChop(arrayBuffer, name, mode) {
+  const raw = await Tone.getContext().rawContext.decodeAudioData(arrayBuffer);
+  const ch0 = raw.getChannelData(0);
+  let peak = 0;
+  let sumSq = 0;
+  for (let i = 0; i < ch0.length; i++) {
+    const a = Math.abs(ch0[i]);
+    if (a > peak) peak = a;
+    sumSq += ch0[i] * ch0[i];
+  }
+  const rms = Math.sqrt(sumSq / ch0.length) || 1e-6;
+  const gain = Math.min(CHOP_TARGET_RMS / rms, 0.891 / (peak || 1));
+  const buffer = new AudioBuffer({ length: raw.length, numberOfChannels: raw.numberOfChannels, sampleRate: raw.sampleRate });
+  for (let c = 0; c < raw.numberOfChannels; c++) {
+    const src = raw.getChannelData(c);
+    const dst = buffer.getChannelData(c);
+    for (let i = 0; i < src.length; i++) dst[i] = src[i] * gain;
+  }
+  chopKit = { buffer, slices: sliceChops(buffer, mode), name, mode };
+  return { name, count: chopKit.slices.length };
+}
+
+// Rows are slices, and rows past the last slice replay the set at double
+// rate — D6's per-slice repitch paid for by row height instead of a knob.
+// Raw context nodes per hit, the playSampleHit discipline; a 4 ms tail ramp
+// declicks the slice edge.
+function playSliceOn(g, n, time) {
+  const count = chopKit.slices.length;
+  const row = n.midi - 60;
+  const idx = ((row % count) + count) % count;
+  const rate = Math.pow(2, Math.max(0, Math.floor(row / count)));
+  const s = chopKit.slices[idx];
+  const ctx = g.chopGain.context.rawContext;
+  const src = ctx.createBufferSource();
+  src.buffer = chopKit.buffer;
+  src.playbackRate.value = rate;
+  const level = ctx.createGain();
+  const vel = n.vel ?? 0.9;
+  const bufDur = Math.min(s.dur, sixteenth() * (n.len || 1) * rate + 0.01);
+  const endT = time + bufDur / rate;
+  level.gain.setValueAtTime(vel, time);
+  level.gain.setValueAtTime(vel, Math.max(time, endT - 0.004));
+  level.gain.linearRampToValueAtTime(0, endT);
+  src.connect(level);
+  level.connect(g.chopGain.input);
+  src.onended = () => {
+    src.disconnect();
+    level.disconnect();
+  };
+  src.start(time, s.start, bufDur);
+}
+
 // Condition a raw take into a one-shot that sits beside the bundled library:
 // find the onset, trim the room before it and the noise after it, fade the
 // edges, cap at 1.5 s, and normalize to the voice's library RMS target under
@@ -380,6 +468,7 @@ export function defaultPatch(track) {
     p.bank = "sample";
     p.pins = {};
   }
+  if (track === "melody") p.source = "synth";
   return p;
 }
 
@@ -401,6 +490,7 @@ function normalizePatch(track, raw = {}) {
     }
     p.pins = pins;
   }
+  if (track === "melody") p.source = p.source === "chops" ? "chops" : "synth";
   return p;
 }
 
@@ -845,6 +935,9 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
   g.leadHighpass = new Tone.Filter({ type: "highpass", frequency: 180, Q: 0.7 }).connect(g.colorIn.melody);
   g.leadFilter = new Tone.Filter({ type: "lowpass", frequency: 3200, Q: 0.6 }).connect(g.leadHighpass);
   g.leadLayers = makeLayers(MELODY_PRESETS, 5, g.leadFilter, SOURCE_LEVEL_DB.melody);
+  // Chops land at the color junction like the drum one-shots at theirs:
+  // pre-shaped audio skips the synth lane's filters, keeps color and sends.
+  g.chopGain = new Tone.Gain(Tone.dbToGain(-2)).connect(g.colorIn.melody);
   g.layers = { harmony: g.padLayers, bass: g.bassLayers, melody: g.leadLayers };
 
   // Sample playback lands here: one static gain per voice, straight into the
@@ -1119,17 +1212,28 @@ function eachActiveLayer(g, track, patch, fn) {
 // low root hint stays anchored — it is the harmonic glue under the chord,
 // and bass owns the register it would otherwise wander into.
 function playChordOn(g, patches, vstate, entry, time, oct = 0) {
-  // entry is a scale degree or a borrowed {pcs} — harmonyChord speaks both.
+  // entry is a scale degree or a {pcs} chord — harmonyChord speaks both. The
+  // triad voice-leads; a stored fourth tone (a 7th, a 9th) rides above the
+  // voicing, same law as the circle's audition path.
   const pcs = harmonyChord(entry).pcs;
-  const voiced = voiceLead(pcs, vstate.prev);
+  const voiced = voiceLead(pcs.slice(0, 3), vstate.prev);
   vstate.prev = voiced;
+  const notes = voiced.slice();
+  const top = Math.max(...voiced);
+  for (const pc of pcs.slice(3)) notes.push(pc + 12 * Math.ceil((top + 1 - pc) / 12));
   const shift = 12 * oct;
-  eachActiveLayer(g, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(voiced.map((m) => midiToFreq(m + shift)), "1n", time));
-  g.halo.triggerAttackRelease(midiToFreq(Math.max(...voiced) + 12 + shift), "1n", time);
+  eachActiveLayer(g, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(notes.map((m) => midiToFreq(m + shift)), "1n", time));
+  g.halo.triggerAttackRelease(midiToFreq(top + 12 + shift), "1n", time);
   g.sub.triggerAttackRelease(midiToFreq(48 + pcs[0]), "1n", time);
 }
 
 function playNoteStackOn(g, patches, track, slot, time) {
+  // The melody lane's chops source: rows trigger slices instead of the synth.
+  // No kit loaded falls through to the synth, so the toggle can't go silent.
+  if (track === "melody" && patches.melody.source === "chops" && chopKit) {
+    for (const n of noteSlot(slot)) playSliceOn(g, n, time);
+    return;
+  }
   const stretch = track === "bass" ? 1.1 : 1;
   const boostPreset = track === "bass" ? dominantCorner("bass", patches.bass) : null;
   for (const n of noteSlot(slot)) {
@@ -2053,6 +2157,17 @@ export function createAudio(song) {
     motionArmed: (track) => motionArmed[track],
     disarmMotion() {
       for (const t of TRACK_KEYS) motionArmed[t] = false;
+    },
+    // --- the chop deck ---
+    async loadChopSample(arrayBuffer, name, mode = "auto") {
+      wakeContext();
+      return decodeChop(arrayBuffer, name, mode);
+    },
+    chopInfo: () => (chopKit ? { name: chopKit.name, count: chopKit.slices.length, mode: chopKit.mode } : null),
+    setChopMode(mode) {
+      if (!chopKit) return;
+      chopKit.mode = mode === "grid" ? "grid" : "auto";
+      chopKit.slices = sliceChops(chopKit.buffer, chopKit.mode);
     },
     userSampleName: (voice) => userSamples[voice]?.name || null,
     async loadUserSample(voice, arrayBuffer, name) {

@@ -214,7 +214,7 @@ function circleCapture(chord) {
   if (!scene?.harmony?.length) return false;
   // Diatonic wedges store their degree (follows key changes for free);
   // borrowed wedges store pitch classes (D13) — the violet visitors.
-  const entry = chord.degree >= 0 ? chord.degree : { pcs: chord.pcs.slice(0, 3) };
+  const entry = chord.degree >= 0 ? chord.degree : { pcs: chord.pcs.slice(0, 4) };
   const slot = circleBar % scene.harmony.length;
   if (harmonyEntryEquals(scene.harmony[slot], entry)) return false;
   pushUndo();
@@ -414,6 +414,38 @@ function renderFooter() {
     grooveSlider,
     grooveVal,
   ]);
+  // The humanizer: per-hit timing drift, a hand instead of a grid. Same
+  // snapshot-on-first-change undo discipline as the groove slider.
+  const humanVal = el("span", { class: "swval", text: Math.round((song.humanize || 0) * 100) + "%" });
+  const humanSlider = el("input", {
+    type: "range",
+    min: "0",
+    max: "1",
+    step: "0.01",
+    value: String(song.humanize || 0),
+    class: "swingslider humanslider",
+  });
+  let humanPre = null;
+  humanSlider.addEventListener("pointerdown", () => {
+    humanPre = null;
+  });
+  humanSlider.addEventListener("change", () => {
+    humanPre = null;
+  });
+  humanSlider.addEventListener("input", () => {
+    if (!humanPre) {
+      humanPre = snapshot();
+      markTouched();
+      commitUndo(humanPre);
+    }
+    song.humanize = parseFloat(humanSlider.value);
+    humanVal.textContent = Math.round(song.humanize * 100) + "%";
+  });
+  const human = el("div", { class: "swingctl" }, [
+    el("span", { class: "swlabel", text: "HUMAN" }),
+    humanSlider,
+    humanVal,
+  ]);
   // The key control IS the circle: one button wearing the key's honest name,
   // opening the wheel. Where the two dropdowns stood.
   const keyBtn = el("div", {
@@ -431,7 +463,7 @@ function renderFooter() {
   const diceBtn = el("div", { class: "tbtn accent", text: "🎲", id: "dice-btn", title: "New song: random key, tempo, sounds", onclick: rerollSong });
   const aboutBtn = el("div", { class: "tbtn", text: "?", id: "about-btn", title: "What is this?", "data-sheet": "about", onclick: openAboutSheet });
   footer.append(
-    el("div", { class: "frow" }, [keyctl, diceBtn, aboutBtn, groove])
+    el("div", { class: "frow" }, [keyctl, diceBtn, aboutBtn, groove, human])
   );
 }
 
@@ -461,7 +493,7 @@ function openAboutSheet() {
     p("Tap the key name at the bottom and the circle of fifths opens. The bright neighborhood is your key — tap a wedge to hear its chord, hold it for sevenths and sus, drag across them to strum. The dim wedges outside are chords you can borrow. Arm ● and a clean tap lands in the playing clip. Drag the rim to carry the whole song to a new key and watch the sharps arrive one by one; drag the white dot to call the same notes by another mode's name; hold the middle and everything you tap comes back mirrored; pinch open to see why twelve fifths never quite close."),
 
     label("sound"),
-    p("Tap a track's name — or ✦ on its mixer strip — to open its sound: a morph pad with four sounds in the corners, everything between them yours to find. Add one color — crush, phase, trem, wob; drums take crush — with its own amount and motion. Pocket swings that one track against the global GROOVE. Drums come in two banks, sampled kits and a synth kit, and every drum can pin a one-shot, load a WAV, or 🎙 record your own mouth."),
+    p("Tap a track's name — or ✦ on its mixer strip — to open its sound: a morph pad with four sounds in the corners, everything between them yours to find. Add one color — crush, phase, trem, wob; drums take crush — with its own amount and motion. Pocket swings that one track against the global GROOVE, and HUMAN drifts every hit a few milliseconds like hands would. Drums come in two banks, sampled kits and a synth kit, and every drum can pin a one-shot, load a WAV, or 🎙 record your own mouth. Melody has two sources: the synth, or chops — load any sample and it lands sliced across the rows, the upper rows replaying at double speed."),
 
     label("ride"),
     p("Arm ● ride in a sound sheet, hit play, and perform: your moves on the pad and knobs are captured to the beat and loop with the clip from then on. Rides live in the scene, save with the project, and play in exports. A clip wearing ∿ has one."),
@@ -850,8 +882,11 @@ function applyKeyScale(key, scale) {
   song.key = ((key % 12) + 12) % 12;
   song.scale = scale;
   setScaleContext(song.key, song.scale);
+  const melodyIsChops = audio.patch("melody").source === "chops";
   for (const sc of song.scenes) {
     for (const trk of ["bass", "melody"]) {
+      // Chops rows are slice indices, not pitches — key travel leaves them be.
+      if (trk === "melody" && melodyIsChops) continue;
       for (let s = 0; s < 16; s++) {
         for (const n of noteSlot(sc[trk][s])) n.midi = snapToScale(n.midi + delta);
       }
@@ -2046,6 +2081,61 @@ function openSoundSheet(track) {
     body.appendChild(el("div", { class: "propsection" }, [el("div", { class: "proplabel", text: "bank" }), bankChips]));
   }
 
+  // The melody track's two sources (DECISIONS P4): the synth, or the chop
+  // deck — load any sample and it lands sliced across the piano roll's rows.
+  if (track === "melody") {
+    const info = audio.chopInfo();
+    const srcChips = el("div", { class: "choicegrid two" }, [
+      choice("synth", patch.source !== "chops", () => {
+        audio.setPatch(track, { source: "synth" });
+        openSoundSheet(track);
+      }, { "data-action": "melody-src-synth" }),
+      choice("chops", patch.source === "chops", () => {
+        audio.setPatch(track, { source: "chops" });
+        openSoundSheet(track);
+      }, { "data-action": "melody-src-chops" }),
+    ]);
+    const rows = [el("div", { class: "proplabel", text: "source" }), srcChips];
+    if (patch.source === "chops") {
+      const chopFile = el("input", { type: "file", accept: "audio/*,.wav,.mp3,.m4a,.ogg", style: "display:none" });
+      const fileBtn = el("div", {
+        class: "tfbtn" + (info ? "" : " accent"),
+        text: info ? `${info.name} · ${info.count} slices` : "load a sample…",
+        "data-action": "chop-load",
+        onclick: () => chopFile.click(),
+      });
+      chopFile.addEventListener("change", async () => {
+        const f = chopFile.files?.[0];
+        if (!f) return;
+        fileBtn.textContent = "slicing…";
+        try {
+          await ensureStarted();
+          await audio.loadChopSample(await f.arrayBuffer(), f.name.replace(/\.[^.]+$/, ""), audio.chopInfo()?.mode || "auto");
+          openSoundSheet(track);
+        } catch {
+          fileBtn.textContent = "couldn't read that file";
+        }
+      });
+      rows.push(el("div", { class: "tfrow" }, [fileBtn, chopFile]));
+      if (info) {
+        rows.push(
+          el("div", { class: "proplabel", text: "slice at" }),
+          el("div", { class: "choicegrid two" }, [
+            choice("hits", info.mode !== "grid", () => {
+              audio.setChopMode("auto");
+              openSoundSheet(track);
+            }, { "data-action": "chop-auto" }),
+            choice("grid", info.mode === "grid", () => {
+              audio.setChopMode("grid");
+              openSoundSheet(track);
+            }, { "data-action": "chop-grid" }),
+          ])
+        );
+      }
+    }
+    body.appendChild(el("div", { class: "propsection" }, rows));
+  }
+
   {
     const padWrap = el("div", { class: "propsection pad-section" }, [el("div", { class: "proplabel", text: "morph" })]);
     const xy = el("div", { class: "xy-pad", style: `--tc:${meta.color}`, "data-action": `xy-${track}` });
@@ -2535,7 +2625,14 @@ function makeStepCursor(container, cellFor, first, count, lastCellFor = cellFor)
 
 function buildPianoEditor(sceneIndex, scene, track) {
   const cfg = PIANO[track];
-  const rows = scaleNotes(cfg.base, cfg.rows).reverse(); // high pitch on top
+  // Chops mode: rows ARE slices (midi 60 = slice 1), the upper run replays
+  // the set at double speed. Otherwise, the scale-snapped pitch rows.
+  const chops = track === "melody" && audio.patch("melody").source === "chops" ? audio.chopInfo() : null;
+  const rows = chops
+    ? Array.from({ length: Math.min(32, chops.count * 2) }, (_, i) => 60 + i).reverse()
+    : scaleNotes(cfg.base, cfg.rows).reverse(); // high pitch on top
+  const rowLabel = (midi) =>
+    chops ? `s${((midi - 60) % chops.count) + 1}${midi - 60 >= chops.count ? "×2" : ""}` : noteName(midi);
   const lane = scene[track];
   const tc = trackColor(track);
 
@@ -2559,7 +2656,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
       onclick: () =>
         applyTf(() => {
           for (let b = 0; b < 4; b++) {
-            const ch = CHORDS[scene.harmony[b % scene.harmony.length]];
+            const ch = harmonyChord(scene.harmony[b % scene.harmony.length]);
             for (let k = 0; k < 4; k++) {
               let midi = pcToMidi(ch.pcs[k % 3], cfg.base);
               if (k === 3) midi += 12;
@@ -2646,7 +2743,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
     rowCells.push(cells);
     grid.appendChild(
       el("div", { class: "prow" }, [
-        el("div", { class: "pkey" + (midi % 12 === 0 ? " c" : ""), text: noteName(midi) }),
+        el("div", { class: "pkey" + (!chops && midi % 12 === 0 ? " c" : ""), text: rowLabel(midi) }),
         rowSteps,
       ])
     );
