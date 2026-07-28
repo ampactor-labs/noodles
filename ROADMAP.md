@@ -17,7 +17,11 @@ headless gates (`npm run smoke`, `npm run calibrate`).
    rides (DECISIONS D5) can be drawn and tweaked per step, plus send automation once
    the base-restore story against mixer state is decided.
 
-Shipped since the last revision: clip launch modes + follow-actions, the vertical mixer,
+Shipped since the last revision: the playable circle of fifths as the key selector
+(DECISIONS D12, design + v2 bank in DESIGN-CIRCLE.md) — sector-lit diatonic palette,
+tap/hold/strum chords through the harmony instrument, ● punch-in to the playing clip,
+rim-drag key travel with the accidentals arriving in order, playback trail weighted
+by shared tones; clip launch modes + follow-actions, the vertical mixer,
 sends, sidechain duck, per-preset loudness calibration, session record, WAV/stem export,
 project files, the dice, the morphable devices (XY pad between the preset corners +
 color/motion slot per track, calibration-gated), the bundled drum sample bank with

@@ -98,7 +98,33 @@ Measured end state (npm run audit): true peak from +5.1 to under 0 dBTP across t
 
 Left as an open fork, deliberately not chosen: the context sample rate. The `createAudio` comment claimed for a long time that it pinned 44100 to play the drum one-shots bit-exact and save ~8% DSP on 48 k phones, and it never did — `Tone.Context` takes no sampleRate option, so the option was accepted and dropped, and the app runs at the hardware's 48 k. Pinning it for real means constructing a native `AudioContext({sampleRate})` and handing it to Tone, which steps outside the standardized-audio-context wrapper Tone leans on for cross-browser param behaviour. That's a live tradeoff for the builder, not an oversight to paper over; the comment now says what the code does.
 
-## Provisional (my recommendation, argue against it)
+## Ratified 2026-07-28
+
+### D12 — The circle of fifths is the key selector, and it is playable
+
+The KEY control opens a full-width circle-of-fifths sheet (`src/circle.js`)
+replacing the two footer dropdowns. Majors ride the outer ring, relative
+minors the inner, and the seven diatonic chords of any key form a contiguous
+patch on that layout — IV/I/V outer, ii/vi/iii under them, vii° on the edge —
+so the key's palette is a bright sector and a borrowed chord is literally a
+longer reach. Verified for all 72 mode/key pairs (.tmp/dbg-circle-theory.mjs);
+full reasoning and the v2 bank in DESIGN-CIRCLE.md.
+
+The calls inside it, each revertable on its own: the wheel never rotates
+(stations are muscle memory; the sector slides instead, so modulation reads
+as travel); the rim is the key-drag handle (wedge taps sound, wedge drags
+strum, and the rim IS the signature layer you're changing); taps sound at the
+immediate clock while writes bar-quantize (the tapTime lesson outranks the
+"quantize like scene launch" brief); writing into the playing clip requires
+the sheet's ● arm and lands only on a clean tap; borrowed chords play but
+don't store, because scene.harmony speaks scale degrees — extending storage
+to chromatic pcs is a named fork, not an accident. Mode rendering falls out
+of the geometry: the sector sits at the relative major's station and the
+home outline sits on the tonic's wedge, so dorian is C major's house entered
+at d. One naming split accepted knowingly: station labels and key names
+spell by circle side (B♭, E♭) while pcName stays sharp-only inside clips
+(A♯) — per-key spelling is banked, first in line.
+
 
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 

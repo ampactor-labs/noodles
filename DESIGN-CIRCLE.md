@@ -1,0 +1,167 @@
+# The circle of fifths — design notes
+
+The KEY button in the footer opens a wheel instead of two dropdowns. The wheel
+is the key selector, a playable chord surface over the harmony instrument, and
+the place where the song watches itself go by. This file records why it is
+shaped the way it is, what got cut, and what is banked for later. The code is
+`src/circle.js`; the theory it leans on is in `src/model.js` (station
+arithmetic, signatures, the mode offsets), verified across all 72 mode/key
+pairs by `.tmp/dbg-circle-theory.mjs`.
+
+## The sector
+
+Lay majors on the outer ring and relative minors inside, and the seven
+diatonic chords of any key form a contiguous patch: IV, I, V adjacent on the
+outer ring, ii, vi, iii directly beneath them, vii° at the edge. The chord
+palette for a key is a neighborhood. That single fact carries the whole
+design, because the handoff's harmony principle ("diatonic close and
+reachable, chromatic a deliberate reach") stops needing an invented layout —
+the theory's own geometry is already the ergonomics. Borrowed chords are
+literally a longer reach.
+
+The math that makes it work: stations are pitch classes multiplied by 7
+(mod 12), and since 7·7 ≡ 1, the same multiplication runs both directions.
+A key's signature is just its station. Every seven-note mode is a rotation of
+major, so a mode's sector is its relative major's sector; the tonic lands on
+a different wedge inside it. C major and A minor and D dorian share one
+neighborhood and differ only in which wedge is the front door. The white home
+outline moves; the sector stays. Seven scary mode names collapse into "same
+house, different door."
+
+## What the wheel never does
+
+It never rotates. C is always at twelve o'clock, D is always two steps
+clockwise, always 2♯. Position becomes muscle memory, which is the point:
+changing key slides the bright region around a fixed world, so modulation
+reads as travel, and the distance you dragged is the drama you'll hear.
+
+## Gestures, and the calls behind them
+
+Tap a wedge and it sounds at the immediate clock. The pasted brief said
+"quantized like scene launch," but this repo already paid for that lesson the
+other way: Tone's `now()` adds the 0.25 s lookahead, and a quarter-second-late
+tap reads as a broken instrument (ROADMAP, the 2026-07-18 pass). Sound is
+immediate; the *write* is what quantizes, because harmony is one chord per
+bar by construction.
+
+Writes need arming. The ● in the sheet bar is the same idiom as session
+record and motion capture: armed, a clean tap replaces the chord being heard
+in the playing clip (undo per change, same as the chord editor). Strums and
+holds never write — a strum is a run, a hold is an audition; one intent, one
+write. Unarmed, the circle is a pure instrument, which is the right cold
+state for jamming over a loop.
+
+Hold and the extension bloom opens: 7, 9, sus4, sus2 as pads fanned away
+from the thumb. The pads are diatonic, which is why there is no maj7 pad —
+one "7" comes out maj7 on I and IV, dominant on V, half-diminished on the
+seam, and the hole names which one you got. That surprise is the lesson about
+seventh quality being positional, delivered by a pad instead of a paragraph.
+(HCI literature on marking menus backs the layout: targets far from the
+touch point to defeat occlusion, selection echoed somewhere the finger can't
+cover. Our echo point is the hole.)
+
+Drag across wedges to strum. Drag the rim to travel: the sector ghost rides
+the finger, each station crossed ticks the haptic, and the accidentals light
+up along the rim in the order the walk collects them — F♯, then C♯, then G♯.
+The order of sharps is never taught anywhere in the app. It is the rim, read
+in travel order, and it appears only during the gesture that asks for it.
+Release commits through the same transpose path the old dropdowns used;
+a canceled drag commits nothing (the pinch law from the arrangement).
+
+The rim is the travel handle for a reason: tap and drag on wedges were
+already taken by sound and strum, and the rim *is* the signature layer — you
+grab the key by its signature, and the signature is the thing that changes
+under your finger.
+
+## The seam
+
+vii° never had a home on any poster circle, because its root's own station is
+five steps away from the key (B sits at station 5 while C's sector spans
+11–1). Rather than pretend, the diminished chord lives as a thin sliver on
+the sector's clockwise edge, between V and the world outside. Musically it is
+V7's upper structure, so the dominant edge is its honest address: the tension
+chord lives on the boundary. Thin to see, fat to hit (the hit test pads it).
+
+## What is volunteered vs. what is pull
+
+Volunteered: shapes and colors only. The sector's wedges wear the chord
+picker's function hues; outside stays neutral; rim signatures sit at whisper
+opacity. Names arrive on demand: hold a wedge and the hole names the chord,
+its roman numeral from home, and (outer ring) the station's signature. The
+hole reads home when idle, the candidate key while traveling, the held chord
+while holding — one surface, three moments, nothing modal.
+
+The trail is the song watching itself: playback chords walk the wheel,
+consecutive chords connect with a line whose weight is their shared-tone
+count. Near on the circle means shared notes means smooth, and the trail
+makes that law visible without saying it. I–IV–V draws a tight triangle at
+home; a borrowed chord lunges outside the sector and looks like the trespass
+it is.
+
+## The naming split, on purpose
+
+Station labels spell by circle position (flat side flat: E♭, B♭, D♭), and
+`keyDisplayName` in the model now names keys the same honest way — the footer
+says "E♭ dorian," not "D♯ dorian." But `pcName` is still sharp-only, so chord
+names inside clips read "A♯" where the circle says "B♭." That mismatch is
+visible and accepted for v1; fixing it properly means per-key preferred
+spelling through `rebuildChords` and the piano roll, which touches every
+name surface in the app. First item in the bank below.
+
+## Cut from v1, and why
+
+- A floating name card over the bloom: collided with its own pads on
+  top-of-wheel holds; the hole was already the better card.
+- Beat shimmer on the sector: the per-bar chord pulses are the heartbeat;
+  more blinking is noise.
+- "V of V" aliases on the card: one more clause on a two-line card; the
+  roman-from-home already carries the relationship.
+- Tap-the-hole as a labels dial: the learning-opacity dial deserves a real
+  design pass, not a hidden toggle.
+- Writing borrowed chords into clips: not a cut so much as a boundary —
+  `scene.harmony` stores scale degrees, so the bright region is exactly what
+  the clip can hold. Honest, and it makes the soft wall physical: you can
+  visit ♭VII, and if you want to live there, you move the key.
+
+## Banked for v2, each one a reveal
+
+- **Drag the front door.** Slide the home marker within the fixed sector to
+  change mode directly — dorian as "same neighborhood, enter at d." The scale
+  chips already do the choosing; this makes the geometry do it.
+- **The spiral.** Pinch out and the circle un-closes into the Pythagorean
+  spiral: twelve 3:2 fifths miss home by 23.46 cents, and equal temperament
+  splits the difference (700 instead of 701.955). One dismissible line for
+  the engineer who has been hearing that ratio his whole mixing life.
+- **Negative harmony mirror.** Reflect the trail across the key's axis and
+  audition the reflection. A plaything, never a term.
+- **The staff projection.** Retroactive notation: the same clip rendered as
+  an engraved staff with the key signature the circle already knows. The
+  opacity dial slides piano roll into sheet music.
+- **Chromatic harmony storage.** Let a harmony slot hold `{pcs}` alongside
+  degree indices so borrowed chords become writable. A real model fork;
+  surface it in DECISIONS before building.
+- **Extension storage** (7/9/sus on stored chords) — same fork, smaller.
+- **Per-key spelling** through `pcName`/`rebuildChords`, ending the A♯/B♭
+  split.
+- **Partner dares.** Constraint clips a teacher can hand you ("stay in E♭,
+  no voice moves more than a step") — the soft-wall mechanism already
+  exists; this points it at two people on a couch.
+
+## Performance shape
+
+One canvas, DPR capped at 2. The wheel, labels, sector, and rim render once
+into a static layer, redrawn only on key/scale change or resize; animated
+frames composite that image with the trail, pulses, and drag ghosts. rAF
+runs only while the sheet is open and something is moving — an idle open
+circle schedules zero frames, a closed one costs nothing at all. Playback
+with the sheet open costs one `drawImage` plus a handful of strokes per
+frame on a ~350 px square. Receipts: `.tmp/dbg-circle.mjs` (screenshots,
+travel, trail), and the circle section in `npm run smoke` (armed punch,
+travel commit, undo restore).
+
+## Prior art, one line
+
+Existing circle apps — the Play Store's, the CodePen SVG wheels — are
+reference cards: tap a key, read a list, maybe hear an arpeggio. The gap this
+design fills is the circle as *instrument*: the sector as playable palette,
+key change as a drag you can hear, theory surfacing only under a held finger.

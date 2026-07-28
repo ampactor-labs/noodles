@@ -90,8 +90,9 @@ logic by reading state, and lean on the builder for on-device audio/feel checks.
 
 ## Architecture
 
-Four files under `src/` + `index.html`. Keep the boundaries: model is pure data + theory, audio is the
-Tone.js graph, main is all UI/interaction, index.html is the shell + CSS.
+Five files under `src/` + `index.html`. Keep the boundaries: model is pure data + theory, audio is the
+Tone.js graph, main is all UI/interaction, circle is the one carved-out view (a canvas
+projection of the model, wired by main), index.html is the shell + CSS.
 
 **`src/model.js`** — pure data and music theory, no DOM, no Tone. The `song`:
 
@@ -166,6 +167,22 @@ instrument. Don't wrap a
 custom-sampleRate native AudioContext in Tone.Context: it throws stackless
 InvalidStateErrors somewhere inside Tone (tried for the 48k→44.1k saving, reverted).
 
+**`src/circle.js`** — the circle of fifths, opened from the footer's KEY button:
+a canvas wheel where majors ride the outer ring, relative minors the inner, and the
+current key's seven diatonic chords light up as a contiguous function-colored sector
+(vii° is the thin sliver on the sector's clockwise edge). It is a pure view over
+`song.key`/`song.scale` and `CHORDS` — tap a wedge to sound its chord (voice-led,
+immediate clock), hold for the diatonic extension bloom (7/9/sus4/sus2) with names
+in the center hole, drag across wedges to strum, drag the rim to change key (the
+sector slides around a fixed wheel; accidentals light up in arrival order during
+the drag). The sheet's ● arms writing: a clean tap then replaces the chord being
+heard in the playing clip, bar-quantized because harmony is one chord per bar.
+Playback chords draw a fading trail whose segment weight is the shared-tone count.
+Rendering is a cached static layer plus rAF only while open and animating; theory
+helpers (station math `pc·7 mod 12`, signatures, `keyDisplayName`, diatonic
+extension intervals) live in model.js. `window.__noodlesCircle` exposes geometry
+for the harnesses; design reasoning and the v2 bank are in `DESIGN-CIRCLE.md`.
+
 **`src/main.js`** — all UI and interaction, vanilla DOM (no framework). It builds: the
 transport (pinned **play + undo + redo** that never scroll and sit above any open editor,
 then BPM ±, KEY + scale picker, GROOVE, Session|Arrange toggle, Mix, +); the Session clip
@@ -190,7 +207,8 @@ hatched bars replay silent in playback and every export); four clip editors, eac
 velocity lane; vertical mixer strips (fader, pan, reverb + echo sends, live meters with peak
 hold, preset pickers); loudness-matched device presets per track; randomized-but-balanced
 cold open (key, scale, tempo, presets, magic scene) plus a 🎲 button that rerolls it all;
-global Key + Scale (the whole app transposes and re-snaps in key); one-tap Transforms;
+global Key + Scale via the playable circle of fifths (the whole app transposes and
+re-snaps in key; keys wear their honest spelling — E♭, not D♯); one-tap Transforms;
 undo/redo; groove/swing; WAV export (master + four stems, plus a seamless loop render when
 the arrangement loop is set) through the same graph as live playback, handed back as
 tap-to-save buttons because a long render outlives a phone tap's transient activation;
