@@ -151,6 +151,29 @@ and the borrowed-punch assertion in npm run smoke.
 
 ## Provisional (my recommendation, argue against it)
 
+### P4 — The chop deck lives on the melody track, as a source toggle
+
+D6 settled WHAT the chop deck is (load a WAV, slice at transients or grid,
+slices on pads, sequence on the 16 steps, repitch via playbackRate) but not
+WHERE it lives, and that fork shapes everything downstream. My
+recommendation: the melody track gains a source toggle — synth | chops —
+exactly the idiom the drums already use for their sample/synth banks. Rows
+in the piano roll become slices; the existing lane data (16 slots of
+{midi, len, vel}) needs no model change because midi maps to slice index
+with the offset doubling as repitch; velocity lanes, transforms, polymeter
+steps, arrangement, undo, and offline export all come along for free. The
+chop buffer stays session-scoped, the same standing limitation as
+user-recorded drum one-shots (that persistence fork is still open and the
+answer should cover both).
+
+Argued against the alternatives: a third drum bank caps chops at four
+voices, which cripples the idea; a fifth track ripples through the audio
+graph, the mixer, session record, stems, and every TRACK_KEYS loop for one
+feature. The melody-source shape touches audio.js (a slice-playback branch
+beside playNoteStackOn) and the piano roll's row labels, and nothing else.
+Provisional because it decides what the melody track IS when a sample is
+loaded — ratify or overturn before the build.
+
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 
 Reading §7 straight: the couch-songwriting cold open is the milestone, the backing-track/Link scenario is phase two. Confirm this is the priority order before the research pass sets its emphasis.

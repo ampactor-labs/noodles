@@ -146,14 +146,25 @@ this file (receipts in the theory oracle and the smoke gate):
   only where the promise breaks. The voice-leading threads landed beside it,
   which closes the handoff's own "common tones light up" line.
 
+And the two gasps landed the same evening:
+
+- **The spiral** — built. Pinch out and the wheel un-closes into the walk of
+  pure fifths: each station drifts by its 1.955-cent excess and B♯ arrives
+  23.46 cents past home, radially and angularly off C, with a dashed line
+  across the gap. The one line of why fades in only at full stretch —
+  "a fifth is 3:2 — walk twelve and you miss home by 23 cents; equal
+  temperament splits the difference" — and pinching back dismisses it. Two
+  fingers only become a pinch once their distance moves, so two-thumb chords
+  stay two taps.
+- **The mirror** — built. Rest a finger on the hole and the key's axis draws
+  itself (tonic to dominant, dashed); every tap the other hand makes
+  reflects across it (pc → 2·tonic + 7 − pc). Major and minor swap by
+  arithmetic, IV comes back as v, and most reflections land in the parallel
+  minor — borrowed, violet, and storable through D13 when armed. The hole
+  names each reflection as it sounds. A plaything; the term appears nowhere.
+
 Still banked, each one a reveal:
 
-- **The spiral.** Pinch out and the circle un-closes into the Pythagorean
-  spiral: twelve 3:2 fifths miss home by 23.46 cents, and equal temperament
-  splits the difference (700 instead of 701.955). One dismissible line for
-  the engineer who has been hearing that ratio his whole mixing life.
-- **Negative harmony mirror.** Reflect the trail across the key's axis and
-  audition the reflection. A plaything, never a term.
 - **Extension storage** (7/9/sus on stored chords) — the D13 fork's smaller
   sibling; the bloom already plays them.
 - **The melody staff.** The piano roll's own slide toward notation; needs a
