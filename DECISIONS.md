@@ -240,6 +240,29 @@ static send is off — without that scan a recorded ride rendered dry.
 Revert is deleting the SEND_PARAMS branch in applyMotionOn; ride lanes in
 project files would then just be ignored keys.
 
+### D17 — Every roll gets a room: the depth floor revises D9's dry default
+
+"The overall mix is ass" — the builder, on device. D9 made dry the
+default on the theory that the dry mix is the meaty one; in practice a
+bone-dry roll reads flat, not meaty, because nothing shares a space
+(65% of rolls carried zero send). The revision: the dice still owns the
+sends, but what it rolls now has a floor — a shared small room on the
+pad and lead (-20..-16 dB), a breath of it on the drums (-27..-23), the
+deep-wet third unchanged on top, bass never (low-end discipline holds).
+The verb return gains 20 ms of pre-delay, so the ear locks onto the dry
+signal before the tail arrives and the room reads as depth behind the
+mix rather than wash on it.
+
+Alongside it, the phone-speaker translation layer: three static carve
+filters, both grades, priced at three biquads. Bass +2 dB peaking at
+900 Hz (a phone driver can't make the fundamental; the note must live
+in its harmonics), lead +1.8 dB high shelf at 2.6 kHz (presence under
+its lowpass), pad -2 dB peaking at 320 Hz (the boxy band where stacked
+chords go dull). A full-mix saturator was considered and skipped: the
+D7 ceiling already gives every path the shared nonlinearity, and D11's
+measured gain structure outranks a research checkbox. Receipts:
+calibrate spreads and the audit program loop, run with the change.
+
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 
 Reading §7 straight: the couch-songwriting cold open is the milestone, the backing-track/Link scenario is phase two. Confirm this is the priority order before the research pass sets its emphasis.

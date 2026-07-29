@@ -1217,6 +1217,10 @@ function rerollSong() {
   playingScene = -1;
   for (const t of TRACKS) playingTracks[t.key] = -1;
   refreshAll();
+  // Reclaim the old song's voice-pool growth once its tails have released —
+  // each roll otherwise leaves the pools a little fuller, and the phone's
+  // audio thread pays for every pooled voice's running param sources.
+  setTimeout(() => audio.trimVoices?.(), 1500);
 }
 
 // Change the global key/scale; harmony follows automatically (it's degree-based),
@@ -3195,6 +3199,11 @@ function buildPianoEditor(sceneIndex, scene, track) {
     const S = 8;
     const bass = bassClef; // the lane's register picks the clef, not the track name
     const baseStep = bass ? 25 : 37; // bottom line: G2 on the bass staff, E4 on the treble
+    // Bass parts are WRITTEN an octave above sounding - the bass-guitar
+    // convention, marked by the small 8 under the clef. Without it a rolled
+    // E1 sits five ledger lines under the staff and its head clips right
+    // off the canvas: notes that play but never show.
+    const written = track === "bass" ? 12 : 0;
     const bottomY = h - 24;
     const yOf = (step) => bottomY - (step - baseStep) * (S / 2);
     c.strokeStyle = "rgba(255,255,255,0.3)";
@@ -3212,6 +3221,12 @@ function buildPianoEditor(sceneIndex, scene, track) {
     drawStaffLetters(c, yOf, baseStep, bass, S);
     if (bass) drawFClef(c, S * 2.2, yOf(baseStep + 6), S);
     else drawGClef(c, S * 2.3, yOf(baseStep + 2), S);
+    if (written) {
+      // The sub-octave numeral: this staff sounds an octave lower than written.
+      c.font = `700 ${Math.round(S * 1.1)}px system-ui, sans-serif`;
+      c.textAlign = "center";
+      c.fillText("8", S * 3.2, yOf(baseStep) + S * 0.9);
+    }
     const sig = keySignature(song.key, song.scale);
     const units = sig > 0 ? [8, 5, 9, 6, 3, 7, 4] : [4, 7, 3, 6, 2, 5, 1];
     c.textAlign = "center";
@@ -3231,7 +3246,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
     for (let s = viewOff; s < viewOff + viewCount; s++) {
       const x = x0 + (s - viewOff) * colW;
       for (const n of noteSlot(lane[s])) {
-        const sp = spellPitch(n.midi);
+        const sp = spellPitch(n.midi + written);
         const rel = sp.step - baseStep;
         c.strokeStyle = "rgba(255,255,255,0.3)";
         c.lineWidth = 1;

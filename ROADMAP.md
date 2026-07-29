@@ -14,6 +14,16 @@ The agreed list is clear — everything on it shipped. Named follow-ups, not
 yet agreed: all-scenes sheet music, mixer ∿ badges for send-ride lanes,
 MIDI export.
 
+The mix pass of 2026-07-28 late (D17): every dice roll now lands with a
+depth floor (shared room on pad/lead, a breath on drums, bass dry), the
+verb return took 20 ms of pre-delay, and three static carve filters handle
+phone-speaker translation (bass 900 Hz presence, lead 2.6 kHz shelf, pad
+320 Hz unbox). Same pass, perf: dice rolls no longer grow the voice pools —
+a boundary-time trim (dice, stop) reclaims idle voices the disabled GC used
+to leave behind (measured: settled graph 2102 → 1242 nodes after 12 rolls),
+and the bass roll staff adopted the written-octave convention (sub-8 clef)
+so low bass notes engrave on the canvas instead of clipping under it.
+
 Voicing chips shipped 2026-07-28: the extension ladder moved into the model
 (`ladderPcs`/`ladderRungOf`), the wheel's bloom pads delegate to it, and the
 chord editor grew a rung row — triad · 7 · 9 · 11 · 13 · sus4 · sus2 — that

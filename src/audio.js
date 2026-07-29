@@ -106,6 +106,23 @@ function disableVoiceGC(synth) {
     synth._gcTimeout = -1;
   }
 }
+// One-shot pool trim for musical boundaries (a dice roll, stop): dispose
+// idle voices beyond a warm floor, mirroring the body of the per-second GC
+// this app disables. The GC's churn on sparse lanes is why it's off; a trim
+// at a boundary has no lane to churn. Without it every roll's dense
+// retrigger burst leaves the pools a little fuller — measured ~13 live
+// oscillators (with forever-running param ConstantSources) per roll,
+// plateauing only when all twelve layer pools hit their caps
+// (.tmp/dbg-dice-churn.mjs) — a bill the A16's audio thread pays per sample.
+function trimVoicePool(synth, keep = 1) {
+  if (!Array.isArray(synth._voices) || !Array.isArray(synth._availableVoices)) return;
+  while (synth._availableVoices.length > keep) {
+    const v = synth._availableVoices.shift();
+    const i = synth._voices.indexOf(v);
+    if (i >= 0) synth._voices.splice(i, 1);
+    v.dispose();
+  }
+}
 
 // A compressor that only compresses.
 function makeComp(spec) {
@@ -899,8 +916,13 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
   }
   // The HPs and send taps always exist (playback code sets their gains); a
   // skipped return just leaves them feeding a dangling — unrendered — edge.
+  // 20 ms of pre-delay before the verb: the ear locks onto the dry signal
+  // before the tail arrives, so the room reads as depth behind the mix
+  // instead of wash on top of it — the front/back panner, not a wet knob.
   g.reverbHP = new Tone.Filter({ type: "highpass", frequency: 200, Q: 0.7 });
-  if (g.reverb) g.reverbHP.connect(g.reverb);
+  g.reverbPre = new Tone.Delay({ delayTime: 0.02, maxDelay: 0.05 });
+  g.reverbHP.connect(g.reverbPre);
+  if (g.reverb) g.reverbPre.connect(g.reverb);
   if (!exportGrade || withEcho) {
     g.echo = new Tone.FeedbackDelay({ delayTime: "8n", feedback: 0.26, wet: 1 }).connect(g.musicDuck);
   }
@@ -1006,6 +1028,10 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
   // Harmony: morphing pad + mono shimmer an octave up + a quiet low-mid root
   // hint. Bass owns the low end, so the pad and the hint are highpassed.
   g.chorus = exportGrade ? new Tone.Chorus({ frequency: 0.4, delayTime: 4, depth: 0.6, wet: 0.35 }).start() : null;
+  // −2 dB at 320 Hz takes the box out of the pad: the 250–500 band is where
+  // stacked chords go dull on a phone driver, and the pad is the widest
+  // stack in the mix.
+  g.padUnbox = new Tone.Filter({ type: "peaking", frequency: 320, Q: 1.1, gain: -2 });
   g.padHighpass = new Tone.Filter({ type: "highpass", frequency: 170, Q: 0.6 });
   g.padFilter = new Tone.Filter({ type: "lowpass", frequency: 1500, Q: 0.7 });
   // The LFO OWNS the pad cutoff (a signal connected to a param overrides it —
@@ -1013,7 +1039,8 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
   // steer the cutoff by rescaling the LFO's min/max around the blended value.
   g.padLfo = new Tone.LFO({ frequency: 0.05, min: 850, max: 2600 }).connect(g.padFilter.frequency);
   g.padLfo.start();
-  g.padHighpass.connect(g.padFilter);
+  g.padHighpass.connect(g.padUnbox);
+  g.padUnbox.connect(g.padFilter);
   if (g.chorus) {
     g.padFilter.connect(g.chorus);
     g.chorus.connect(g.colorIn.harmony);
@@ -1036,13 +1063,20 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
     volume: SOURCE_LEVEL_DB.harmonyRoot,
   }).connect(g.rootHintFilter);
 
-  // Bass and lead: layers feed the shared drive/filter lane.
+  // Bass and lead: layers feed the shared drive/filter lane. The static
+  // carve filters are the phone-speaker translation layer (a 250 Hz–4 kHz
+  // driver hears midrange or nothing): the bass gets +2 dB of upper-harmonic
+  // presence at 900 Hz so its NOTE survives a speaker that can't make its
+  // fundamental, and the lead gets a +1.8 dB presence shelf at 2.6 kHz —
+  // under its lowpass — so the hook stays forward at low volume.
   g.bassHighpass = new Tone.Filter({ type: "highpass", frequency: 34, Q: 0.7 }).connect(g.colorIn.bass);
-  g.bassFilter = new Tone.Filter({ type: "lowpass", frequency: 750, Q: 0.9 }).connect(g.bassHighpass);
+  g.bassPresence = new Tone.Filter({ type: "peaking", frequency: 900, Q: 1, gain: 2 }).connect(g.bassHighpass);
+  g.bassFilter = new Tone.Filter({ type: "lowpass", frequency: 750, Q: 0.9 }).connect(g.bassPresence);
   g.bassDrive = new Tone.Distortion(0).connect(g.bassFilter);
   g.bassLayers = makeLayers(BASS_PRESETS, 4, g.bassDrive, SOURCE_LEVEL_DB.bass);
   g.leadHighpass = new Tone.Filter({ type: "highpass", frequency: 180, Q: 0.7 }).connect(g.colorIn.melody);
-  g.leadFilter = new Tone.Filter({ type: "lowpass", frequency: 3200, Q: 0.6 }).connect(g.leadHighpass);
+  g.leadPresence = new Tone.Filter({ type: "highshelf", frequency: 2600, gain: 1.8 }).connect(g.leadHighpass);
+  g.leadFilter = new Tone.Filter({ type: "lowpass", frequency: 3200, Q: 0.6 }).connect(g.leadPresence);
   g.leadLayers = makeLayers(MELODY_PRESETS, 5, g.leadFilter, SOURCE_LEVEL_DB.melody);
   // Chops land at the color junction like the drum one-shots at theirs:
   // pre-shaped audio skips the synth lane's filters, keeps color and sends.
@@ -2123,6 +2157,14 @@ export function createAudio(song) {
       for (const track of TRACK_KEYS) queuedTracks[track] = -1; // clear queues on stop
       queueEpoch += 1;
       scheduleVisual(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks(), queueEpoch }));
+      // Once the releases have rung out and the voices are back in the
+      // available pools, reclaim the session's pool growth.
+      setTimeout(() => this.trimVoices(), 1800);
+    },
+    // Dispose idle voices beyond a warm floor across every layer pool — the
+    // boundary-time complement to disableVoiceGC (see trimVoicePool).
+    trimVoices() {
+      for (const t of MELODIC_TRACKS) for (const layer of live.layers[t]) trimVoicePool(layer);
     },
     get playing() {
       return playing;

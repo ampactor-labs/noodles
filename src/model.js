@@ -702,16 +702,23 @@ function rollVibe() {
     // through the lead highpass and sits on the bass register — out.
     melodyBase: pickFrom([48, 60, 72]),
     bassBase: rnd() < 0.5 ? 36 : 24,
-    // Space: about a third of rolls arrive wet, keyed by track and send —
-    // verb on the pad and lead, echo on the lead, never bass or drums
-    // (low-end discipline; the returns are highpassed and ride the kick
-    // duck, so wet stays clean). The app side applies this generically.
-    wet: rnd() < 0.35
-      ? {
-          harmony: { verb: rint(-16, -9) },
-          melody: { verb: rint(-18, -10), ...(rnd() < 0.6 ? { echo: rint(-18, -10) } : {}) },
-        }
-      : null,
+    // Space: every roll gets a depth FLOOR — a shared small room on the pad
+    // and lead and a breath of it on the drums — because a bone-dry default
+    // reads flat, not meaty (the builder's verdict overruled D9's dry
+    // floor; D17). About a third of rolls arrive noticeably wet on top.
+    // Bass never (low-end discipline; the returns are highpassed and ride
+    // the kick duck, so wet stays clean).
+    wet: (() => {
+      const deep = rnd() < 0.35;
+      return {
+        harmony: { verb: deep ? rint(-16, -9) : rint(-20, -16) },
+        drums: { verb: deep ? rint(-24, -20) : rint(-27, -23) },
+        melody: {
+          verb: deep ? rint(-18, -10) : rint(-22, -17),
+          ...(rnd() < (deep ? 0.6 : 0.3) ? { echo: rint(-19, -12) } : {}),
+        },
+      };
+    })(),
     harmonyOct: rnd() < 0.15 ? (rnd() < 0.5 ? 1 : -1) : 0,
     polymeter: rnd() < 0.1 ? (rnd() < 0.5 ? "bass" : "melody") : null,
     bScene: rnd() < 0.6,
