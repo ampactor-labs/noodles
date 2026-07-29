@@ -1804,6 +1804,28 @@
         color: var(--text);
         margin-bottom: 10px;
       }
+      /* Gesture rows: the scannable half of the guide. Gesture on the left
+         in the accent, what it does on the right. */
+      .about-k {
+        display: grid;
+        grid-template-columns: minmax(84px, auto) 1fr;
+        gap: 4px 10px;
+        align-items: baseline;
+        margin-bottom: 3px;
+      }
+      .about-g {
+        color: #e8b84b;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .about-d {
+        font-size: 13px;
+        line-height: 1.45;
+        color: var(--text);
+      }
+      .about-k:last-of-type {
+        margin-bottom: 10px;
+      }
       .about-label {
         margin-top: 6px;
         margin-bottom: 7px;

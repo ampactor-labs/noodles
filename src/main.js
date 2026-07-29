@@ -498,39 +498,79 @@ function openAboutSheet() {
   sheet.appendChild(sheetBar("noodles", "a pocket instrument"));
   const p = (text) => el("div", { class: "about-p", text });
   const label = (text) => el("div", { class: "about-label", text });
+  const k = (g, d) => el("div", { class: "about-k" }, [el("div", { class: "about-g", text: g }), el("div", { class: "about-d", text: d })]);
   const body = el("div", { class: "editor-scroll" }, [
     p("This is an instrument. The song playing right now was rolled on the spot, just for you, and every bit of it is yours to change. You can't break it: everything stays in key, every roll comes out mixed, and undo sits in the top bar."),
 
     label("start here"),
-    p("▶ plays, ⏹ stops. Tap a scene row's ▶ to launch that whole row. Tap any clip to open it and draw. 🎲 rolls a fresh song: new key, tempo, sounds, groove."),
+    k("\u25b6", "plays. \u23f9 stops."),
+    k("\ud83c\udfb2", "rolls a fresh song: new key, tempo, sounds, groove."),
+    k("tap a clip", "opens it for drawing."),
+    k("scene \u25b6", "launches that whole row on the next bar."),
 
     label("the grid"),
-    p("Each row is a scene — a loop and a song section in one. + adds another: blank, a copy, or a fresh magic one. The corner pie on a playing clip shows where it is in its loop. Long-press a clip for launch modes and follow actions, a scene's ▶ for scene moves, a track name for track moves."),
+    k("row", "a scene: a loop and a song section in one."),
+    k("+", "adds a scene: blank, a copy, or a fresh magic one."),
+    k("corner pie", "where a playing clip is in its loop."),
+    k("long-press", "a clip for launch modes and follow actions, a scene's \u25b6 for scene moves, a track name for track moves."),
 
     label("editors"),
-    p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key, the staff above writes the lane down as you draw (bass gets its own clef), and each row's name wears its job's color. Chords: the wheel itself is the palette — tap a wedge to set the selected bar, drag across the wheel to paint a run of bars in one stroke, and everything the big wheel does works here too. Above the slots, your line is engraved on a real grand staff — two clefs, your key's signature, every notehead wearing its letter — with gold lines joining the notes that carry over between chords and dim lines showing which voice moves where. The rung chips under the slots grow the selected chord up the ladder (7 · 9 · 11 · 13) or swap in a sus, and the slash chips under those choose which note sits in the bass. The lane under any editor has a picker: tap vel to flip through captured rides, redraw them per step, chips pick the bar, ✕ clears one. − / + shortens a clip's loop (a 12-step line against 16-step drums drifts in and out of phase on purpose) or stretches it to whole bars — 2, 3, 4 — so a line can walk the whole progression instead of looping one bar against it; BAR chips page the grid, and the dice rolls walking basslines too. ◧ zooms the note grid when your thumbs need bigger targets."),
+    k("drums", "tap or drag paints hits; the lane below sets how hard each one lands."),
+    k("notes", "tap adds, drag right stretches, tap again removes. Every pitch lands in key, and the staff above writes the lane down as you draw."),
+    k("chords", "the wheel is the palette: tap a wedge to set the selected bar, drag across wedges to paint a run of bars in one stroke."),
+    k("rung chips", "grow the selected chord up the ladder \u2014 7 \u00b7 9 \u00b7 11 \u00b7 13 \u2014 or swap in a sus; the slash chips pick which note sits in the bass."),
+    k("\u2212 / +", "loop length. Short of a bar it phases against the other tracks on purpose; past it \u2014 2, 3, 4 bars \u2014 a line can walk the whole progression, and BAR chips page the grid. The dice rolls walking basslines too."),
+    k("vel", "tap it to flip through captured rides and redraw them per step; \u2715 clears one."),
+    k("\u25e7", "zooms the note grid when your thumbs need bigger targets."),
+    p("The chord editor engraves your line on a real grand staff as you write \u2014 two clefs, your key's signature, every notehead wearing its letter. The gold lines join notes that carry over between chords; the dim lines show which voice moves, and how far."),
 
     label("the circle"),
-    p("Tap the key name at the bottom and the circle of fifths opens. The bright neighborhood is your key — tap a wedge to hear its chord, drag across them to strum, and hold one for the ladder: 7, 9, 11, 13, sus. Release on a pad and the wedge keeps that voicing — the little gold number remembers — and it lands in the playing clip; release on empty air to forget. The dim wedges outside are chords you can borrow. Arm ● and plain taps write too. Drag the rim to carry the whole song to a new key and watch the sharps arrive one by one; drag the white dot to call the same notes by another mode's name; hold the middle and everything you tap comes back mirrored; pinch open to see why twelve fifths never quite close."),
+    p("Tap the key name at the bottom and the circle of fifths opens. The bright neighborhood is your key; everything dim is a knock away."),
+    k("tap", "sounds a wedge's chord."),
+    k("drag", "strums across wedges."),
+    k("hold", "blooms the ladder: 7, 9, 11, 13, sus. Release on a pad and the wedge keeps that voicing \u2014 the gold number remembers \u2014 and it lands in the playing clip. Empty air forgets."),
+    k("\u25cf", "arms the wheel: plain taps write into the playing clip too."),
+    k("rim drag", "carries the whole song around the circle \u2014 watch the sharps arrive one at a time."),
+    k("white dot", "drag it to another wedge and the same notes answer to a new mode's name; hold it still and home blooms."),
+    k("hold middle", "everything you tap comes back mirrored across the key."),
+    k("pinch", "opens the spiral: twelve perfect fifths never quite close, and this is the gap."),
 
     label("sound"),
-    p("Tap a track's name — or ✦ on its mixer strip — to open its sound: a morph pad with four sounds in the corners, everything between them yours to find. Add one color — crush, phase, trem, wob; drums take crush — with its own amount and motion. Pocket swings that one track against the global GROOVE, and HUMAN drifts every hit a few milliseconds like hands would. Drums come in two banks, sampled kits and a synth kit, and every drum can pin a one-shot, load a WAV, or 🎙 record your own mouth. Melody has two sources: the synth, or chops — load any sample and it lands sliced across the rows, the upper rows replaying at double speed."),
+    k("track name", "opens its sound: a morph pad with four sounds in the corners and everything between them yours to find."),
+    k("color", "one per track \u2014 crush, phase, trem, wob \u2014 with its own amount and motion."),
+    k("pocket", "swings one track against the global GROOVE. HUMAN drifts every hit a few milliseconds, like hands would."),
+    k("drums", "two banks \u2014 sampled kits and a synth kit. Any drum can pin a one-shot, load a WAV, or \ud83c\udf99 record your own mouth."),
+    k("melody", "two sources: the synth, or chops \u2014 load any sample and it lands sliced across the rows, the upper rows at double speed."),
 
     label("ride"),
-    p("Arm ● ride in a sound sheet, hit play, and perform: your moves on the pad and knobs — the verb and echo sends included — are captured to the beat and loop with the clip from then on. Rides live in the scene, save with the project, and play in exports. A clip wearing ∿ has one."),
+    p("Arm \u25cf ride in a sound sheet, hit play, and perform: your moves on the pad and knobs \u2014 the verb and echo sends included \u2014 are captured to the beat and loop with the clip from then on. Rides live in the scene, save with the project, and play in exports. A clip wearing \u223f has one."),
 
     label("mix"),
-    p("Mix opens the mixer. The fader is the meter: drag the handle to set level, the body glows with loudness, the bright bar is the peak, the tick holds the recent maximum. Verb and echo are sends into a shared room, off by default — turn a knob up to send a track into it."),
+    p("Mix opens the mixer. The fader is the meter: drag the handle to set level, the body glows with loudness, the bright bar is the peak. Verb and echo are sends into a shared room \u2014 every roll opens them a little; turn a knob to take a track deeper or dry."),
 
     label("arrange"),
-    p("View flips to the timeline. Drag clips around, pull a right edge to resize, sweep the strip under the bar numbers to set a loop — tap the loop to switch it on and off. Arm ● in the top bar while you jam: scene changes and your mute moves both write into the timeline, and the hatched bars play silent everywhere, exports included."),
+    k("View", "flips to the timeline. Drag clips, pull a right edge to resize."),
+    k("loop strip", "sweep under the bar numbers to set a loop; tap it to switch it on and off."),
+    k("\u25cf record", "arm it in the top bar and jam: scene changes and mute moves write into the timeline, and the hatched bars play silent everywhere, exports included."),
 
     label("keep it"),
-    p("File saves the project to a file or keeps it on this device, and exports a WAV — master or four stems, named for your key — through the full studio chain (your phone plays a lightened live mix to stay smooth; exports always render everything). Staff PNG engraves your chord line onto real staff paper — signature, accidentals, the exact voicing you hear — ready to send to whoever's teaching you. Loaded samples and mouth-drums now stay on this device between visits. And you can write a dare into File before saving: the words travel with the project and greet whoever loads it — nothing checks, nothing grades, the dare is between you two."),
-    p("Install it and noodles leaves the browser behind: full screen, its own icon, and everything — sounds, samples, exports — works with no signal at all."),
+    p("File saves the project to a file or keeps it on this device, and exports a WAV \u2014 master or four stems, named for your key \u2014 through the full studio chain (your phone plays a lightened live mix to stay smooth; exports always render everything). Staff PNG engraves your chord line onto real staff paper, ready to send to whoever's teaching you. Samples and mouth-drums stay on this device between visits. And you can write a dare into File before saving: the words travel with the project and greet whoever loads it \u2014 nothing checks, nothing grades, the dare is between you two."),
+    p("Install it and noodles leaves the browser behind: full screen, its own icon, and everything \u2014 sounds, samples, exports \u2014 works with no signal at all."),
+
+    label("the theory, if you want it"),
+    k("I ii V\u2026", "roman numerals name a chord's JOB in the key, not its letter \u2014 which is why they survive a key change untouched."),
+    k("\u266f \u266d", "the key signature is a promise about letters: which ones arrive raised or lowered, every time. The staff only prints an accidental where a note breaks the promise."),
+    k("fifths", "neighbors on the circle share six of seven notes \u2014 that's why travel by fifths is smooth and the far side sounds far."),
+    k("7 9 11 13", "the ladder: each number stacks one more third on the chord, and each rung CONTAINS the ones below it."),
+    k("sus", "the third steps aside for its neighbor \u2014 the chord holds its breath until the third comes back."),
+    k("C/E", "a slash chord: the same chord with a chosen note in the bass. The inversion chips are exactly this."),
+    k("violet", "a borrowed chord \u2014 not from this key, visiting anyway. The dice deals one now and then; the dim wedges are full of them."),
+    k("modes", "the same seven notes with a different one called home. The white dot moves the door, not the house."),
+    k("gold threads", "voice leading: the fewer notes move between chords \u2014 and the shorter their steps \u2014 the smoother the change sounds."),
 
     p("Made for couches and phone speakers. Tell your friends."),
 
+    label("tune it"),
     // A new build arrived while you were playing, so it wasn't taken. It's
     // already downloaded and the next launch runs it — this is just the door,
     // for when you'd rather have it now.
