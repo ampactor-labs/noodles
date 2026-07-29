@@ -732,7 +732,12 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true } = {}) {
   // dead on the -10 LUFS of the references rather than above them. Streaming
   // normalizes loudness anyway, so the headroom is free and the codec never
   // clips.
-  const CEIL = 0.66;
+  // 0.66 held the margin at the old master defaults; D22's full weight
+  // shelf moved the worst reconstruction overshoot to -0.16 dBTP (audit,
+  // funk/pad roll), one hair from a codec clip. 0.64 buys the margin back
+  // for ~0.3 dB of loudness the streaming normalizers were going to take
+  // anyway. Re-measure worst-case tp across the audit dice on any change.
+  const CEIL = 0.64;
   const KNEE = 0.28;
   const [ceilIn, ceilOut] = makeShaper((a) => {
     const mag = Math.abs(a);
@@ -1090,7 +1095,15 @@ if (typeof window !== "undefined") window.__noodlesGraph = buildGraph;
 // with it); juice is the saturator's drive, level-compensated so it stays a
 // character knob; weight is the low shelf; glue is how hard the mix leans on
 // the bus compressor.
-export const MASTER_DEFAULTS = { level: 0, juice: 0.5, weight: 0.5, glue: 0.5 };
+// The builder's defaults (D22): character stages at full, program backed
+// off 6 dB. The arithmetic that makes it work: glue's drive is
+// uncompensated, so glue at 1.0 (+6 dB over compiled) refills the -6 level
+// cut at the bus comp - the comp and ceiling see the same signal as the
+// old defaults while the soft-clip stage upstream runs 6 dB cleaner and
+// the saturator and shelf run full. Measured on the wet reference:
+// rms -11.0 vs -11.7 at the old defaults, crest 7.4 vs 8.1. Pulling glue
+// back to 0.5 on the panel is the open-master escape (crest 10.7).
+export const MASTER_DEFAULTS = { level: -6, juice: 1, weight: 1, glue: 1 };
 const MASTER_LEVEL_MIN_DB = -12;
 const MASTER_LEVEL_MAX_DB = 6;
 const masterJuiceDb = (v) => 8 + v * 12; // 0.5 = the compiled SAT_DRIVE_DB 14

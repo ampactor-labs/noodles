@@ -4449,11 +4449,12 @@ function projectDevices() {
   };
 }
 
+// The master bus is app character, not project state (D22, and the
+// builder's "no backward-compatibility needed"): every song, fresh or
+// loaded, plays through the same compiled master. The panel still moves
+// it live; it just doesn't travel in files.
 function projectMix() {
-  return {
-    ...Object.fromEntries(TRACKS.map((t) => [t.key, structuredClone(mixState[t.key])])),
-    master: audio.master(),
-  };
+  return Object.fromEntries(TRACKS.map((t) => [t.key, structuredClone(mixState[t.key])]));
 }
 
 function captureProject() {
@@ -4510,9 +4511,9 @@ function restoreMix(mix = {}) {
     };
     Object.assign(mixState[key], parsed);
   }
-  // The master bus rides the mix: absent in the file (older saves) means the
-  // compiled defaults, never whatever this session had dialed in.
-  audio.setMaster({ ...MASTER_DEFAULTS, ...(mix.master || {}) });
+  // The master never rides a file (D22): a load resets it to the compiled
+  // defaults, whatever the file or this session had dialed in.
+  audio.setMaster({ ...MASTER_DEFAULTS });
   applyMixState();
 }
 

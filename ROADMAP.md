@@ -14,6 +14,13 @@ The agreed list is clear: everything on it shipped. Named follow-ups, not
 yet agreed: all-scenes sheet music, mixer ∿ badges for send-ride lanes,
 MIDI export.
 
+The master defaults went to full character 2026-07-29 (D22): juice, weight,
+and glue at 100% with level at -6 (the builder's numbers, measured before
+adoption - glue's uncompensated drive refills the level cut at the bus comp,
+so the mix lands 0.7 dB hotter with the soft-clip stage running 6 dB
+cleaner), and CEIL moved 0.66 to 0.64 to buy back the true-peak margin the
+full weight shelf spent (worst roll -0.16 dBTP to -0.59).
+
 Every roll is a four-bar phrase since 2026-07-29 (D21): harmony always four
 entries, drums tiled with a bar-4 fill, the bass walking the changes every
 roll, melody chord-tracking per bar, polymeter as the twelve-step

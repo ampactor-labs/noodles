@@ -352,6 +352,28 @@ norm: bar counts show only when a lane disagrees with the harmony's
 length, and sub-bar step counts always. Both of D18's deferrals are now
 closed.
 
+### D22 — The master defaults go to full character, and the ceiling buys back its margin
+
+The builder's proposal, verified before adoption: juice, weight, and
+glue default to 100% with level at -6. The arithmetic that makes it
+coherent: glue's drive is uncompensated, so glue at full (+6 dB over
+compiled) refills the -6 level cut at the bus compressor. The comp and
+ceiling see the same signal as the old defaults while the soft-clip
+stage upstream runs 6 dB cleaner and the saturator and low shelf run
+full. Measured on the wet reference: rms -11.0 against -11.7 at the old
+defaults, crest 7.4 against 8.1. Pulling glue back to 0.5 on the master
+panel is the open-master escape (crest 10.7, same knobs).
+
+The full weight shelf cost the chain its true-peak margin - worst roll
+measured -0.16 dBTP where the ceiling's design promises room under full
+scale for codec reconstruction. CEIL moves 0.66 to 0.64: worst tp back
+to -0.59, about 0.3 dB of loudness the streaming normalizers were going
+to take anyway. The program sits at -9.0..-11.1 LUFS across the audit
+dice, which is the reference register the chain was tuned to. And per
+the builder's "no backward-compatibility needed," the master stopped
+traveling in project files at all: every song, fresh or loaded, plays
+through the compiled character, and the panel moves it live only.
+
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 
 Reading §7 straight: the couch-songwriting cold open is the milestone, the backing-track/Link scenario is phase two. Confirm this is the priority order before the research pass sets its emphasis.
