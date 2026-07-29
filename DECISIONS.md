@@ -313,6 +313,27 @@ playback transpose flag, so what the roll shows is exactly what sounds.
 Polymeter survives as the sub-bar idiom; equal-length-everywhere was
 rejected for killing it and for growing the beginner surface fourfold.
 
+### D20 — Full juice: one chain, no grades, D15 repealed
+
+"Nah, I want the same sound live as exported. Full juice." The builder's
+call, repealing his own D15 emergency override, and the ledger says the
+app can afford it now: since D15 the voice pools stopped growing
+(boundary trims), boot parks the context, the gesture and paint layers
+lost their long tasks, and the per-roll accrual died. The parity trims
+from earlier today treated the symptom; this removes the disease. Live
+and export now build the identical graph: input compressors on, drum
+parallel compression and its alignment delay back, full Freeverb (the
+native two-comb half-verb is deleted with its +7.5 dB makeup), chorus
+and halo constructed, phaser at ten stages. The exportGrade flag is gone
+from buildGraph; the only remaining construction options are meters and
+the withVerb/withEcho return skipping, which change cost, never sound.
+Known cost, accepted knowingly: the Freeverb comb worklets run whenever
+the context runs (the idle park still suspends them at rest, and since
+D17's depth floor the verb is in use whenever anything plays), and the
+dense-wet render wall goes back up by roughly the third D15 bought. If
+the A16 chokes, the tap-response toggle and perf overlay are the
+diagnosis kit, and D15's branches live in git history.
+
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 
 Reading §7 straight: the couch-songwriting cold open is the milestone, the backing-track/Link scenario is phase two. Confirm this is the priority order before the research pass sets its emphasis.

@@ -411,7 +411,7 @@ try {
     }
 
     // --- The master chain, end to end.
-    const masterOnly = () => buildGraph({ meters: false, exportGrade: true, withVerb: false, withEcho: false }).master;
+    const masterOnly = () => buildGraph({ meters: false, withVerb: false, withEcho: false }).master;
     out.chain = { sweep: {}, slope: {} };
     // -40 dBFS, not -60, is the small-signal reference: Tone's distortion curve
     // returns 0 for |x| < 0.001, a dead zone that gates the whole wet path
@@ -454,7 +454,7 @@ try {
     // comb and would only smear the onset).
     {
       const busGraph = (mutate) => {
-        const g = buildGraph({ meters: false, exportGrade: true, withVerb: false, withEcho: false });
+        const g = buildGraph({ meters: false, withVerb: false, withEcho: false });
         g.musicDuck.disconnect(g.master);
         g.drumBus.disconnect(g.master);
         g.musicDuck.toDestination();

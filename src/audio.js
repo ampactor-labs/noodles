@@ -660,9 +660,8 @@ function bassVelocityBoost(preset, midi) {
 // the moment they exist, connected or not (measured ~21x on a minimal graph),
 // so a dry export must never build them. Live always constructs (native
 // nodes; the dry park makes them free).
-function buildGraph({ meters = false, exportGrade = false, withVerb = true, withEcho = true } = {}) {
+function buildGraph({ meters = false, withVerb = true, withEcho = true } = {}) {
   const g = {};
-  g.exportGrade = exportGrade;
 
   // Master chain: bus trim → rumble HP → low shelf → saturation → DC block →
   // soft clip → glue drive → glue → ceiling drive → ceiling → out.
@@ -857,20 +856,13 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
   // bass were 130 degrees apart at 60 Hz on the same downbeat.
   g.musicDuck = new Tone.Gain(1).connect(g.master);
   g.drumBus = new Tone.Gain(1).connect(g.master);
-  if (exportGrade) {
-    g.drumAlign = new Tone.Delay({ delayTime: COMP_LATENCY, maxDelay: 0.05 });
-    g.drumDry = new Tone.Gain(DRUM_DRY_GAIN).connect(g.drumAlign);
-    g.drumAlign.connect(g.drumBus);
-    const drumParallel = makeComp(COMP_SPECS.drumParallel);
-    g.drumParallel = drumParallel.input;
-    g.drumParallelReturn = new Tone.Gain(DRUM_PARALLEL_GAIN).connect(g.drumBus);
-    drumParallel.output.connect(g.drumParallelReturn);
-  } else {
-    // Live: dry bus straight in, parallel weight approximated by +1.2 dB
-    // (the comb-alignment delay goes with the comps that made it necessary).
-    g.drumDry = new Tone.Gain(DRUM_DRY_GAIN * Tone.dbToGain(1.2)).connect(g.drumBus);
-    g.drumParallel = new Tone.Gain(0); // scheduled sends land on a dead end
-  }
+  g.drumAlign = new Tone.Delay({ delayTime: COMP_LATENCY, maxDelay: 0.05 });
+  g.drumDry = new Tone.Gain(DRUM_DRY_GAIN).connect(g.drumAlign);
+  g.drumAlign.connect(g.drumBus);
+  const drumParallel = makeComp(COMP_SPECS.drumParallel);
+  g.drumParallel = drumParallel.input;
+  g.drumParallelReturn = new Tone.Gain(DRUM_PARALLEL_GAIN).connect(g.drumBus);
+  drumParallel.output.connect(g.drumParallelReturn);
 
   // Sends. Algorithmic (Freeverb) instead of convolution — far cheaper per
   // sample on a low-end mobile CPU, and fine for a send reverb. The highpass
@@ -881,38 +873,13 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
   // the sidechain fills the exact pocket the kick just carved.
   // reverbOut is whatever node feeds the duck bus — the edge the dry park
   // cuts, in either grade.
-  if (exportGrade) {
-    if (withVerb) {
-      g.reverb = new Tone.Freeverb({ roomSize: 0.72, dampening: 2600, wet: 1 }).connect(g.musicDuck);
-      g.reverbOut = g.reverb;
-    }
-  } else {
-    // Half a Freeverb for the live grade: four of its eight combs (same
-    // Schroeder tunings, same dampening register, resonance a touch up to
-    // hold tail length), split two-per-side for width. The +4.5 dB makeup is
-    // measured against the full Freeverb on the wet reference (.tmp probe)
-    // so a send level chosen live translates to the export.
-    g.reverb = new Tone.Gain(1);
-    g.reverbOut = new Tone.Gain(Tone.dbToGain(7.5)).connect(g.musicDuck);
-    const tunings = [0.0253, 0.03667];
-    tunings.forEach((delayTime, i) => {
-      // Native feedback combs, NOT Tone.LowpassCombFilter: that class is an
-      // AudioWorklet whose processor runs its JS on the audio thread FOREVER
-      // once constructed — process() returns !disposed — connected or not.
-      // A DelayNode inside the loop makes the cycle legal, and native nodes
-      // truly stop when unreachable, so a parked verb costs zero.
-      const sum = new Tone.Gain(1);
-      const delay = new Tone.Delay({ delayTime, maxDelay: 0.05 });
-      const damp = new Tone.Filter({ type: "lowpass", frequency: 2600, Q: 0.5 });
-      const fb = new Tone.Gain(0.78);
-      g.reverb.connect(sum);
-      sum.connect(delay);
-      delay.connect(damp);
-      damp.connect(fb);
-      fb.connect(sum);
-      const pan = new Tone.Panner(i % 2 === 0 ? -0.6 : 0.6).connect(g.reverbOut);
-      damp.connect(pan);
-    });
+  // One Freeverb, both worlds (D20 repealed the lightened live grade).
+  // Its comb worklets do run whenever the context runs, but the idle park
+  // suspends the context when nothing plays, and since D17's depth floor
+  // the verb is in use whenever something does.
+  if (withVerb) {
+    g.reverb = new Tone.Freeverb({ roomSize: 0.72, dampening: 2600, wet: 1 }).connect(g.musicDuck);
+    g.reverbOut = g.reverb;
   }
   // The HPs and send taps always exist (playback code sets their gains); a
   // skipped return just leaves them feeding a dangling — unrendered — edge.
@@ -923,7 +890,7 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
   g.reverbPre = new Tone.Delay({ delayTime: 0.02, maxDelay: 0.05 });
   g.reverbHP.connect(g.reverbPre);
   if (g.reverb) g.reverbPre.connect(g.reverb);
-  if (!exportGrade || withEcho) {
+  if (withEcho) {
     g.echo = new Tone.FeedbackDelay({ delayTime: "8n", feedback: 0.26, wet: 1 }).connect(g.musicDuck);
   }
   g.echoHP = new Tone.Filter({ type: "highpass", frequency: 160, Q: 0.7 });
@@ -955,26 +922,9 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
       // pre-drive) gain shapes tone and gets eaten by the nonlinearities,
       // so leveling there never converges. Drive for tone, trim for level.
       g.trims[k] = new Tone.Gain(1);
-      if (exportGrade) {
-        const input = makeComp(COMP_SPECS.input);
-        g.inputs[k] = input.input;
-        input.output.connect(g.trims[k]);
-      } else {
-        // Live bypass: the comp's makeup is already subtracted (D11), so the
-        // level holds AT THE CALIBRATION LEVEL - but a bypassed compressor is
-        // not a static gain, and on sustained program the missing squeeze
-        // left the live stems 2-3 dB hotter than the export renders of the
-        // same content (live/export A/B, .tmp/dbg-carve-ab.mjs: harmony
-        // -13.5 vs -16.6, bass -11.1 vs -13.7, melody -18.8 vs -20.7 rms).
-        // That surplus drove the D7 ceiling into its 13-19% third-harmonic
-        // zone nearly continuously, which the builder heard as hard
-        // clipping. These trims restore parity where it matters most; the
-        // peaks stay less controlled, which is D15's standing trade.
-        const LIVE_BYPASS_TRIM_DB = { harmony: -3.1, bass: -2.6, melody: -1.9 };
-        const bypassTrim = new Tone.Gain(Tone.dbToGain(LIVE_BYPASS_TRIM_DB[k] ?? 0));
-        bypassTrim.connect(g.trims[k]);
-        g.inputs[k] = bypassTrim;
-      }
+      const input = makeComp(COMP_SPECS.input);
+      g.inputs[k] = input.input;
+      input.output.connect(g.trims[k]);
       g.trims[k].connect(g.channels[k]);
       g.channels[k].connect(g.musicDuck);
     }
@@ -1038,7 +988,7 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
 
   // Harmony: morphing pad + mono shimmer an octave up + a quiet low-mid root
   // hint. Bass owns the low end, so the pad and the hint are highpassed.
-  g.chorus = exportGrade ? new Tone.Chorus({ frequency: 0.4, delayTime: 4, depth: 0.6, wet: 0.35 }).start() : null;
+  g.chorus = new Tone.Chorus({ frequency: 0.4, delayTime: 4, depth: 0.6, wet: 0.35 }).start();
   // −2 dB at 320 Hz takes the box out of the pad: the 250–500 band is where
   // stacked chords go dull on a phone driver, and the pad is the widest
   // stack in the mix.
@@ -1062,7 +1012,7 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
   // hold one chord plus the tail of the last. Idle voices are silent
   // subtrees; the cost is pay-per-chord-size.
   g.padLayers = makeLayers(HARMONY_PRESETS, 8, g.padHighpass, SOURCE_LEVEL_DB.harmonyPad);
-  g.halo = !exportGrade ? null : new Tone.Synth({
+  g.halo = new Tone.Synth({
     oscillator: { type: "sine" },
     envelope: { attack: 0.9, decay: 1, sustain: 0.5, release: 1.6 },
     volume: SOURCE_LEVEL_DB.harmonyHalo,
@@ -1238,10 +1188,10 @@ const COLOR_MAKERS = {
     const shaper = new Tone.WaveShaper(curve(8 - amount * 5), 1024);
     return { nodes: [shaper], updateColor: (a) => shaper.setMap(curve(8 - a * 5), 1024) };
   },
-  phase(amount, motion, exportGrade) {
+  phase(amount, motion) {
     // Ten allpass stages per channel is mastering-grade sweep density; four
     // keeps the character live at a fraction of the audio-thread bill.
-    const phaser = new Tone.Phaser({ frequency: 0.1 + motion * 1.9, octaves: 2 + amount * 3, baseFrequency: 300, stages: exportGrade ? 10 : 2 });
+    const phaser = new Tone.Phaser({ frequency: 0.1 + motion * 1.9, octaves: 2 + amount * 3, baseFrequency: 300, stages: 10 });
     phaser.wet.value = Math.min(1, 0.3 + amount * 0.7);
     return {
       nodes: [phaser],
@@ -1313,7 +1263,7 @@ function applyColorTo(g, track, patch) {
     g.colorTypes[track] = "none";
     return;
   }
-  const made = COLOR_MAKERS[type](colorAmount(track, type, patch.amount), patch.motion, g.exportGrade);
+  const made = COLOR_MAKERS[type](colorAmount(track, type, patch.amount), patch.motion);
   let prev = g.colorIn[track];
   for (const n of made.nodes) {
     prev.connect(n);
@@ -2478,11 +2428,10 @@ export function createAudio(song) {
             song.scenes.some((sc) =>
               TRACK_KEYS.some((k) => audible(k) && sc.motion?.[k]?.[kind]?.some((v) => sendGain(laneToDb(v)) > 0))
             );
-          // Exports render the full chain; opts.graph = "live" exists only
-          // for the measurement probes to cost the live grade offline.
+          // One chain, both worlds (D20): live and export build the same
+          // graph, so opts.graph survives only as an ignored probe flag.
           const g = buildGraph({
             meters: false,
-            exportGrade: opts.graph !== "live",
             withVerb: TRACK_KEYS.some((k) => audible(k) && sendGain(channelState[k].verb) > 0) || rides("verb"),
             withEcho: TRACK_KEYS.some((k) => audible(k) && sendGain(channelState[k].echo) > 0) || rides("echo"),
           });

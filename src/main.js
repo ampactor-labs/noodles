@@ -554,7 +554,7 @@ function openAboutSheet() {
     k("\u25cf record", "arm it in the top bar and jam: scene changes and mute moves write into the timeline, and the hatched bars play silent everywhere, exports included."),
 
     label("keep it"),
-    p("File saves the project to a file or keeps it on this device, and exports a WAV (master or four stems, named for your key) through the full studio chain. Your phone plays a lightened live mix to stay smooth; exports always render everything. Staff PNG engraves your chord line onto real staff paper, ready to send to whoever's teaching you. Samples and mouth-drums stay on this device between visits. And you can write a dare into File before saving: the words travel with the project and greet whoever loads it. Nothing checks, nothing grades; the dare is between you two."),
+    p("File saves the project to a file or keeps it on this device, and exports a WAV (master or four stems, named for your key) through the full studio chain. What you hear live IS the export chain: same compressors, same room, same everything. Staff PNG engraves your chord line onto real staff paper, ready to send to whoever's teaching you. Samples and mouth-drums stay on this device between visits. And you can write a dare into File before saving: the words travel with the project and greet whoever loads it. Nothing checks, nothing grades; the dare is between you two."),
     p("Install it and noodles leaves the browser behind: full screen, its own icon, and everything (sounds, samples, exports) works with no signal at all."),
 
     label("the theory, if you want it"),
