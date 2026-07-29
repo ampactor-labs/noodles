@@ -4508,7 +4508,10 @@ function setExportStatus(text) {
 }
 
 function clearExportOffers() {
-  for (const o of exportOffers) URL.revokeObjectURL(o.url); // don't leak old WAV blobs
+  for (const o of exportOffers) {
+    clearTimeout(o.ttl);
+    URL.revokeObjectURL(o.url); // don't leak old WAV blobs
+  }
   exportOffers = [];
   renderExportOffers();
 }
@@ -4537,7 +4540,18 @@ function renderExportOffers() {
 }
 
 function offerSave(blob, name, label) {
-  exportOffers.push({ url: URL.createObjectURL(blob), blob, name, label });
+  const offer = { url: URL.createObjectURL(blob), blob, name, label };
+  // A rendered WAV is tens of MB, and the object URL pins it in memory until
+  // revoked - which used to be "whenever the NEXT export starts", i.e. maybe
+  // never. Offers expire after 15 minutes instead: long enough to save or
+  // share, never a session-long hold on a phone's heap.
+  offer.ttl = setTimeout(() => {
+    URL.revokeObjectURL(offer.url);
+    const i = exportOffers.indexOf(offer);
+    if (i >= 0) exportOffers.splice(i, 1);
+    renderExportOffers();
+  }, 15 * 60 * 1000);
+  exportOffers.push(offer);
   renderExportOffers();
   // Offers land at the bottom of a sheet that now scrolls — walk each fresh
   // render into view so "ready" never points at something off-screen.

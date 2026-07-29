@@ -263,6 +263,36 @@ D7 ceiling already gives every path the shared nonlinearity, and D11's
 measured gain structure outranks a research checkbox. Receipts:
 calibrate spreads and the audit program loop, run with the change.
 
+### D18 — The dice learns color, memory, and a wildcard
+
+The roll audit found the generators musically conservative in three
+specific ways: harmony rolled bare triads forever (the ladder existed,
+the dice never used it), melody placed strong beats with no knowledge of
+the chord under them, and pure randomness repeated itself — the same
+drummer twice in a row reads as a rut even when the odds say fair.
+
+Now: some rolls voice their line in sevenths and the odd ninth via
+ladderPcs (the same stacks the wheel and rung chips write — the staff
+and namer take them for free); major-side rolls occasionally borrow a
+bVII or bVI mid-line, so the violet visitor is part of the cold open,
+not only something you dig for; the melody's downbeat and final note
+snap to the first chord's tones (the lane loops one bar against the
+whole progression, so full tracking is impossible — but those two notes
+are the ones the ear checks); a hat lift into the loop seam breathes on
+some rolls; and the dice keeps session memory — one re-pick when the
+groove, kit, or progression matches the previous roll, plus a 6%
+wildcard that forces polymeter, tempo-band edges, and stacked voicings.
+Receipts: 400-song probe — zero invalid entries, ~35% of scenes carry
+stacks, borrowed stays rare (~3%), groove repeats fall 21% → 4.8%, 71 of
+72 key/scale pairs seen; audit dice loop holds -9.3..-11.5 LUFS, true
+peaks under -1.33 dBTP.
+
+Named for later, not rolled: chord-following bass (the one-bar lane
+can't track a progression without a playback-side transpose-follow
+feature — the tonic pedal against the harmony's own moving sub voice is
+an idiom, not a bug, but a follow flag would be the next depth), and
+drum fills every fourth bar (needs bar-position awareness in playback).
+
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 
 Reading §7 straight: the couch-songwriting cold open is the milestone, the backing-track/Link scenario is phase two. Confirm this is the priority order before the research pass sets its emphasis.
