@@ -961,8 +961,19 @@ function buildGraph({ meters = false, exportGrade = false, withVerb = true, with
         input.output.connect(g.trims[k]);
       } else {
         // Live bypass: the comp's makeup is already subtracted (D11), so the
-        // level holds; only the squeeze is gone.
-        g.inputs[k] = g.trims[k];
+        // level holds AT THE CALIBRATION LEVEL - but a bypassed compressor is
+        // not a static gain, and on sustained program the missing squeeze
+        // left the live stems 2-3 dB hotter than the export renders of the
+        // same content (live/export A/B, .tmp/dbg-carve-ab.mjs: harmony
+        // -13.5 vs -16.6, bass -11.1 vs -13.7, melody -18.8 vs -20.7 rms).
+        // That surplus drove the D7 ceiling into its 13-19% third-harmonic
+        // zone nearly continuously, which the builder heard as hard
+        // clipping. These trims restore parity where it matters most; the
+        // peaks stay less controlled, which is D15's standing trade.
+        const LIVE_BYPASS_TRIM_DB = { harmony: -3.1, bass: -2.6, melody: -1.9 };
+        const bypassTrim = new Tone.Gain(Tone.dbToGain(LIVE_BYPASS_TRIM_DB[k] ?? 0));
+        bypassTrim.connect(g.trims[k]);
+        g.inputs[k] = bypassTrim;
       }
       g.trims[k].connect(g.channels[k]);
       g.channels[k].connect(g.musicDuck);

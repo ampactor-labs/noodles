@@ -1,0 +1,1902 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>noodles · a pocket instrument</title>
+    <meta name="description" content="An instrument that runs in your browser. Tap play and there's a groove; roll the dice and it's a different song. No account, nothing to install." />
+    <meta property="og:title" content="noodles · a pocket instrument" />
+    <meta property="og:description" content="An instrument, not a demo: everything you hear is editable, and the dice rolls a whole new song. Your first beat is thirty seconds away." />
+    <meta property="og:type" content="website" />
+    <link rel="icon" href="/noodles/icons/icon-192.png" type="image/png" />
+    <!-- iOS ignores the manifest for home-screen icons and composites its own
+         rounding, so it gets the full-bleed art directly. -->
+    <link rel="apple-touch-icon" href="/noodles/icons/apple-touch-icon.png" />
+    <meta name="theme-color" content="#1b1b1d" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="noodles" />
+    <style>
+      :root {
+        --bg: #0e0e0f;
+        --bar: #1b1b1d;
+        --panel: #202022;
+        --cell: #262628;
+        --cell-line: #060606;
+        --text: #d2d2d4;
+        --dim: #76767a;
+        color-scheme: dark;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+      }
+      html,
+      body {
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, system-ui, "Segoe UI", sans-serif;
+        -webkit-user-select: none;
+        user-select: none;
+        touch-action: manipulation;
+      }
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      /* Transport bar */
+      #transport {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: stretch;
+        height: 54px;
+        padding-top: env(safe-area-inset-top, 0px);
+        background: var(--bar);
+        border-bottom: 1px solid #000;
+        position: relative;
+        z-index: 30; /* stays above the editor scrim/sheet — always usable */
+      }
+      .tbtn.disabled {
+        opacity: 0.5;
+        color: var(--dim);
+        pointer-events: none;
+      }
+      /* One bar, no segment walls: the old divider borders penned the BPM
+         into a middle cell that is NARROWER than the BPM's minimum width on
+         a 360px phone — the box spilled under the walls and the dividers
+         sliced through it. */
+      .tleft {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 10px;
+      }
+      .ttempo {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+      }
+      .tright {
+        gap: 7px;
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        padding: 0 10px;
+      }
+      .tbtn {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 34px;
+        min-width: 34px;
+        padding: 0 10px;
+        border-radius: 5px;
+        background: #2b2b2e;
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 600;
+        border: 1px solid #000;
+      }
+      #bpm {
+        flex: 0 0 auto;
+        min-width: 78px;
+        padding: 8px 10px;
+        border: 1px solid #000;
+        border-radius: 6px;
+        background: #2b2b2e;
+        text-align: center;
+        touch-action: none;
+        font-variant-numeric: tabular-nums;
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+      }
+      #bpm.dragging {
+        background: #3a3a40;
+        color: #fff;
+      }
+      /* Compact steps where the full bar cannot fit — these live AFTER the
+         base #bpm rule or its min-width wins the cascade and the box spills
+         under its neighbors again (A16 class = 360px, worst case 320). */
+      @media (max-width: 400px) {
+        .tleft,
+        .tright {
+          gap: 5px;
+          padding: 0 7px;
+        }
+        .tbtn {
+          padding: 0 8px;
+        }
+        #bpm {
+          min-width: 64px;
+          padding: 8px 6px;
+          font-size: 14px;
+        }
+      }
+      @media (max-width: 340px) {
+        .tleft,
+        .tright {
+          gap: 4px;
+          padding: 0 5px;
+        }
+        .tbtn {
+          min-width: 30px;
+          padding: 0 6px;
+        }
+      }
+      .swingctl {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1 1 160px;
+        min-width: 0;
+      }
+      .swlabel {
+        font-size: 10px;
+        color: var(--dim);
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+      .swval {
+        font-size: 11px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        width: 32px;
+        color: var(--text);
+      }
+      .swingslider {
+        flex: 1 1 auto;
+        width: auto;
+        min-width: 60px;
+        height: 28px;
+        accent-color: #e8b84b;
+      }
+      .keyctl {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex: 0 0 auto;
+      }
+      /* The key button: the circle's front door, wearing the key's name. */
+      .tbtn.keybtn {
+        background: #2b2b2e;
+        border: 1px solid #000;
+        font-size: 13px;
+        font-weight: 700;
+        padding: 0 12px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .tbtn.keybtn small {
+        color: var(--dim);
+        font-size: 10px;
+        font-weight: 600;
+      }
+      .keyglyph {
+        display: block;
+        flex: 0 0 auto;
+      }
+      .keybtn-name {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      /* The circle sheet */
+      .circle-wrap {
+        display: flex;
+        justify-content: center;
+        padding: 0 0 6px;
+      }
+      .circle-canvas {
+        display: block;
+        touch-action: none; /* the wheel owns every gesture on it */
+      }
+      .circle-arm {
+        color: #d24b4b;
+        margin-right: 6px;
+      }
+      .circle-arm.on {
+        background: #d24b4b;
+        color: #fff;
+      }
+      .circle-scale {
+        justify-content: center;
+      }
+      .staffview {
+        display: block;
+        width: 100%;
+        height: 190px; /* the grand staff: treble + bass at S=11 */
+        margin: 0 0 6px;
+      }
+      .oct-row .tfbtn {
+        height: 30px;
+        min-width: 44px;
+        padding: 0 8px;
+        font-size: 12px;
+      }
+      .oct-row {
+        margin-bottom: 2px;
+      }
+      .rollstaff {
+        display: block;
+        width: 100%;
+        height: 94px;
+        margin: 0 0 4px;
+        flex: 0 0 auto;
+      }
+      .vkey-pick {
+        cursor: pointer;
+      }
+      .vkey-pick.on {
+        color: #e8b84b;
+      }
+      .lane-ctl {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+        padding: 2px 8px 6px;
+      }
+      .lane-bars {
+        display: flex;
+        gap: 4px;
+      }
+      .lane-bar {
+        min-width: 26px;
+        text-align: center;
+        padding: 4px 6px;
+        border-radius: 5px;
+        background: #2b2b2e;
+        border: 1px solid #000;
+        font-size: 11px;
+        font-weight: 700;
+      }
+      .lane-bar.on {
+        background: #e8b84b;
+        color: #141414;
+      }
+      .lane-clear {
+        color: #d24b4b;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 4px 8px;
+      }
+      .inv-row {
+        display: flex;
+        justify-content: center;
+        padding: 0 8px 4px;
+      }
+      /* Seven rung chips on a phone width: same chip chrome, tighter cells. */
+      .rung-row {
+        display: flex;
+        justify-content: center;
+        gap: 4px;
+        padding: 2px 8px 0;
+      }
+      .rung-row .lane-bar {
+        min-width: 0;
+        flex: 0 1 auto;
+        padding: 4px 7px;
+      }
+      .dare-banner {
+        position: fixed;
+        left: 10px;
+        right: 10px;
+        bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+        z-index: 8;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: #2b241a;
+        border: 1px solid #e8b84b;
+        border-radius: 10px;
+        padding: 10px 12px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .dare-text {
+        flex: 1;
+      }
+      .dare-x {
+        color: var(--dim);
+        padding: 2px 6px;
+      }
+      .dare-row {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .dare-input {
+        flex: 1;
+        background: #2b2b2e;
+        color: var(--text);
+        border: 1px solid #000;
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-size: 13px;
+      }
+      .circle-scale .tfbtn {
+        padding: 7px 9px;
+        font-size: 12px;
+      }
+      .tbtn.play.on {
+        background: #39a35e;
+        color: #fff;
+      }
+      .tbtn.record {
+        color: #d24b4b;
+        font-size: 16px;
+      }
+      .tbtn.record.on {
+        background: #d24b4b;
+        color: #fff;
+      }
+      .tbtn.accent {
+        color: #e8b84b;
+      }
+      #bpm small {
+        color: var(--dim);
+        font-size: 10px;
+        font-weight: 600;
+        margin-left: 3px;
+      }
+      #footer {
+        flex: 0 0 auto;
+        display: grid;
+        gap: 6px;
+        padding: 6px 8px calc(7px + env(safe-area-inset-bottom, 0px));
+        background: var(--bar);
+        border-top: 1px solid #000;
+        position: relative;
+        z-index: 6;
+      }
+      /* One row when it fits, GROOVE drops to its own full-width line when it
+         doesn't. The slider flexes to fill whatever line it lands on, so it's
+         never clipped — narrow phone or wide screen. */
+      .frow {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+        width: 100%;
+        gap: 8px;
+        row-gap: 6px;
+        min-width: 0;
+      }
+      .frow .tbtn {
+        height: 40px;
+        min-width: 46px;
+        padding: 0 10px;
+      }
+
+      /* Session grid */
+      #session {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 58px repeat(4, 1fr);
+        gap: 2px;
+        padding: 2px;
+        background: #000;
+      }
+      .head {
+        background: var(--panel);
+        padding: 6px 5px 5px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        color: var(--text);
+        border-bottom: 2px solid var(--tc, #444);
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .head.track-head {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        /* Same height as a clip row (.clip min-height): the header is a tap
+           target now — it opens the track's Sound page — and fingers need
+           clip-sized targets. */
+        min-height: 62px;
+      }
+      .more {
+        color: #46464c;
+        font-size: 11px;
+        font-weight: 900;
+        line-height: 1;
+        pointer-events: none;
+      }
+      .head .more,
+      .arr-thead .more {
+        position: absolute;
+        top: 2px;
+        right: 5px;
+      }
+      .scenecell .more {
+        margin-top: -2px;
+      }
+      .head.track-head.pressing,
+      .arr-thead.pressing {
+        filter: brightness(1.16);
+      }
+      .head-name {
+        width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .head.corner {
+        background: var(--bar);
+        border-bottom: 2px solid #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .view-mix {
+        min-width: 44px;
+        height: 28px;
+        border: 1px solid #000;
+        border-radius: 5px;
+        background: #2b2b2e;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      /* The M/S pair fills its container everywhere it appears — big,
+         obvious, thumb-sized targets instead of 22px pips. */
+      .head-ms,
+      .arr-thead .ms,
+      .mx-ms {
+        display: flex;
+        gap: 4px;
+        width: 100%;
+      }
+      .msbtn {
+        flex: 1 1 0;
+        min-width: 0;
+        height: 24px;
+        border-radius: 4px;
+        background: #2a2a2c;
+        border: 1px solid #000;
+        color: var(--dim);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        font-weight: 900;
+        touch-action: manipulation;
+      }
+      .msbtn.on {
+        background: color-mix(in srgb, var(--tc) 62%, #19191b);
+        color: #fff;
+        border-color: color-mix(in srgb, var(--tc) 82%, #000);
+      }
+      .track-head.muted,
+      .mx-strip.muted {
+        opacity: 0.62;
+      }
+      .track-head.soloed {
+        outline: 1px solid color-mix(in srgb, var(--tc) 80%, #fff);
+        outline-offset: -1px;
+      }
+      .clip.track-muted,
+      .arr-lane.track-muted .arr-clip {
+        opacity: 0.38;
+      }
+      .scenecell {
+        background: var(--panel);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        min-height: 62px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .scenecell .tri {
+        color: var(--dim);
+        font-size: 12px;
+      }
+      .scenecell.playing .tri {
+        color: #7bd67b;
+      }
+      @keyframes queued-pulse {
+        0%, 100% { opacity: 0.65; }
+        50%       { opacity: 0.25; }
+      }
+      /* Queued = a steady amber ring + triangle; the PULSE is the clock's,
+         not CSS's: the step events toggle .qblink on #session at the quarter
+         note (pinned to the heard beat), so the blink sits on the grid and
+         lands exactly until the launch boundary flips queued to playing.
+         The old free-running 0.9s opacity animation dimmed the whole clip,
+         repainted it every frame, and restarted mid-phase on any re-render. */
+      .scenecell.queued .tri {
+        color: #e8b84b;
+        transition: opacity 0.09s ease;
+      }
+      .clip.queued {
+        box-shadow: 0 0 0 2px #e8b84b inset;
+        transition: box-shadow 0.09s ease;
+      }
+      .clip.queued .tri {
+        color: #e8b84b;
+        transition: opacity 0.09s ease;
+      }
+      #session.qblink .clip.queued {
+        box-shadow: 0 0 0 2px rgba(232, 184, 75, 0.35) inset;
+      }
+      #session.qblink .scenecell.queued .tri,
+      #session.qblink .clip.queued .tri {
+        opacity: 0.35;
+      }
+      .clip {
+        position: relative;
+        min-height: 62px;
+        border-radius: 3px;
+        background: var(--cell);
+        border: 1px solid #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 6px 8px;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.25;
+        color: #f2f2f2;
+        overflow: hidden;
+      }
+      .clip.filled {
+        background: color-mix(in srgb, var(--tc) 34%, #161616);
+        border: 1px solid color-mix(in srgb, var(--tc) 50%, #000);
+        align-items: flex-start;
+      }
+      .harmony-mini {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 3px 5px;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+        margin-top: 8px; /* clear the ▶ triangle */
+      }
+      .arr-harmony-mini {
+        display: flex;
+        gap: 16px;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+      }
+      .harmony-mini div {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.1;
+        align-items: center;
+        min-width: 0;
+      }
+      .arr-harmony-mini div {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.1;
+      }
+      .harmony-mini b { font-size: 10px; }
+      .harmony-mini span { font-size: 7px; opacity: 0.65; font-weight: 500; }
+      .arr-harmony-mini b { font-size: 11px; }
+      .arr-harmony-mini span { font-size: 8px; opacity: 0.65; font-weight: 500; }
+      .clip.filled .tri {
+        position: absolute;
+        top: 5px;
+        left: 6px;
+        font-size: 9px;
+        color: color-mix(in srgb, var(--tc) 80%, #fff 20%);
+      }
+      /* The pie is its own LEAF element, and --pct is written on IT — never on
+         the clip. On the clip (the old ::after form) every 30 Hz write
+         invalidated the clip's whole subtree (custom properties inherit) and
+         repainted the whole cell; measured at 4x throttle that was ~70 ms/s of
+         main-thread style/paint across four playing clips — the single biggest
+         steady-playback cost. On the leaf, a write recalcs and repaints 10px.
+         No CSS transition: the pump drives it against the audio clock. */
+      .clip .pie {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: conic-gradient(color-mix(in srgb, var(--tc) 85%, #fff) calc(var(--pct, 0) * 1%), rgba(0,0,0,0.3) 0);
+        opacity: 0;
+        pointer-events: none;
+      }
+      .clip.playing .pie {
+        opacity: 1;
+      }
+      .clip.playing {
+        background: color-mix(in srgb, var(--tc) 62%, #161616);
+        border-color: color-mix(in srgb, var(--tc) 85%, #fff);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--tc) 85%, #fff) inset;
+      }
+      .clip.pressing {
+        filter: brightness(1.18);
+      }
+      .clip-badge.state {
+        left: 5px;
+        right: auto;
+        color: rgba(255, 255, 255, 0.6);
+      }
+      .clip-badge {
+        position: absolute;
+        right: 5px;
+        bottom: 4px;
+        max-width: calc(100% - 10px);
+        padding: 2px 5px;
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.38);
+        color: color-mix(in srgb, var(--tc) 78%, #fff);
+        font-size: 9px;
+        font-weight: 800;
+        line-height: 1;
+        text-transform: uppercase;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .clip.empty {
+        color: var(--dim);
+        border: 1px dashed #333;
+        background: #161617;
+        font-size: 18px;
+        font-weight: 400;
+      }
+      .clip.ghost {
+        color: #3f3f44;
+        border: 1px dashed #26262a;
+        background: transparent;
+        font-size: 13px;
+        font-weight: 600;
+        min-height: 48px;
+      }
+      .clip .mini {
+        display: flex;
+        gap: 2px;
+        align-items: flex-end;
+        height: 16px;
+      }
+      .clip .mini i {
+        width: 3px;
+        background: color-mix(in srgb, var(--tc) 85%, #fff 15%);
+        border-radius: 1px;
+        opacity: 0.85;
+      }
+
+      /* Editor bottom sheet */
+      #scrim {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+        z-index: 9;
+      }
+      #scrim.open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      #sheet {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 10;
+        background: var(--panel);
+        border-top: 1px solid #000;
+        border-radius: 12px 12px 0 0;
+        transform: translateY(110%);
+        transition: transform 0.26s cubic-bezier(0.2, 0.7, 0.2, 1);
+        padding: 10px 12px calc(16px + env(safe-area-inset-bottom, 0px));
+        max-height: 78%;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        pointer-events: none;
+      }
+      #sheet.open {
+        transform: translateY(0);
+        pointer-events: auto;
+      }
+      .sheet-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      .sheet-bar .swatch {
+        width: 12px;
+        height: 12px;
+        border-radius: 3px;
+        background: var(--tc, #888);
+      }
+      .sheet-bar .title {
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .sheet-bar .sub {
+        color: var(--dim);
+        font-size: 12px;
+        font-weight: 600;
+        margin-right: auto;
+      }
+      .sheet-bar .close {
+        background: #2b2b2e;
+        border: 1px solid #000;
+        border-radius: 5px;
+        padding: 6px 10px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .rec-motion {
+        color: #d24b4b;
+      }
+      .scroll-hint {
+        position: absolute;
+        left: 50%;
+        bottom: 6px;
+        transform: translateX(-50%);
+        color: var(--dim);
+        font-size: 15px;
+        font-weight: 900;
+        pointer-events: none;
+        animation: queued-pulse 1.4s ease-in-out infinite;
+      }
+      .mic-big {
+        min-height: 96px;
+        border: 1px solid #000;
+        border-radius: 10px;
+        background: #2b2b2e;
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        font-weight: 700;
+        text-align: center;
+        padding: 12px;
+      }
+      .mic-big.live {
+        background: #d24b4b;
+        color: #fff;
+        animation: queued-pulse 0.9s ease-in-out infinite;
+      }
+      .rec-motion.on {
+        background: #d24b4b;
+        color: #fff;
+        animation: queued-pulse 0.9s ease-in-out infinite;
+      }
+      .propsection {
+        border-top: 1px solid #000;
+        padding: 10px 0;
+      }
+      .proplabel {
+        margin-bottom: 7px;
+        color: var(--dim);
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+      }
+      .choicegrid {
+        display: grid;
+        gap: 7px;
+      }
+      .choicegrid.two {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .choicegrid.three {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .choicegrid.four {
+        grid-template-columns: repeat(4, 1fr);
+      }
+      .choice,
+      .numval {
+        min-height: 42px;
+        border: 1px solid #000;
+        border-radius: 6px;
+        background: #2b2b2e;
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 700;
+        text-align: center;
+      }
+      .choice.on {
+        background: color-mix(in srgb, var(--tc) 58%, #1d1d20);
+        color: #fff;
+        border-color: color-mix(in srgb, var(--tc) 74%, #000);
+      }
+      .numrow {
+        display: grid;
+        grid-template-columns: 48px 1fr 48px;
+        gap: 8px;
+        align-items: center;
+      }
+      .choice.stepper {
+        font-size: 18px;
+      }
+      .tempo-sheet {
+        display: grid;
+        gap: 10px;
+      }
+      .tap-tempo {
+        text-align: center;
+        padding: 14px 12px;
+        font-size: 14px;
+      }
+      .tempo-input {
+        width: 100%;
+        height: 54px;
+        border-radius: 8px;
+        border: 1px solid #000;
+        background: #151517;
+        color: var(--text);
+        text-align: center;
+        font-size: 24px;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Drum step grid */
+      .drumrow {
+        display: grid;
+        grid-template-columns: 54px 1fr;
+        gap: 6px;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+      .pad {
+        height: 34px;
+        border-radius: 5px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        font-weight: 700;
+        color: #101012;
+        background: var(--pc);
+      }
+      .steps {
+        display: grid;
+        grid-template-columns: repeat(16, 1fr);
+        gap: 3px;
+      }
+      .step {
+        height: 34px;
+        border-radius: 4px;
+        background: #1a1a1c;
+        border: 1px solid #0a0a0a;
+      }
+      .step.g {
+        background: #202024;
+      }
+      .step.on {
+        background: var(--pc);
+      }
+      /* The playing-column marker is ONE absolutely-positioned overlay moved
+         by transform — the old per-cell .cursor class sweep cost ~900 class
+         ops/s at 120 BPM with a piano editor open. */
+      .step-cursor {
+        position: absolute;
+        display: none;
+        border-radius: 3px;
+        outline: 2px solid rgba(255, 255, 255, 0.5);
+        outline-offset: -1px;
+        pointer-events: none;
+        will-change: transform;
+      }
+      .editor-scroll,
+      .proll {
+        position: relative;
+      }
+      /* Steps beyond the clip's loop length (polymeter) sit dim and inert. */
+      .step.off,
+      .pcell.off,
+      .vbar.off {
+        opacity: 0.22;
+        pointer-events: none;
+      }
+      .steplenctl {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        margin-left: auto;
+      }
+      .steplenctl .numval {
+        min-height: 34px;
+        min-width: 40px;
+        padding: 0 6px;
+      }
+      .steplenctl .tfbtn {
+        min-width: 34px;
+        text-align: center;
+      }
+
+      /* Harmony editor */
+      .chordrow {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+      .cslot {
+        flex: 1 1 0;
+        height: 54px;
+        background: color-mix(in srgb, var(--tc) 20%, #161616);
+        border: 2px solid color-mix(in srgb, var(--tc) 35%, #000);
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-size: 15px;
+        font-weight: 700;
+        color: #fff;
+      }
+      .cslot b { font-size: 13px; }
+      .cslot span { font-size: 9px; opacity: 0.6; font-weight: 600; margin-top: 1px; }
+      /* Slots share the engraving's bar grid now, so they can run narrow;
+         long stacks ellipsize — the staff's lettered heads carry the full
+         spelling right above. */
+      .cslot { min-width: 0; overflow: hidden; }
+      .cslot span,
+      .cslot .chord-notes {
+        max-width: 100%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .chord-notes {
+        display: block;
+        margin-top: 3px;
+        font-style: normal;
+        font-size: 8px;
+        font-weight: 800;
+        line-height: 1;
+        opacity: 0.78;
+        letter-spacing: 0;
+        white-space: nowrap;
+      }
+      .cslot.sel {
+        outline: 2px solid #fff;
+        z-index: 3;
+      }
+      /* Arrangement view */
+      #arrangement {
+        flex: 1;
+        display: none;
+        min-height: 0;
+      }
+      #app.arrange #arrangement {
+        display: block;
+      }
+      #app.arrange #session {
+        display: none;
+      }
+      .arr-wrap {
+        display: grid;
+        grid-template-columns: 78px 1fr;
+        height: 100%;
+      }
+      .arr-headers {
+        background: var(--bar);
+        border-right: 1px solid #000;
+      }
+      .arr-corner {
+        height: 28px;
+        border-bottom: 1px solid #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .arr-corner .view-mix {
+        height: 22px;
+        min-width: 48px;
+        font-size: 11px;
+      }
+      .arr-thead {
+        height: 64px;
+        border-bottom: 1px solid #000;
+        position: relative;
+        padding: 7px 8px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 5px;
+      }
+      .arr-thead .dot {
+        width: 22px;
+        height: 3px;
+        border-radius: 2px;
+        background: var(--tc);
+      }
+      .arr-thead .nm {
+        font-size: 11px;
+        font-weight: 700;
+      }
+      .arr-thead .ms {
+        display: flex;
+        gap: 4px;
+      }
+      .arr-scroll {
+        overflow-x: auto;
+        overflow-y: hidden;
+        position: relative;
+        -webkit-overflow-scrolling: touch;
+        /* One finger pans on the browser's own inertial scroll — the timeline
+           flicks with momentum. attachArrGestures only borrows the two-finger
+           pinch (Touch events + preventDefault), so pan-x, not none. */
+        touch-action: pan-x;
+      }
+      .arr-content {
+        position: relative;
+      }
+      /* Ruler: bar numbers on top, the loop's own lane underneath — big
+         enough that every loop gesture is a thumb gesture. */
+      .arr-ruler {
+        height: 46px;
+        position: relative;
+        border-bottom: 1px solid #000;
+        background: #131315;
+      }
+      .arr-tick {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        border-left: 1px solid #2b2b2d;
+        padding-left: 4px;
+        padding-top: 3px;
+        font-size: 9px;
+        color: var(--dim);
+        font-variant-numeric: tabular-nums;
+        display: flex;
+        align-items: flex-start;
+      }
+      .arr-looplane {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 26px;
+        touch-action: none;
+        z-index: 5;
+      }
+      .arr-lane {
+        height: 64px;
+        position: relative;
+        border-bottom: 1px solid #000;
+      }
+      /* Adaptive grid, Ableton-style: bar lines always; beats fade in as you
+         zoom, then 16ths. The bar gradient is listed first so it paints on top
+         and stays the strongest line where they coincide. renderArrangement
+         picks the level from ppb. */
+      .arr-content.g-bars .arr-lane {
+        background-image: linear-gradient(90deg, rgba(255, 255, 255, 0.09) 0 1px, transparent 1px);
+        background-size: var(--ppb, 37px) 100%;
+      }
+      .arr-content.g-beats .arr-lane {
+        background-image:
+          linear-gradient(90deg, rgba(255, 255, 255, 0.09) 0 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px);
+        background-size: var(--ppb) 100%, calc(var(--ppb) / 4) 100%;
+      }
+      .arr-content.g-16 .arr-lane {
+        background-image:
+          linear-gradient(90deg, rgba(255, 255, 255, 0.09) 0 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.02) 0 1px, transparent 1px);
+        background-size: var(--ppb) 100%, calc(var(--ppb) / 4) 100%, calc(var(--ppb) / 16) 100%;
+      }
+      /* A recorded performance mute: the bar range is silent on playback and
+         in exports. Hatched over the clips so the silence is legible. */
+      .arr-mute {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        background: repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.55) 0 5px, rgba(0, 0, 0, 0.25) 5px 10px);
+        border-left: 1px solid rgba(255, 255, 255, 0.12);
+        border-right: 1px solid rgba(255, 255, 255, 0.12);
+        pointer-events: none;
+        z-index: 2;
+      }
+      .arr-clip {
+        position: absolute;
+        top: 5px;
+        bottom: 5px;
+        touch-action: none;
+        border-radius: 3px;
+        background: color-mix(in srgb, var(--tc) 34%, #161616);
+        border: 1px solid color-mix(in srgb, var(--tc) 55%, #000);
+        overflow: hidden;
+        padding: 4px 6px;
+        font-size: 10px;
+        font-weight: 700;
+        color: #f2f2f2;
+      }
+      .arr-clip.sel {
+        outline: 2px solid #fff;
+        z-index: 3;
+      }
+      .arr-clip .cmini {
+        display: flex;
+        gap: 1px;
+        align-items: flex-end;
+        height: 14px;
+        margin-top: 4px;
+      }
+      .arr-clip .cmini i {
+        width: 2px;
+        background: color-mix(in srgb, var(--tc) 85%, #fff 15%);
+        border-radius: 1px;
+      }
+      .arr-clip .rz {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 16px;
+        background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--tc) 60%, #000));
+      }
+      .arr-playhead {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: #eaeaec;
+        box-shadow: 0 0 6px rgba(255, 255, 255, 0.5);
+        pointer-events: none;
+        z-index: 4;
+        will-change: transform;
+      }
+      .arr-loop {
+        position: absolute;
+        top: 3px;
+        bottom: 3px;
+        border-radius: 5px;
+        background: rgba(232, 184, 75, 0.12);
+        border: 1px solid rgba(232, 184, 75, 0.4);
+      }
+      .arr-loop.on {
+        background: rgba(232, 184, 75, 0.36);
+        border-color: rgba(232, 184, 75, 0.95);
+      }
+      /* Visible edge grips, both ends, with hit zones wider than they look. */
+      .arr-loop .lz {
+        position: absolute;
+        top: -3px;
+        bottom: -3px;
+        width: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .arr-loop .lz.left {
+        left: -10px;
+      }
+      .arr-loop .lz.right {
+        right: -10px;
+      }
+      .arr-loop .lz::before {
+        content: "";
+        width: 6px;
+        height: 68%;
+        border-radius: 3px;
+        background: rgba(232, 184, 75, 0.5);
+        border: 1px solid rgba(0, 0, 0, 0.6);
+      }
+      .arr-loop.on .lz::before {
+        background: #e8b84b;
+      }
+      .arr-tools {
+        position: absolute;
+        top: 50px; /* below the ruler + loop lane, never covering them */
+        z-index: 6;
+        display: flex;
+        gap: 6px;
+      }
+      .arr-tools div {
+        background: #2b2b2e;
+        border: 1px solid #000;
+        border-radius: 5px;
+        padding: 5px 10px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      /* Editor scroll container */
+      .editor-scroll {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        touch-action: pan-y;
+        margin-bottom: 8px;
+        padding-right: 4px;
+      }
+      .editor-scroll::-webkit-scrollbar {
+        width: 4px;
+      }
+      .editor-scroll::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 4px;
+      }
+
+      /* Piano roll */
+      .prow {
+        display: grid;
+        grid-template-columns: 42px 1fr;
+        gap: 5px;
+        align-items: center;
+        margin-bottom: 3px;
+      }
+      .pkey {
+        font-size: 9px;
+        font-weight: 700;
+        color: var(--dim);
+        text-align: right;
+        padding-right: 4px;
+      }
+      .pkey.c {
+        color: var(--text);
+      }
+      .psteps {
+        display: grid;
+        grid-template-columns: repeat(16, 1fr);
+        gap: 3px;
+      }
+      .pcell {
+        height: 22px;
+        border-radius: 3px;
+        background: #1a1a1c;
+        border: 1px solid #0a0a0a;
+        touch-action: none;
+      }
+      .pcell.g {
+        background: #202024;
+      }
+      .pcell.on {
+        background: var(--tc);
+      }
+      .pcell.nstart {
+        box-shadow: inset 3px 0 0 rgba(255, 255, 255, 0.55);
+      }
+      .vlane {
+        display: grid;
+        grid-template-columns: 42px 1fr;
+        gap: 5px;
+        align-items: end;
+        margin-top: 10px;
+        /* the step grids live inside .editor-scroll, which reserves 4px on the
+           right; mirror it so velocity bars line up with their steps */
+        padding-right: 4px;
+      }
+      .vlane.drums {
+        grid-template-columns: 54px 1fr;
+        gap: 6px;
+      }
+      .vkey {
+        font-size: 9px;
+        font-weight: 700;
+        color: var(--dim);
+        text-align: right;
+        padding-right: 4px;
+      }
+      .vsteps {
+        display: grid;
+        grid-template-columns: repeat(16, 1fr);
+        gap: 3px;
+        height: 46px;
+      }
+      .vbar {
+        background: #1a1a1c;
+        border: 1px solid #0a0a0a;
+        border-radius: 3px;
+        display: flex;
+        align-items: flex-end;
+        overflow: hidden;
+        touch-action: none;
+      }
+      .vbar i {
+        display: block;
+        width: 100%;
+        background: var(--tc);
+      }
+
+      /* Mixer — vertical Ableton-style channel strips */
+      .mx-container {
+        display: flex;
+        gap: 2px;
+        padding-bottom: 4px;
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+      }
+      .mx-strip {
+        flex: 1 1 0;
+        min-width: 0;
+        background: #1a1a1c;
+        border: 1px solid #000;
+        border-radius: 8px;
+        padding: 8px 4px 6px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        overflow: hidden;
+      }
+      .mx-name {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 700;
+        width: 100%;
+        padding-bottom: 6px;
+        border-bottom: 1px solid #2a2a2c;
+      }
+      .mx-ms {
+        width: 100%;
+        justify-content: center;
+      }
+      .mx-strip.focus {
+        outline: 2px solid color-mix(in srgb, var(--tc) 75%, #fff);
+        outline-offset: -2px;
+      }
+      /* Wide enough that "Master" fits (36px clipped it mid-word), centered
+         with no dot — and the whole strip is a button into the bus editor. */
+      .mx-master {
+        background: #202022;
+        flex: 0 0 50px;
+        cursor: pointer;
+      }
+      .mx-master .mx-name {
+        justify-content: center;
+        font-size: 10px;
+        letter-spacing: 0.2px;
+      }
+      .mx-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 3px;
+        background: var(--tc);
+        flex-shrink: 0;
+      }
+      /* The fader IS the meter: RMS body, instantaneous peak bar, hold tick
+         with a numeric readout, and (on tracks) the volume handle riding the
+         same column. */
+      .mx-vol {
+        position: relative;
+        width: 44px;
+        height: 132px;
+        background: #111;
+        border: 1px solid #000;
+        border-radius: 5px;
+        overflow: hidden;
+      }
+      .mx-vol.grab {
+        touch-action: none;
+        cursor: ns-resize;
+      }
+      .mx-master .mx-vol {
+        width: 26px;
+        flex: 1 1 0;
+        height: auto;
+      }
+      .mv-rms {
+        position: absolute;
+        inset: 0;
+        transform: scaleY(0);
+        transform-origin: bottom;
+        will-change: transform;
+        background: linear-gradient(0deg, #4caf50, #e8b84b 70%, #d24b4b);
+        pointer-events: none;
+      }
+      .mv-peak {
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: rgba(255, 255, 255, 0.85);
+        display: none;
+        pointer-events: none;
+      }
+      .mv-hold {
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 0;
+        border-top: 1px solid #fff;
+        display: none;
+        pointer-events: none;
+      }
+      .mv-label {
+        position: absolute;
+        top: 2px;
+        right: 3px;
+        font-size: 10px;
+        font-weight: 900;
+        line-height: 1;
+        color: rgba(255, 255, 255, 0.75);
+        text-shadow: 0 1px 2px #000;
+        pointer-events: none;
+      }
+      .mv-handle {
+        position: absolute;
+        left: 1px;
+        right: 1px;
+        height: 10px;
+        margin-top: -5px;
+        border-radius: 4px;
+        background: color-mix(in srgb, var(--tc) 55%, #222);
+        border: 1px solid color-mix(in srgb, var(--tc) 85%, #fff);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+        pointer-events: none;
+      }
+      .mx-val {
+        font-size: 9px;
+        font-weight: 700;
+        color: var(--dim);
+        font-variant-numeric: tabular-nums;
+      }
+      .knob-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        margin-top: 4px;
+      }
+      .knob-label {
+        font-size: 8px;
+        font-weight: 800;
+        color: var(--dim);
+        text-transform: uppercase;
+      }
+      .knob-dial {
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        background: #2a2a2c;
+        border: 1px solid color-mix(in srgb, var(--tc) 40%, #000);
+        position: relative;
+        touch-action: none;
+        cursor: ns-resize;
+      }
+      /* Full-size rotator with a tick at the rim: works at any dial size,
+         and leaves the center free for the value. */
+      .knob-indicator {
+        position: absolute;
+        inset: 0;
+      }
+      .knob-indicator::before {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 50%;
+        width: 2px;
+        height: 7px;
+        margin-left: -1px;
+        background: #fff;
+        border-radius: 1px;
+      }
+      .knob-val {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--text);
+        font-variant-numeric: tabular-nums;
+        pointer-events: none;
+      }
+      .mx-dev-section {
+        width: 100%;
+        border-top: 1px solid #2a2a2c;
+        padding-top: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .mx-preset {
+        width: 100%;
+        background: #2b2b2e;
+        color: var(--text);
+        border: 1px solid #000;
+        border-radius: 5px;
+        padding: 5px 4px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .mx-sound {
+        width: 100%;
+        margin-top: 3px;
+        padding: 5px 2px;
+        border: 1px solid color-mix(in srgb, var(--tc) 45%, #000);
+        border-radius: 5px;
+        background: color-mix(in srgb, var(--tc) 16%, #1a1a1c);
+        color: color-mix(in srgb, var(--tc) 80%, #fff);
+        font-size: 10px;
+        font-weight: 800;
+        text-align: center;
+        text-transform: uppercase;
+      }
+
+      /* Sound sheet — the XY morph pad */
+      .xy-pad {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 1.7;
+        border: 1px solid #000;
+        border-radius: 8px;
+        background:
+          linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px) 0 0 / 25% 100%,
+          linear-gradient(0deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px) 0 0 / 100% 25%,
+          #151517;
+        touch-action: none;
+        overflow: hidden;
+      }
+      .xy-corner {
+        position: absolute;
+        padding: 4px 6px;
+        font-size: 10px;
+        font-weight: 800;
+        color: var(--dim);
+        text-transform: uppercase;
+        pointer-events: none;
+      }
+      .xy-corner.tl { top: 0; left: 0; }
+      .xy-corner.tr { top: 0; right: 0; }
+      .xy-corner.bl { bottom: 0; left: 0; }
+      .xy-corner.br { bottom: 0; right: 0; }
+      .xy-dot {
+        position: absolute;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: color-mix(in srgb, var(--tc) 80%, #fff);
+        border: 2px solid #fff;
+        box-shadow: 0 0 10px color-mix(in srgb, var(--tc) 70%, transparent);
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+      }
+      .knobrow {
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+      }
+      .srow {
+        display: grid;
+        grid-template-columns: 74px 1fr;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+      .srow-voice {
+        height: 34px;
+        border-radius: 5px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        font-weight: 700;
+        color: #101012;
+        background: var(--pc);
+      }
+      .srow-pin {
+        height: 34px;
+        border: 1px solid #000;
+        border-radius: 6px;
+        background: #2b2b2e;
+        color: var(--dim);
+        display: flex;
+        align-items: center;
+        padding: 0 10px;
+        font-size: 12px;
+        font-weight: 600;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .srow-pin.pinned {
+        color: var(--text);
+        border-color: color-mix(in srgb, var(--tc, #54a8e0) 55%, #000);
+      }
+      .knobrow .knob-dial {
+        width: 52px;
+        height: 52px;
+      }
+      .knobrow .knob-val {
+        font-size: 12px;
+      }
+      /* Five knobs (pocket + the send ride pair) on a 360px phone: smaller
+         dials keep one row with air instead of a squeeze. */
+      .knobrow.five .knob-dial {
+        width: 44px;
+        height: 44px;
+      }
+      .knobrow.five .knob-val {
+        font-size: 11px;
+      }
+      /* Sound page sizing: full available height, no scrolling — the morph
+         pad flexes to absorb what the fixed rows leave (overflow stays as a
+         tiny-viewport safety net). Leaves the transport bar reachable. */
+      #sheet.snd {
+        height: calc(100% - 54px);
+        max-height: calc(100% - 54px);
+      }
+      .sound-body {
+        display: flex;
+        flex-direction: column;
+        margin-bottom: 0;
+      }
+      .sound-body .propsection {
+        padding: 7px 0;
+        flex: none;
+      }
+      .sound-body .proplabel {
+        margin-bottom: 5px;
+      }
+      .sound-body .pad-section {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .sound-body .pad-section .xy-pad {
+        flex: 1;
+        aspect-ratio: auto;
+        min-height: 140px;
+      }
+      .choicegrid.six {
+        grid-template-columns: repeat(6, 1fr);
+        gap: 5px;
+      }
+      .choicegrid.six .choice {
+        min-height: 40px;
+        font-size: 10px;
+        padding: 0 2px;
+      }
+      .oneshot-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+      .oneshot-grid .srow {
+        grid-template-columns: 52px 1fr;
+        gap: 6px;
+        margin-bottom: 0;
+      }
+
+      /* ?perf diagnostics overlay */
+      #perf-hud {
+        position: fixed;
+        bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 999;
+        font: 700 10px/1.4 ui-monospace, monospace;
+        color: #7f7;
+        background: rgba(0, 0, 0, 0.75);
+        padding: 3px 8px;
+        border-radius: 4px;
+        pointer-events: none;
+        white-space: nowrap;
+      }
+
+      /* Export sheet */
+      .exp-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+      .exp-btn {
+        background: #2b2b2e;
+        border: 1px solid #000;
+        border-radius: 8px;
+        padding: 18px 10px;
+        text-align: center;
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--text);
+      }
+      .exp-btn:active {
+        background: #3a3a40;
+      }
+      .exp-status {
+        text-align: center;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--dim);
+        min-height: 20px;
+      }
+      .exp-links {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .exp-btn.save {
+        display: block;
+        text-decoration: none;
+        background: #2f5a3a;
+        border-color: #1c3a25;
+        color: #eaf6ee;
+      }
+      /* The loop is the backing track — the primary render when one is set. */
+      .exp-btn.loop-primary {
+        display: block;
+        background: #e8b84b;
+        border-color: #b8901f;
+        color: #1a1400;
+        margin-bottom: 10px;
+        font-size: 15px;
+      }
+      .project-file {
+        display: none;
+      }
+
+      /* About sheet */
+      .about-p {
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--text);
+        margin-bottom: 10px;
+      }
+      /* Gesture rows: the scannable half of the guide. Gesture on the left
+         in the accent, what it does on the right. */
+      .about-k {
+        display: grid;
+        grid-template-columns: minmax(84px, auto) 1fr;
+        gap: 4px 10px;
+        align-items: baseline;
+        margin-bottom: 3px;
+      }
+      .about-g {
+        color: #e8b84b;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .about-d {
+        font-size: 13px;
+        line-height: 1.45;
+        color: var(--text);
+      }
+      .about-k:last-of-type {
+        margin-bottom: 10px;
+      }
+      .about-label {
+        margin-top: 6px;
+        margin-bottom: 7px;
+        color: var(--dim);
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+      }
+      .about-foot {
+        margin-top: 14px;
+        color: var(--dim);
+        font-size: 10px;
+        letter-spacing: 0.3px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Transform buttons (Arp / Humanize / ...) */
+      .tfrow {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      .tfbtn {
+        background: #2b2b2e;
+        border: 1px solid #000;
+        border-radius: 6px;
+        padding: 8px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .tfbtn.accent {
+        color: #e8b84b;
+      }
+      .tfbtn:active {
+        background: #3a3a40;
+      }
+      @media (min-width: 720px) {
+        #transport {
+          justify-content: flex-start;
+        }
+        .ttempo {
+          flex: 0 0 auto;
+          margin-left: 12px;
+          margin-right: 0;
+        }
+        .tright {
+          margin-left: auto;
+        }
+        #footer {
+          display: flex;
+          justify-content: flex-start;
+          align-items: center;
+        }
+        .swingctl {
+          margin-left: 4px;
+        }
+      }
+    </style>
+    <script type="module" crossorigin src="/noodles/assets/index-v9sju_QU.js"></script>
+  <link rel="manifest" href="/noodles/manifest.webmanifest"></head>
+  <body>
+    <div id="app">
+      <div id="transport"></div>
+      <div id="session"></div>
+      <div id="arrangement"></div>
+      <div id="footer"></div>
+    </div>
+    <div id="scrim"></div>
+    <div id="sheet"></div>
+  </body>
+</html>
