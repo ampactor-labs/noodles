@@ -231,22 +231,22 @@ back once (the same motionOn restore-once contract). Lanes store the
 knob's -30..0 dB normalized to 0..1, so a send ride reads like every other
 lane in the picker and the painter; playback inverts it and ramps the
 per-track send gain directly. Capture is the same performance: arm ● ride,
-sweep verb or echo — knobs now sitting on the Sound sheet beside amount
-and motion — and only what you touched grows a lane. The live path wakes a
+sweep verb or echo (knobs now on the Sound sheet beside amount and
+motion), and only what you touched grows a lane. The live path wakes a
 parked return before a lane opens its send (the setSend discipline,
-threaded through as mstate.wakeSend); offline, renderOffline scans the
+threaded through as mstate.wakeSend). Offline, renderOffline scans the
 scenes' ride lanes so a return a ride needs gets built even when every
-static send is off — without that scan a recorded ride rendered dry.
+static send is off; without that scan a recorded ride rendered dry.
 Revert is deleting the SEND_PARAMS branch in applyMotionOn; ride lanes in
 project files would then just be ignored keys.
 
 ### D17 — Every roll gets a room: the depth floor revises D9's dry default
 
-"The overall mix is ass" — the builder, on device. D9 made dry the
-default on the theory that the dry mix is the meaty one; in practice a
-bone-dry roll reads flat, not meaty, because nothing shares a space
+The builder's on-device verdict: "the overall mix is ass." D9 made dry
+the default on the theory that the dry mix is the meaty one; in practice
+a bone-dry roll reads flat, not meaty, because nothing shares a space
 (65% of rolls carried zero send). The revision: the dice still owns the
-sends, but what it rolls now has a floor — a shared small room on the
+sends, but what it rolls now has a floor. A shared small room on the
 pad and lead (-20..-16 dB), a breath of it on the drums (-27..-23), the
 deep-wet third unchanged on top, bass never (low-end discipline holds).
 The verb return gains 20 ms of pre-delay, so the ear locks onto the dry
@@ -268,28 +268,28 @@ calibrate spreads and the audit program loop, run with the change.
 The roll audit found the generators musically conservative in three
 specific ways: harmony rolled bare triads forever (the ladder existed,
 the dice never used it), melody placed strong beats with no knowledge of
-the chord under them, and pure randomness repeated itself — the same
+the chord under them, and pure randomness repeated itself: the same
 drummer twice in a row reads as a rut even when the odds say fair.
 
 Now: some rolls voice their line in sevenths and the odd ninth via
-ladderPcs (the same stacks the wheel and rung chips write — the staff
-and namer take them for free); major-side rolls occasionally borrow a
+ladderPcs (the same stacks the wheel and rung chips write; the staff
+and namer take them for free). Major-side rolls occasionally borrow a
 bVII or bVI mid-line, so the violet visitor is part of the cold open,
-not only something you dig for; the melody's downbeat and final note
-snap to the first chord's tones (the lane loops one bar against the
-whole progression, so full tracking is impossible — but those two notes
-are the ones the ear checks); a hat lift into the loop seam breathes on
-some rolls; and the dice keeps session memory — one re-pick when the
+not only something you dig for. The melody's downbeat and final note
+snap to the first chord's tones: the lane loops one bar against the
+whole progression, so full tracking is impossible, but those two notes
+are the ones the ear checks. A hat lift into the loop seam breathes on
+some rolls. And the dice keeps session memory, one re-pick when the
 groove, kit, or progression matches the previous roll, plus a 6%
 wildcard that forces polymeter, tempo-band edges, and stacked voicings.
-Receipts: 400-song probe — zero invalid entries, ~35% of scenes carry
-stacks, borrowed stays rare (~3%), groove repeats fall 21% → 4.8%, 71 of
-72 key/scale pairs seen; audit dice loop holds -9.3..-11.5 LUFS, true
-peaks under -1.33 dBTP.
+Receipts: the 400-song probe rolls zero invalid entries, ~35% of scenes
+carry stacks, borrowed stays rare (~3%), groove repeats fall 21% → 4.8%,
+and 71 of 72 key/scale pairs appear; the audit dice loop holds
+-9.3..-11.5 LUFS with true peaks under -1.33 dBTP.
 
 Named for later, not rolled: chord-following bass (the one-bar lane
 can't track a progression without a playback-side transpose-follow
-feature — the tonic pedal against the harmony's own moving sub voice is
+feature; the tonic pedal against the harmony's own moving sub voice is
 an idiom, not a bug, but a follow flag would be the next depth), and
 drum fills every fourth bar (needs bar-position awareness in playback).
 
@@ -299,19 +299,19 @@ D18 named the wall: melodic lanes were one bar looping against 1/2/4
 bars of harmony, so nothing could follow the progression in data. The
 builder floated "all clips the same length"; the ratified middle path
 keeps one bar as the default (the cold open's 16-cell grid is a feature)
-and lets any drums/bass/melody lane stretch to whole bars — the steps
+and lets any drums/bass/melody lane stretch to whole bars. The steps
 system that already went short for polymeter (2..16) now goes long
 (32/48/64). Growing unrolls the loop (bar 1 tiles into the new space, so
 nothing changes until you edit bar 2); shrinking keeps the data. The
 editors page with BAR chips, the same idiom the motion-lane picker
-proved; playback needed zero changes (the step modulo generalized all
-along). And the dice cashes it in: about a third of multi-chord rolls
-now walk the changes — a progression-length bass whose per-bar root IS
-the bar's chord root, with pickups toward the NEXT bar's root — closing
-D18's chord-following deferral without a playback transpose flag, so
-what the roll shows is exactly what sounds. Polymeter survives as the
-sub-bar idiom; equal-length-everywhere was rejected for killing it and
-for growing the beginner surface fourfold.
+proved, and playback needed zero changes: the step modulo generalized
+all along. The dice cashes it in immediately. About a third of
+multi-chord rolls now walk the changes, a progression-length bass whose
+per-bar root is the bar's chord root, with pickups toward the next
+bar's root. That closes D18's chord-following deferral without a
+playback transpose flag, so what the roll shows is exactly what sounds.
+Polymeter survives as the sub-bar idiom; equal-length-everywhere was
+rejected for killing it and for growing the beginner surface fourfold.
 
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 
