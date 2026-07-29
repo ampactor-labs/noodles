@@ -467,12 +467,14 @@ export function noteSlot(slot) {
 }
 
 export function normalizeNoteLane(lane = null) {
-  return Array.from({ length: 16 }, (_, i) => cloneNoteSlot(lane?.[i]));
+  const len = lane?.length > 16 ? Math.min(64, Math.ceil(lane.length / 16) * 16) : 16;
+  return Array.from({ length: len }, (_, i) => cloneNoteSlot(lane?.[i]));
 }
 
 // Drum steps are velocities (0 = off). Old projects stored booleans; coerce.
 export function normalizeDrumLane(lane = null) {
-  return Array.from({ length: 16 }, (_, i) => {
+  const len = lane?.length > 16 ? Math.min(64, Math.ceil(lane.length / 16) * 16) : 16;
+  return Array.from({ length: len }, (_, i) => {
     const v = lane?.[i];
     if (v === true) return 0.9;
     const n = Number(v);
@@ -499,14 +501,20 @@ export function normalizeMotion(motion = null) {
   return out;
 }
 
-// Per-clip step lengths (polymeter): drums/bass/melody lanes can loop early,
-// 2..16 steps, phasing against the other tracks' cycles.
+// Per-clip step lengths: drums/bass/melody lanes can loop EARLY (2..16
+// steps - polymeter, phasing against the other tracks' cycles) or LONG
+// (32/48/64 = whole bars, so a lane can walk the progression instead of
+// looping one bar against it). Sub-bar stays free-form; above a bar the
+// length snaps to whole bars - a 23-step lane is neither idiom.
 export const STEPPED_TRACKS = ["drums", "bass", "melody"];
+export const MULTIBAR_STEPS = [32, 48, 64];
 export function normalizeSteps(steps = null) {
   const out = {};
   for (const t of STEPPED_TRACKS) {
     const n = Math.round(Number(steps?.[t]));
-    out[t] = Number.isFinite(n) ? Math.max(2, Math.min(16, n)) : 16;
+    if (!Number.isFinite(n)) out[t] = 16;
+    else if (n > 16) out[t] = MULTIBAR_STEPS.reduce((a, b) => (Math.abs(b - n) < Math.abs(a - n) ? b : a));
+    else out[t] = Math.max(2, n);
   }
   return out;
 }
@@ -882,6 +890,42 @@ function magicBass(vibe) {
   return bass;
 }
 
+// The follow bass: a progression-length lane (steps = bars x 16) whose
+// per-bar root IS the bar's chord root, with a walking pickup toward the
+// NEXT bar's root some of the time - the changes played, not pedaled.
+// Multi-bar lanes made this rollable in data; before them the one-bar
+// loop structurally couldn't track the progression (D18's deferral).
+function magicBassFollow(vibe, harmony) {
+  const bars = harmony.length;
+  const lane = new Array(bars * 16).fill(null);
+  const win = scaleNotes(vibe.bassBase, 12);
+  const n12b = (v) => ((v % 12) + 12) % 12;
+  const rootFor = (b) => {
+    const pc = n12b(harmonyChord(normalizeHarmonyEntry(harmony[b])).pcs[0]);
+    const cands = win.filter((m) => n12b(m) === pc);
+    return cands.length ? cands[0] : win[0];
+  };
+  const behavior = pickW(GROOVES[vibe.groove].bass.filter(([b]) => b !== "drone"));
+  for (let b = 0; b < bars; b++) {
+    const root = rootFor(b);
+    const at = b * 16;
+    if (behavior === "offbeat8") {
+      for (let s = 2; s < 16; s += 4) lane[at + s] = [{ midi: root, len: 2, vel: 0.85 + rnd() * 0.1 }];
+    } else if (behavior === "bounce") {
+      for (let s = 0; s < 16; s += 2) {
+        if (rnd() < 0.2) continue;
+        lane[at + s] = [{ midi: s % 4 === 2 ? root + 12 : root, len: 2, vel: (s % 4 === 0 ? 0.9 : 0.75) + rnd() * 0.1 }];
+      }
+      if (!lane[at]) lane[at] = [{ midi: root, len: 2, vel: 0.9 }];
+    } else {
+      lane[at] = [{ midi: root, len: 4, vel: 0.9 }];
+      if (rnd() < 0.6) lane[at + 8] = [{ midi: root, len: 4, vel: 0.85 }];
+      if (rnd() < 0.45) lane[at + 14] = [{ midi: rnd() < 0.5 ? rootFor((b + 1) % bars) : root, len: 2, vel: 0.7 + rnd() * 0.15 }];
+    }
+  }
+  return lane;
+}
+
 export function makeMagicScene(vibe) {
   // Tolerate no vibe (fresh roll) and pre-vibe or trimmed song.vibe shapes
   // from older saves — anything that can't drive the generators re-rolls.
@@ -895,7 +939,13 @@ export function makeMagicScene(vibe) {
     drums.hat[15] = Math.max(drums.hat[15], 0.6 + rnd() * 0.15);
   }
   const harmony = magicHarmony(vibe);
-  const scene = makeScene(harmony, drums, magicMelody(vibe, harmony), magicBass(vibe));
+  // A third of multi-chord rolls walk the changes; polymeter keeps the bass
+  // when it was rolled first (a 12-step phase and a 4-bar walk can't share
+  // one lane).
+  const follow = harmony.length >= 2 && vibe.polymeter !== "bass" && rnd() < 0.35;
+  const bass = follow ? magicBassFollow(vibe, harmony) : magicBass(vibe);
+  const scene = makeScene(harmony, drums, magicMelody(vibe, harmony), bass);
+  if (follow) scene.steps.bass = harmony.length * 16;
   scene.tag = "✨";
   scene.harmonyOct = vibe.harmonyOct;
   if (vibe.polymeter) scene.steps[vibe.polymeter] = 12;

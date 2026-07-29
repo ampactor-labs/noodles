@@ -508,7 +508,7 @@ function openAboutSheet() {
     p("Each row is a scene — a loop and a song section in one. + adds another: blank, a copy, or a fresh magic one. The corner pie on a playing clip shows where it is in its loop. Long-press a clip for launch modes and follow actions, a scene's ▶ for scene moves, a track name for track moves."),
 
     label("editors"),
-    p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key, the staff above writes the lane down as you draw (bass gets its own clef), and each row's name wears its job's color. Chords: the wheel itself is the palette — tap a wedge to set the selected bar, drag across the wheel to paint a run of bars in one stroke, and everything the big wheel does works here too. Above the slots, your line is engraved on a real grand staff — two clefs, your key's signature, every notehead wearing its letter — with gold lines joining the notes that carry over between chords and dim lines showing which voice moves where. The rung chips under the slots grow the selected chord up the ladder (7 · 9 · 11 · 13) or swap in a sus, and the slash chips under those choose which note sits in the bass. The lane under any editor has a picker: tap vel to flip through captured rides, redraw them per step, chips pick the bar, ✕ clears one. − / + shortens a clip's loop; a 12-step line against 16-step drums drifts in and out of phase on purpose. ◧ zooms the note grid when your thumbs need bigger targets."),
+    p("Drums: tap or drag to paint hits; the lane below sets how hard each step hits. Notes: tap to add, drag right to stretch, tap again to remove — every pitch lands in key, the staff above writes the lane down as you draw (bass gets its own clef), and each row's name wears its job's color. Chords: the wheel itself is the palette — tap a wedge to set the selected bar, drag across the wheel to paint a run of bars in one stroke, and everything the big wheel does works here too. Above the slots, your line is engraved on a real grand staff — two clefs, your key's signature, every notehead wearing its letter — with gold lines joining the notes that carry over between chords and dim lines showing which voice moves where. The rung chips under the slots grow the selected chord up the ladder (7 · 9 · 11 · 13) or swap in a sus, and the slash chips under those choose which note sits in the bass. The lane under any editor has a picker: tap vel to flip through captured rides, redraw them per step, chips pick the bar, ✕ clears one. − / + shortens a clip's loop (a 12-step line against 16-step drums drifts in and out of phase on purpose) or stretches it to whole bars — 2, 3, 4 — so a line can walk the whole progression instead of looping one bar against it; BAR chips page the grid, and the dice rolls walking basslines too. ◧ zooms the note grid when your thumbs need bigger targets."),
 
     label("the circle"),
     p("Tap the key name at the bottom and the circle of fifths opens. The bright neighborhood is your key — tap a wedge to hear its chord, drag across them to strum, and hold one for the ladder: 7, 9, 11, 13, sus. Release on a pad and the wedge keeps that voicing — the little gold number remembers — and it lands in the playing clip; release on empty air to forget. The dim wedges outside are chords you can borrow. Arm ● and plain taps write too. Drag the rim to carry the whole song to a new key and watch the sharps arrive one by one; drag the white dot to call the same notes by another mode's name; hold the middle and everything you tap comes back mirrored; pinch open to see why twelve fifths never quite close."),
@@ -1310,7 +1310,8 @@ function clipContent(scene, track) {
 // shows a wave — bottom-left, mirroring the launch badge.
 function stateBadge(scene, track) {
   const bits = [];
-  if (track !== "harmony" && stepsFor(scene, track) !== 16) bits.push(String(stepsFor(scene, track)));
+  const len = stepsFor(scene, track);
+  if (track !== "harmony" && len !== 16) bits.push(len > 16 ? `${len / 16}bar` : String(len));
   if (scene.motion?.[track] && Object.keys(scene.motion[track]).length) bits.push("∿");
   return bits.length ? el("div", { class: "clip-badge state", text: bits.join(" ") }) : null;
 }
@@ -2727,19 +2728,61 @@ function openMicCapture(voice) {
 // Piano-roll zoom: 17px cells are the smallest target in the app, so the
 // roll pages between all 16 steps and fat 8-step halves. Sticky across opens.
 let pianoView = 0; // 0 = 16 steps, 1 = steps 1-8, 2 = steps 9-16
+let gridBar = 0; // which bar of a multi-bar lane the editors show
+// Bar pager for multi-bar lanes: the same chip idiom the motion-lane picker
+// uses. Null when the lane is one bar - no chrome for the common case.
+function barPager(sceneIndex, track, clipLen) {
+  const bars = Math.ceil(clipLen / 16);
+  if (bars <= 1) return null;
+  return el(
+    "div",
+    { class: "lane-ctl grid-bars" },
+    [
+      el("div", { class: "swlabel", text: "bar" }),
+      ...Array.from({ length: bars }, (_, b) =>
+        el("div", {
+          class: "lane-bar" + (b === gridBar ? " on" : ""),
+          text: String(b + 1),
+          "data-action": `grid-bar-${b}`,
+          onclick: () => {
+            gridBar = b;
+            openEditor(sceneIndex, track);
+          },
+        })
+      ),
+    ]
+  );
+}
 const PIANO_VIEWS = ["⊞ 16", "◧ 1–8", "◨ 9–16"];
 
-// Polymeter control: how many of the 16 steps this clip actually loops.
+// Loop-length control. Below a bar it walks by steps (polymeter, 2..16);
+// at 16 the + steps up in WHOLE BARS (32/48/64) so a lane can hold the
+// whole progression. Growing past a bar unrolls the loop - the existing
+// bar tiles into the new space, so the sound doesn't change until you
+// edit bar 2 - and shrinking keeps the data (playback just loops early).
 function stepLenControl(scene, track) {
   const set = (d) => {
     pushUndo();
-    (scene.steps ||= { drums: 16, bass: 16, melody: 16 })[track] = Math.max(2, Math.min(16, stepsFor(scene, track) + d));
+    const cur = stepsFor(scene, track);
+    let next;
+    if (d > 0) next = cur >= 16 ? Math.min(64, cur + 16) : cur + 1;
+    else next = cur > 16 ? cur - 16 : Math.max(2, cur - 1);
+    (scene.steps ||= { drums: 16, bass: 16, melody: 16 })[track] = next;
+    if (next > cur && next > 16) {
+      const tile = (arr) => {
+        for (let i = arr.length; i < next; i++) arr[i] = structuredClone(arr[i % cur] ?? null);
+      };
+      if (track === "drums") for (const v of DRUM_VOICES) tile(scene.drums[v]);
+      else tile(scene[track]);
+    }
+    gridBar = Math.min(gridBar, Math.ceil(next / 16) - 1);
     openEditor(editor.scene, track);
     refreshClip(editor.scene, track);
   };
-  return el("div", { class: "steplenctl", title: "Loop length in steps" }, [
+  const len = stepsFor(scene, track);
+  return el("div", { class: "steplenctl", title: "Loop length: steps below a bar, whole bars above" }, [
     el("div", { class: "tfbtn", text: "−", onclick: () => set(-1) }),
-    el("div", { class: "numval steplen", text: `${stepsFor(scene, track)}` }),
+    el("div", { class: "numval steplen", text: len > 16 ? `${len / 16} bars` : `${len}` }),
     el("div", { class: "tfbtn", text: "+", onclick: () => set(1) }),
   ]);
 }
@@ -2752,17 +2795,20 @@ function buildDrumEditor(scene) {
       onclick: () => {
         pushUndo();
         const dens = { kick: 0.32, snare: 0.14, hat: 0.5, clap: 0.12 };
+        const len = stepsFor(scene, "drums");
         for (const v of DRUM_VOICES) {
-          for (let s = 0; s < 16; s++) {
+          for (let s = 0; s < Math.max(16, len); s++) {
             if (v === "kick" && s % 2 !== 0 && Math.random() > 0.1) { scene.drums[v][s] = 0; continue; }
             if (v === "snare" && s % 4 !== 0) { scene.drums[v][s] = 0; continue; }
             scene.drums[v][s] = Math.random() < dens[v] ? 0.7 + Math.random() * 0.3 : 0;
           }
         }
-        scene.drums.kick[0] = 0.9;
-        scene.drums.kick[8] = 0.9;
-        scene.drums.snare[4] = 0.9;
-        scene.drums.snare[12] = 0.9;
+        for (let b = 0; b * 16 < Math.max(16, len); b++) {
+          scene.drums.kick[b * 16] = 0.9;
+          scene.drums.kick[b * 16 + 8] = 0.9;
+          scene.drums.snare[b * 16 + 4] = 0.9;
+          scene.drums.snare[b * 16 + 12] = 0.9;
+        }
         openEditor(editor.scene, "drums");
         refreshClip(editor.scene, "drums");
       },
@@ -2773,7 +2819,7 @@ function buildDrumEditor(scene) {
       onclick: () => {
         pushUndo();
         for (const v of DRUM_VOICES) {
-          for (let s = 0; s < 16; s++) {
+          for (let s = 0; s < scene.drums[v].length; s++) {
             if (scene.drums[v][s] > 0) {
               scene.drums[v][s] = Math.max(0.4, Math.min(1, scene.drums[v][s] + (Math.random() * 0.4 - 0.2)));
             }
@@ -2788,7 +2834,7 @@ function buildDrumEditor(scene) {
       text: "Clear",
       onclick: () => {
         pushUndo();
-        for (const v of DRUM_VOICES) for (let s = 0; s < 16; s++) scene.drums[v][s] = 0;
+        for (const v of DRUM_VOICES) for (let s = 0; s < scene.drums[v].length; s++) scene.drums[v][s] = 0;
         openEditor(editor.scene, "drums");
         refreshClip(editor.scene, "drums");
       },
@@ -2798,6 +2844,10 @@ function buildDrumEditor(scene) {
   sheet.appendChild(tfd);
 
   const clipLen = stepsFor(scene, "drums");
+  gridBar = Math.min(gridBar, Math.ceil(clipLen / 16) - 1);
+  const B = gridBar * 16; // the visible page's offset into the lane
+  const pager = barPager(editor.scene, "drums", clipLen);
+  if (pager) sheet.appendChild(pager);
   const stepEls = {};
   const scrollContainer = el("div", { class: "editor-scroll" });
   for (const v of DRUM_VOICES) {
@@ -2809,9 +2859,9 @@ function buildDrumEditor(scene) {
     let drumDragPre = null;
     const stepsArr = [];
     for (let s = 0; s < 16; s++) {
-      const on = scene.drums[v][s];
+      const on = scene.drums[v][B + s];
       const cell = el("div", {
-        class: `step ${Math.floor(s / 4) % 2 ? "" : "g"} ${on ? "on" : ""}${s >= clipLen ? " off" : ""}`,
+        class: `step ${Math.floor(s / 4) % 2 ? "" : "g"} ${on ? "on" : ""}${B + s >= clipLen ? " off" : ""}`,
         style: `--pc:${padHex(v)}`,
       });
       stepsArr.push(cell);
@@ -2837,10 +2887,10 @@ function buildDrumEditor(scene) {
       drumDragPre = snapshot();
       dragRect = null; // fresh read at gesture start, reused for the drag
       const s0 = stepAtX(e.clientX);
-      if (s0 >= clipLen) return;
-      drumDragMode = scene.drums[v][s0] > 0 ? "delete" : "add";
-      scene.drums[v][s0] = drumDragMode === "add" ? 0.9 : 0;
-      stepsArr[s0].classList.toggle("on", scene.drums[v][s0] > 0);
+      if (B + s0 >= clipLen) return;
+      drumDragMode = scene.drums[v][B + s0] > 0 ? "delete" : "add";
+      scene.drums[v][B + s0] = drumDragMode === "add" ? 0.9 : 0;
+      stepsArr[s0].classList.toggle("on", scene.drums[v][B + s0] > 0);
       if (drumDragMode === "add") {
         audio.previewHit(v);
         buzz();
@@ -2852,11 +2902,11 @@ function buildDrumEditor(scene) {
     steps.addEventListener("pointermove", (e) => {
       if (drumDragMode === null) return;
       const s = stepAtX(e.clientX);
-      if (s >= clipLen) return;
+      if (B + s >= clipLen) return;
       const shouldOn = drumDragMode === "add";
-      const isOn = scene.drums[v][s] > 0;
+      const isOn = scene.drums[v][B + s] > 0;
       if (isOn !== shouldOn) {
-        scene.drums[v][s] = shouldOn ? 0.9 : 0;
+        scene.drums[v][B + s] = shouldOn ? 0.9 : 0;
         stepsArr[s].classList.toggle("on", shouldOn);
         paintClipMini(editor.scene, "drums");
         if (typeof paintDrums === "function") paintDrums();
@@ -2978,7 +3028,7 @@ function buildDrumEditor(scene) {
     for (let s = 0; s < 16; s++) {
       let maxVel = 0;
       for (const v of DRUM_VOICES) {
-        if (scene.drums[v][s] > maxVel) maxVel = scene.drums[v][s];
+        if (scene.drums[v][B + s] > maxVel) maxVel = scene.drums[v][B + s];
       }
       const h = maxVel > 0 ? Math.round(maxVel * 100) + "%" : "0%";
       if (vbars[s].__h !== h) {
@@ -3014,7 +3064,7 @@ function buildDrumEditor(scene) {
       return;
     }
     let hasNotes = false;
-    for (const v of DRUM_VOICES) if (scene.drums[v][s] > 0) hasNotes = true;
+    for (const v of DRUM_VOICES) if (scene.drums[v][B + s] > 0) hasNotes = true;
     if (!hasNotes) return;
     await ensureStarted();
     pushUndo();
@@ -3022,7 +3072,7 @@ function buildDrumEditor(scene) {
     const set = (ev) => {
       const vel = Math.max(0.05, Math.min(1, 1 - (ev.clientY - rect.top) / rect.height));
       for (const v of DRUM_VOICES) {
-        if (scene.drums[v][s] > 0) scene.drums[v][s] = vel;
+        if (scene.drums[v][B + s] > 0) scene.drums[v][B + s] = vel;
       }
       paintDrums();
     };
@@ -3127,12 +3177,12 @@ function buildPianoEditor(sceneIndex, scene, track) {
           }
         }),
     }),
-    el("div", { class: "tfbtn", text: "Oct−", onclick: () => applyTf(() => { for (let s = 0; s < 16; s++) for (const n of noteSlot(lane[s])) n.midi -= 12; }) }),
-    el("div", { class: "tfbtn", text: "Oct+", onclick: () => applyTf(() => { for (let s = 0; s < 16; s++) for (const n of noteSlot(lane[s])) n.midi += 12; }) }),
+    el("div", { class: "tfbtn", text: "Oct−", onclick: () => applyTf(() => { for (let s = 0; s < lane.length; s++) for (const n of noteSlot(lane[s])) n.midi -= 12; }) }),
+    el("div", { class: "tfbtn", text: "Oct+", onclick: () => applyTf(() => { for (let s = 0; s < lane.length; s++) for (const n of noteSlot(lane[s])) n.midi += 12; }) }),
     el("div", {
       class: "tfbtn",
       text: "Humanize",
-      onclick: () => applyTf(() => { for (let s = 0; s < 16; s++) for (const n of noteSlot(lane[s])) n.vel = Math.max(0.4, Math.min(1, n.vel + (Math.random() * 0.4 - 0.2))); }),
+      onclick: () => applyTf(() => { for (let s = 0; s < lane.length; s++) for (const n of noteSlot(lane[s])) n.vel = Math.max(0.4, Math.min(1, n.vel + (Math.random() * 0.4 - 0.2))); }),
     }),
     el("div", {
       class: "tfbtn",
@@ -3145,7 +3195,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
           // line. Windows sit between octave 2 and octave 5.
           const base = pick(track === "bass" ? [36, 48] : [48, 60]);
           const ns = scaleNotes(base, 14);
-          for (let s = 0; s < 16; s++) {
+          for (let s = 0; s < Math.max(16, stepsFor(scene, track)); s++) {
             if (Math.random() >= 0.5) {
               lane[s] = null;
               continue;
@@ -3159,7 +3209,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
           }
         }),
     }),
-    el("div", { class: "tfbtn", text: "Clear", onclick: () => applyTf(() => { for (let s = 0; s < 16; s++) lane[s] = null; }) }),
+    el("div", { class: "tfbtn", text: "Clear", onclick: () => applyTf(() => { for (let s = 0; s < lane.length; s++) lane[s] = null; }) }),
     el("div", {
       class: "tfbtn",
       text: PIANO_VIEWS[pianoView],
@@ -3173,8 +3223,11 @@ function buildPianoEditor(sceneIndex, scene, track) {
   ]);
   sheet.appendChild(tf);
   const clipLen = stepsFor(scene, track);
-  const viewOff = pianoView === 2 ? 8 : 0;
+  gridBar = Math.min(gridBar, Math.ceil(clipLen / 16) - 1);
+  const viewOff = gridBar * 16 + (pianoView === 2 ? 8 : 0);
   const viewCount = pianoView === 0 ? 16 : 8;
+  const pager = barPager(sceneIndex, track, clipLen);
+  if (pager) sheet.appendChild(pager);
 
   // The roll's own staff (DESIGN-STAFF): noteheads on the step grid, treble
   // for melody, a drawn F clef for bass — per-track clef IS the grand-staff
@@ -3284,7 +3337,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
   const rowCells = []; // [rowIndex][step]
 
   const noteAt = (step, midi = null) => {
-    for (let st = 0; st < 16; st++) {
+    for (let st = 0; st < lane.length; st++) {
       const notes = noteSlot(lane[st]);
       for (let i = 0; i < notes.length; i++) {
         const n = notes[i];

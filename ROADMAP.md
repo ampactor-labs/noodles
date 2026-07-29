@@ -14,6 +14,12 @@ The agreed list is clear — everything on it shipped. Named follow-ups, not
 yet agreed: all-scenes sheet music, mixer ∿ badges for send-ride lanes,
 MIDI export.
 
+Multi-bar lanes shipped 2026-07-29 (D19): any drums/bass/melody lane can
+stretch to 2/3/4 whole bars (steps 32/48/64 beside the polymeter range),
+growing unroll-tiles the loop, BAR chips page the editors, and the dice
+rolls progression-length walking basslines — D18's chord-following
+deferral closed in data, no playback transpose.
+
 The mix pass of 2026-07-28 late (D17): every dice roll now lands with a
 depth floor (shared room on pad/lead, a breath on drums, bass dry), the
 verb return took 20 ms of pre-delay, and three static carve filters handle

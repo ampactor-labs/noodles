@@ -293,6 +293,26 @@ feature — the tonic pedal against the harmony's own moving sub voice is
 an idiom, not a bug, but a follow flag would be the next depth), and
 drum fills every fourth bar (needs bar-position awareness in playback).
 
+### D19 — Lanes can be whole bars long, and the bass walks the changes
+
+D18 named the wall: melodic lanes were one bar looping against 1/2/4
+bars of harmony, so nothing could follow the progression in data. The
+builder floated "all clips the same length"; the ratified middle path
+keeps one bar as the default (the cold open's 16-cell grid is a feature)
+and lets any drums/bass/melody lane stretch to whole bars — the steps
+system that already went short for polymeter (2..16) now goes long
+(32/48/64). Growing unrolls the loop (bar 1 tiles into the new space, so
+nothing changes until you edit bar 2); shrinking keeps the data. The
+editors page with BAR chips, the same idiom the motion-lane picker
+proved; playback needed zero changes (the step modulo generalized all
+along). And the dice cashes it in: about a third of multi-chord rolls
+now walk the changes — a progression-length bass whose per-bar root IS
+the bar's chord root, with pickups toward the NEXT bar's root — closing
+D18's chord-following deferral without a playback transpose flag, so
+what the roll shows is exactly what sounds. Polymeter survives as the
+sub-bar idiom; equal-length-everywhere was rejected for killing it and
+for growing the beginner surface fourfold.
+
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 
 Reading §7 straight: the couch-songwriting cold open is the milestone, the backing-track/Link scenario is phase two. Confirm this is the priority order before the research pass sets its emphasis.
