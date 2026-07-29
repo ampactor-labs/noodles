@@ -334,6 +334,24 @@ dense-wet render wall goes back up by roughly the third D15 bought. If
 the A16 chokes, the tap-response toggle and perf overlay are the
 diagnosis kit, and D15's branches live in git history.
 
+### D21 — Every roll is a four-bar phrase
+
+The builder's read of the dice: it should always come back with all
+clips at four bars. D19 built the room and this moves everything in.
+Harmony always rolls four entries (a static is one chord held four
+bars, a vamp is its pair twice over, cadences were four already), the
+drums tile their archetype bar with a fresh velocity breath per bar and
+a real fill at the end of bar four (snare pickups, hats opening, half
+the time the kick stepping aside), the bass walks the changes on every
+roll (magicBassFollow grew the drone so it could carry all behaviors),
+and the melody's strong notes snap per bar to the chord under them: the
+full harmonic tracking D18 called impossible in one-bar data. Polymeter
+survives as the exception; its track keeps the old one-bar behaviors at
+twelve steps, phasing on purpose. The clip badge stops labeling the new
+norm: bar counts show only when a lane disagrees with the harmony's
+length, and sub-bar step counts always. Both of D18's deferrals are now
+closed.
+
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 
 Reading §7 straight: the couch-songwriting cold open is the milestone, the backing-track/Link scenario is phase two. Confirm this is the priority order before the research pass sets its emphasis.

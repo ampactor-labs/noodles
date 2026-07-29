@@ -764,12 +764,16 @@ function magicHarmony(vibe) {
     lastRoll.cadence = i;
     line = CADENCES[i].slice();
   } else if (fam === "vamp") {
+    // Every roll is a four-bar phrase (D21): a vamp is its pair twice over.
     let i = rint(0, VAMPS.length - 1);
     if (i === lastRoll.vamp) i = rint(0, VAMPS.length - 1);
     lastRoll.vamp = i;
-    line = VAMPS[i].slice();
+    const [a, b] = VAMPS[i];
+    line = [a, b, a, b];
   } else if (fam === "static") {
-    line = [rint(0, 6)];
+    // One chord held four bars; the seventh pass below can still shade it.
+    const d = rint(0, 6);
+    line = [d, d, d, d];
   } else {
     line = Array.from({ length: 4 }, () => rint(0, 6)); // the surprise generator
   }
@@ -795,16 +799,19 @@ function magicHarmony(vibe) {
 // step transposition and drop-note variation, and let the groove's gap hint
 // leave breathing room. Uniform scatter can't hook; repetition can.
 const MOTIF_SHIFTS = [[0, 5], [1, 2], [-1, 2], [2, 1], [-2, 1]];
-function magicMelody(vibe, harmony = null) {
+function magicMelody(vibe, harmony = null, bars = 4) {
   const win = scaleNotes(vibe.melodyBase, 14);
   const gap = GROOVES[vibe.groove].melodyGap;
-  // Chord-tone gravity: the lane loops one bar against the whole
-  // progression, so full harmonic tracking is impossible - but the note the
-  // ear checks is the one ON the downbeat, and the one it remembers is the
-  // last. Snap those two to the first chord's tones and the motif sounds
-  // IN the song instead of over it; the middle keeps its freedom.
-  const chordPcs = harmony?.length ? new Set(harmonyChord(harmony[0]).pcs.map((p) => ((p % 12) + 12) % 12)) : null;
-  const snapToChord = (idx) => {
+  const total = bars * 16;
+  // Chord-tone gravity, per bar: with four-bar lanes (D21) the motif can
+  // track the progression for real. Each repetition's strong notes snap to
+  // the tones of the chord UNDER that bar; the middle keeps its freedom.
+  const barPcs = (bar) => {
+    if (!harmony?.length) return null;
+    return new Set(harmonyChord(harmony[bar % harmony.length]).pcs.map((p) => ((p % 12) + 12) % 12));
+  };
+  const snapToChord = (idx, bar) => {
+    const chordPcs = barPcs(bar);
     if (!chordPcs) return idx;
     for (let d = 0; d < 4; d++) {
       for (const cand of [idx - d, idx + d]) {
@@ -823,29 +830,30 @@ function magicMelody(vibe, harmony = null) {
   const anchor = rint(4, 9);
   const events = [...offs].sort((a, b) => a - b).map((off, i, arr) => ({
     off,
-    idx:
-      off === 0 || i === arr.length - 1
-        ? snapToChord(clampIdx(anchor + rint(-3, 3)))
-        : clampIdx(anchor + rint(-3, 3)),
+    strong: off === 0 || i === arr.length - 1,
+    idx: clampIdx(anchor + rint(-3, 3)),
     len: rnd() < 0.35 ? 2 : 1,
     vel: 0.65 + rnd() * 0.3,
   }));
-  const melody = new Array(16).fill(null);
+  const melody = new Array(total).fill(null);
   const writeRep = (rep, shift, always) => {
     for (const ev of events) {
       if (!always && rnd() < 0.15) continue;
       const s = rep * motifLen + ev.off;
-      if (s >= 16) return;
-      melody[s] = [{ midi: win[clampIdx(ev.idx + shift)], len: ev.len, vel: Math.max(0.4, Math.min(1, ev.vel + rnd() * 0.1 - 0.05)) }];
+      if (s >= total) return;
+      const bar = Math.floor(s / 16);
+      const raw = clampIdx(ev.idx + shift);
+      const idx = ev.strong ? snapToChord(raw, bar) : raw;
+      melody[s] = [{ midi: win[idx], len: ev.len, vel: Math.max(0.4, Math.min(1, ev.vel + rnd() * 0.1 - 0.05)) }];
     }
   };
   writeRep(0, 0, true);
-  for (let rep = 1; rep * motifLen < 16; rep++) {
+  for (let rep = 1; rep * motifLen < total; rep++) {
     if (rnd() < gap) continue;
     writeRep(rep, pickW(MOTIF_SHIFTS), false);
   }
   // Never a dud: if the gaps ate too much, the motif answers itself.
-  if (melody.filter(Boolean).length < 3) writeRep(8 / motifLen, 0, true);
+  if (melody.filter(Boolean).length < 3) writeRep(Math.floor(total / 2 / motifLen), 0, true);
   return melody;
 }
 
@@ -905,11 +913,14 @@ function magicBassFollow(vibe, harmony) {
     const cands = win.filter((m) => n12b(m) === pc);
     return cands.length ? cands[0] : win[0];
   };
-  const behavior = pickW(GROOVES[vibe.groove].bass.filter(([b]) => b !== "drone"));
+  const behavior = pickW(GROOVES[vibe.groove].bass);
   for (let b = 0; b < bars; b++) {
     const root = rootFor(b);
     const at = b * 16;
-    if (behavior === "offbeat8") {
+    if (behavior === "drone") {
+      lane[at] = [{ midi: root, len: 8, vel: 0.9 }];
+      lane[at + 8] = [{ midi: rnd() < 0.3 ? root + 12 : root, len: 8, vel: 0.85 }];
+    } else if (behavior === "offbeat8") {
       for (let s = 2; s < 16; s += 4) lane[at + s] = [{ midi: root, len: 2, vel: 0.85 + rnd() * 0.1 }];
     } else if (behavior === "bounce") {
       for (let s = 0; s < 16; s += 2) {
@@ -930,25 +941,50 @@ export function makeMagicScene(vibe) {
   // Tolerate no vibe (fresh roll) and pre-vibe or trimmed song.vibe shapes
   // from older saves — anything that can't drive the generators re-rolls.
   if (!GROOVES[vibe?.groove] || vibe.melodyBase == null) vibe = rollVibe();
-  const drums = GROOVES[vibe.groove].drums();
-  drums.kick[0] = Math.max(drums.kick[0], 0.95); // the downbeat anchor, always
-  // The turnaround breath: a hat lift into the next downbeat, some rolls.
-  // One bar of loop needs motion at its seam or it reads as a treadmill.
-  if (rnd() < 0.4) {
-    drums.hat[14] = Math.max(drums.hat[14], 0.45 + rnd() * 0.1);
-    drums.hat[15] = Math.max(drums.hat[15], 0.6 + rnd() * 0.15);
+  // Every roll is a four-bar phrase (D21): one archetype bar, tiled with a
+  // fresh velocity breath per bar, a lift into the downbeat some rolls, and
+  // a real fill at the end of bar 4. The treadmill dies here.
+  const oneBar = GROOVES[vibe.groove].drums();
+  oneBar.kick[0] = Math.max(oneBar.kick[0], 0.95); // the downbeat anchor, always
+  const drums = {};
+  for (const v of Object.keys(oneBar)) {
+    const src = oneBar[v];
+    if (!src) {
+      drums[v] = null;
+      continue;
+    }
+    drums[v] = new Array(64).fill(0);
+    for (let b = 0; b < 4; b++) {
+      for (let st = 0; st < 16; st++) {
+        const vel = src[st];
+        drums[v][b * 16 + st] = vel > 0 ? Math.max(0.05, Math.min(1, vel + (b ? rnd() * 0.08 - 0.04 : 0))) : 0;
+      }
+    }
+  }
+  if (rnd() < 0.4 && drums.hat) {
+    drums.hat[62] = Math.max(drums.hat[62], 0.45 + rnd() * 0.1);
+    drums.hat[63] = Math.max(drums.hat[63], 0.6 + rnd() * 0.15);
+  }
+  if (rnd() < 0.6 && drums.snare && drums.hat) {
+    // The bar-4 fill: snare pickups walking in, hats opening under them,
+    // and half the time the kick steps aside for the last beat.
+    drums.snare[60] = Math.max(drums.snare[60], 0.45 + rnd() * 0.1);
+    drums.snare[62] = Math.max(drums.snare[62], 0.6 + rnd() * 0.15);
+    if (rnd() < 0.5) drums.snare[63] = 0.75 + rnd() * 0.15;
+    for (let st = 60; st < 64; st++) drums.hat[st] = Math.max(drums.hat[st], 0.35 + (st - 60) * 0.12);
+    if (rnd() < 0.5 && drums.kick) for (let st = 61; st < 64; st++) drums.kick[st] = 0;
   }
   const harmony = magicHarmony(vibe);
-  // A third of multi-chord rolls walk the changes; polymeter keeps the bass
-  // when it was rolled first (a 12-step phase and a 4-bar walk can't share
-  // one lane).
-  const follow = harmony.length >= 2 && vibe.polymeter !== "bass" && rnd() < 0.35;
-  const bass = follow ? magicBassFollow(vibe, harmony) : magicBass(vibe);
-  const scene = makeScene(harmony, drums, magicMelody(vibe, harmony), bass);
-  if (follow) scene.steps.bass = harmony.length * 16;
+  // The bass walks the changes on every roll now; polymeter keeps the old
+  // one-bar behaviors (a 12-step phase and a 4-bar walk can't share a lane).
+  const bass = vibe.polymeter === "bass" ? magicBass(vibe) : magicBassFollow(vibe, harmony);
+  const melody = vibe.polymeter === "melody" ? magicMelody(vibe, harmony, 1) : magicMelody(vibe, harmony);
+  const scene = makeScene(harmony, drums, melody, bass);
+  scene.steps.drums = 64;
+  scene.steps.bass = vibe.polymeter === "bass" ? 12 : harmony.length * 16;
+  scene.steps.melody = vibe.polymeter === "melody" ? 12 : 64;
   scene.tag = "✨";
   scene.harmonyOct = vibe.harmonyOct;
-  if (vibe.polymeter) scene.steps[vibe.polymeter] = 12;
   return scene;
 }
 
@@ -967,9 +1003,11 @@ function makeVariationScene(a, vibe) {
   } else {
     // busy: ghost hats fill the gaps, one extra kick late in the bar
     const ghosts = euclid(16, rint(9, 11), rint(0, 2));
-    b.drums.hat = b.drums.hat.map((v, s) => v || (ghosts[s] ? 0.3 + rnd() * 0.1 : 0));
+    b.drums.hat = b.drums.hat.map((v, s) => v || (ghosts[s % 16] ? 0.3 + rnd() * 0.1 : 0));
     const extra = rnd() < 0.5 ? 10 : 14;
-    if (!b.drums.kick[extra]) b.drums.kick[extra] = 0.7;
+    for (let bar = 0; bar * 16 < b.drums.kick.length; bar++) {
+      if (!b.drums.kick[bar * 16 + extra]) b.drums.kick[bar * 16 + extra] = 0.7;
+    }
   }
   if (a.harmony.length >= 2 && rnd() < 0.5) b.harmony = [...a.harmony.slice(1), a.harmony[0]];
   return b;

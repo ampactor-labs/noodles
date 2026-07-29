@@ -14,6 +14,12 @@ The agreed list is clear: everything on it shipped. Named follow-ups, not
 yet agreed: all-scenes sheet music, mixer ∿ badges for send-ride lanes,
 MIDI export.
 
+Every roll is a four-bar phrase since 2026-07-29 (D21): harmony always four
+entries, drums tiled with a bar-4 fill, the bass walking the changes every
+roll, melody chord-tracking per bar, polymeter as the twelve-step
+exception. Both of D18's deferrals (chord-following bass, fourth-bar
+fills) are closed.
+
 Multi-bar lanes shipped 2026-07-29 (D19): any drums/bass/melody lane can
 stretch to 2/3/4 whole bars (steps 32/48/64 beside the polymeter range),
 growing unroll-tiles the loop, BAR chips page the editors, and the dice

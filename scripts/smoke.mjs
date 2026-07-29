@@ -222,7 +222,9 @@ try {
     const vkey = document.querySelector(".vkey-pick");
     vkey.click();
     const picked = vkey.textContent;
-    const chips = document.querySelectorAll(".lane-bar").length;
+    // Scoped to the picker's own strip: the D19 grid pager also wears
+    // .lane-bar chips, and a four-bar melody (D21) shows four of those too.
+    const chips = document.querySelectorAll(".lane-bars .lane-bar").length;
     vkey.click();
     const pickedRide = vkey.textContent;
     document.querySelector(".lane-clear").click();

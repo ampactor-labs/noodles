@@ -504,7 +504,7 @@ function openAboutSheet() {
 
     label("start here"),
     k("\u25b6", "plays. \u23f9 stops."),
-    k("\ud83c\udfb2", "rolls a fresh song: new key, tempo, sounds, groove."),
+    k("\ud83c\udfb2", "rolls a fresh four-bar song: new key, tempo, sounds, groove, a bassline that walks the chords, a fill at the end of bar 4."),
     k("tap a clip", "opens it for drawing."),
     k("scene \u25b6", "launches that whole row on the next bar."),
 
@@ -1346,12 +1346,16 @@ function clipContent(scene, track) {
   return null;
 }
 
-// Depth made visible: a shortened loop shows its step count, a motion ride
-// shows a wave — bottom-left, mirroring the launch badge.
+// Depth made visible: a sub-bar loop shows its step count, a lane whose bar
+// count DIFFERS from the harmony's shows its bars, a motion ride shows a
+// wave — bottom-left, mirroring the launch badge. Since D21 rolled every
+// lane at four bars, matching lengths are the norm and wear nothing.
 function stateBadge(scene, track) {
   const bits = [];
   const len = stepsFor(scene, track);
-  if (track !== "harmony" && len !== 16) bits.push(len > 16 ? `${len / 16}bar` : String(len));
+  const harmonyBars = Math.max(1, scene.harmony?.length || 1);
+  if (track !== "harmony" && len < 16) bits.push(String(len));
+  else if (track !== "harmony" && len !== 16 && len / 16 !== harmonyBars) bits.push(`${len / 16}bar`);
   if (scene.motion?.[track] && Object.keys(scene.motion[track]).length) bits.push("∿");
   return bits.length ? el("div", { class: "clip-badge state", text: bits.join(" ") }) : null;
 }
