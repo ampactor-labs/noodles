@@ -1582,6 +1582,14 @@ export function createAudio(song) {
   // delivers it. The transport's 0.25 s lookAhead is scheduler headroom
   // either way; it never adds to a tap (tapTime bypasses it).
   const tapFeel = typeof localStorage !== "undefined" && localStorage.getItem("noodles:tap-feel") === "tight" ? "interactive" : "playback";
+  // iPhone: Safari routes Web Audio through the RINGER channel, so the side
+  // switch on silent mutes the app while the transport runs fine — "playing,
+  // no sound". Declaring the session as media playback (Audio Session API,
+  // iOS 16.4+) routes it like music instead. Undefined elsewhere; a DAW is
+  // exactly the "interrupt background music" case the category means.
+  try {
+    if (navigator.audioSession) navigator.audioSession.type = "playback";
+  } catch {}
   const context = new Tone.Context({ latencyHint: tapFeel, lookAhead: 0.25, updateInterval: 0.05 });
   Tone.setContext(context);
   // setContext swaps the active context, so the clock loop below binds to the
@@ -2060,7 +2068,11 @@ export function createAudio(song) {
     clearTimeout(idleTimer);
     idleTimer = 0;
     const raw = Tone.getContext().rawContext;
-    if (inited && raw.state === "suspended") raw.resume();
+    // "anything not running", not === "suspended": iOS parks the context in
+    // WebKit's non-standard "interrupted" after a call/Siri/screen lock, and
+    // matching only "suspended" left every tap after an interruption playing
+    // a lit transport over a stopped clock.
+    if (inited && raw.state !== "running" && raw.state !== "closed") raw.resume();
     // Re-arm the park when this wake wasn't the start of playback: without
     // it, one pad audition while stopped left the whole graph burning CPU
     // until the next play/stop cycle. The timer's own !playing check makes
@@ -2080,31 +2092,49 @@ export function createAudio(song) {
   // unarmed park left the whole graph burning audio CPU while the app just
   // sat there (caught by the builder reading aud× ~1.0x, idle after boot).
   parkContextSoon();
+  // Coming back from an iOS interruption nothing re-runs by itself: the
+  // context sits "interrupted", the transport still thinks it's playing.
+  // Kick it awake the moment the app is visible again; when stopped, the
+  // park owns the state and the next tap resumes through wakeContext.
+  const resumeOnReturn = () => {
+    if (document.visibilityState !== "visible") return;
+    const raw = Tone.getContext().rawContext;
+    if (inited && playing && raw.state !== "running" && raw.state !== "closed") raw.resume();
+  };
+  document.addEventListener("visibilitychange", resumeOnReturn);
+  window.addEventListener("pageshow", resumeOnReturn);
 
   return {
     async init() {
       if (inited) return;
       inited = true;
-      await Tone.start();
-      if (Tone.getContext().state !== "running") await Tone.getContext().resume();
-      // Prime the hardware audio pipeline with a near-silent impulse so the
-      // first real notes aren't swallowed by the OS/browser ramp-up.
-      const ctx = Tone.getContext().rawContext;
-      const primer = ctx.createOscillator();
-      const primerGain = ctx.createGain();
-      primerGain.gain.value = 0.001;
-      primer.connect(primerGain);
-      primerGain.connect(ctx.destination);
-      primer.start();
-      await wait(150);
-      primer.stop();
-      primer.disconnect();
-      primerGain.disconnect();
-      // Samples preload at page build (loadSamples runs there); by first play
-      // they're almost always in, so this awaits a settled promise, not a fetch.
-      if (live.reverb.ready) await live.reverb.ready;
-      await loadSamples();
-      clock.start(0);
+      try {
+        await Tone.start();
+        if (Tone.getContext().state !== "running") await Tone.getContext().resume();
+        // Prime the hardware audio pipeline with a near-silent impulse so the
+        // first real notes aren't swallowed by the OS/browser ramp-up.
+        const ctx = Tone.getContext().rawContext;
+        const primer = ctx.createOscillator();
+        const primerGain = ctx.createGain();
+        primerGain.gain.value = 0.001;
+        primer.connect(primerGain);
+        primerGain.connect(ctx.destination);
+        primer.start();
+        await wait(150);
+        primer.stop();
+        primer.disconnect();
+        primerGain.disconnect();
+        // Samples preload at page build (loadSamples runs there); by first play
+        // they're almost always in, so this awaits a settled promise, not a fetch.
+        if (live.reverb.ready) await live.reverb.ready;
+        await loadSamples();
+        clock.start(0);
+      } catch (err) {
+        // A failed unlock or a fetch dying mid-init must not brick the
+        // session: clear the latch so the next tap retries from the top.
+        inited = false;
+        throw err;
+      }
     },
     play() {
       wakeContext();

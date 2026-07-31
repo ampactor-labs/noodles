@@ -193,12 +193,21 @@ const markTouched = () => {
   userTouched = true;
 };
 
-let audioReady = false;
-async function ensureStarted() {
+// The one audio unlock, memoized as the in-flight promise: every tap awaits
+// the SAME completion (a second tap during a slow first init used to sail
+// past a boolean latch and launch before the clock started), and a failed
+// init clears the latch so the next tap retries instead of leaving a lit
+// transport over dead air for the rest of the session.
+let startPromise = null;
+function ensureStarted() {
   markTouched(); // any sound at all means there's now something to lose
-  if (audioReady) return;
-  audioReady = true;
-  await audio.init();
+  if (!startPromise) {
+    startPromise = audio.init().catch((err) => {
+      startPromise = null;
+      throw err;
+    });
+  }
+  return startPromise;
 }
 
 let playingScene = -1;
@@ -3550,7 +3559,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
       // Only the preview needs audio. Awaiting init before wiring the gesture
       // dropped the whole drag on a session's first press (150 ms+ of primer),
       // which read as "you must press twice to stretch a note".
-      ensureStarted().then(() => audio.previewNote(track, midi));
+      ensureStarted().then(() => audio.previewNote(track, midi)).catch(() => {});
     }
     paint();
     let moved = false;
@@ -3608,7 +3617,7 @@ function buildPianoEditor(sceneIndex, scene, track) {
       return;
     }
     if (!noteSlot(lane[s]).length) return;
-    ensureStarted(); // warm the context; the drag itself makes no sound
+    ensureStarted().catch(() => {}); // warm the context; the drag itself makes no sound
     pushUndo();
     const rect = bar.getBoundingClientRect();
     const set = (ev) => {
