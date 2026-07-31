@@ -72,6 +72,12 @@ just that the play button lights up. `npm run calibrate` renders every device
 preset through the real signal chain and prints RMS/peak tables; those numbers
 are the ground truth behind the preset gain trims in `src/audio.js`.
 
+## Verification
+
+Honestly: almost nothing. There are no test files and no CI beyond the deploy workflow, so every change is verified by playing it.
+
+For a sketchpad that is a defensible trade, but it means a regression in the sequencer would ship, and you should treat the timing behavior as observed rather than guaranteed.
+
 ## Weak spots
 
 Timing is at the mercy of the browser. Web Audio scheduling on mobile is not a real-time audio thread, so under load or with the screen asleep the grid can drift in ways a native sequencer would not.
