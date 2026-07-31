@@ -6,6 +6,8 @@ almost none of its density. The bet: the instrument is the lesson. The
 affordances carry the theory, so the first pleasing sound is seconds away and
 the depth only shows up when you go looking for it.
 
+**Status: working, API unstable.** Phone-first and playable; desktop is secondary and the audio timing is browser-dependent.
+
 `HANDOFF.md` is the full brief: who it's for, the design principles, the
 playgrounds, the milestone. `DECISIONS.md` records the forks and why each went
 the way it did. This file is just how to run the thing.
@@ -69,3 +71,9 @@ and asserts the core flow, including that the transport actually advances, not
 just that the play button lights up. `npm run calibrate` renders every device
 preset through the real signal chain and prints RMS/peak tables; those numbers
 are the ground truth behind the preset gain trims in `src/audio.js`.
+
+## Weak spots
+
+Timing is at the mercy of the browser. Web Audio scheduling on mobile is not a real-time audio thread, so under load or with the screen asleep the grid can drift in ways a native sequencer would not.
+
+Desktop works but was not designed for; the interaction model assumes a thumb. There is no CI beyond the deploy workflow, so nothing here is regression-tested.
