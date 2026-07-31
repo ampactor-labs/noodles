@@ -11,8 +11,21 @@ headless gates (`npm run smoke`, `npm run calibrate`).
 ## Agreed next (in order)
 
 The agreed list is clear: everything on it shipped. Named follow-ups, not
-yet agreed: all-scenes sheet music, mixer ∿ badges for send-ride lanes,
-MIDI export.
+yet agreed: all-scenes sheet music, mixer ∿ badges for send-ride lanes
+(more useful now that the dice bakes rides), MIDI export, rolled form
+(dice sets follow-actions so A→B→A plays itself — deferred because it
+changes session-launch defaults, the builder's call to make).
+
+The roll learned gesture 2026-07-31 (D24): a comp pattern per vibe
+(sustain/tresillo/skank/pulse/arp, groove-weighted, played per-16th by
+compHitAt with the bar voiced once at step 0), sound hires for the
+melodic tracks (60% pull the morph point into a groove-weighted corner;
+rhythmic comps always hire a fast-attack pad), melody characters
+(hook/runner/sparse/arc, carried by the vibe so ✨b re-sings the same
+voice), baked send rides on 30% of rolls (throw/bloom/drumlift in the
+motion lanes), rolled humanize from the groove's drift band, and two new
+drummers (breaks, dembow — seven archetypes now). Receipt:
+.tmp/dbg-dice-range.mjs, 400 rolls clean.
 
 The master defaults went to full character 2026-07-29 (D22): juice, weight,
 and glue at 100% with level at -6 (the builder's numbers, measured before

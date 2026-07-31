@@ -135,7 +135,20 @@ function rolledPatch(track) {
   return p;
 }
 function randomizePresets(vibe) {
-  for (const t of ["harmony", "bass", "melody", "drums"]) audio.setPatch(t, rolledPatch(t));
+  for (const t of ["harmony", "bass", "melody", "drums"]) {
+    const p = rolledPatch(t);
+    // A hired corner (rolled in the vibe, weighted by the groove) pulls the
+    // morph point into its quadrant — within 0.35 of the corner on each axis
+    // the bilinear weights keep it dominant (0.65² = 0.42 vs 0.23 adjacent)
+    // while the jitter keeps every hire a different blend of its neighbors.
+    const hire = vibe?.hires?.[t];
+    if (hire && CORNERS[t]?.includes(hire)) {
+      const i = CORNERS[t].indexOf(hire);
+      p.x = Math.abs(i % 2 - Math.random() * 0.35);
+      p.y = Math.abs(Math.floor(i / 2) - Math.random() * 0.35);
+    }
+    audio.setPatch(t, p);
+  }
   // The kit hire was rolled inside the vibe (an 808 halftime and a garage
   // 2-step read as THINGS; a null hire keeps the surprise). setKit moves
   // bank + corner and leaves the rolled color/motion alone.

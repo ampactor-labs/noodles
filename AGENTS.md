@@ -229,7 +229,9 @@ scene launches AND your M/S mute moves get written into the arrangement bar by b
 hatched bars replay silent in playback and every export); four clip editors, each with a
 velocity lane; vertical mixer strips (fader, pan, reverb + echo sends, live meters with peak
 hold, preset pickers); loudness-matched device presets per track; randomized-but-balanced
-cold open (key, scale, tempo, presets, magic scene) plus a 🎲 button that rerolls it all;
+cold open (key, scale, tempo, presets, magic scene — since D24 the vibe also rolls a comp
+gesture for the pad, groove-weighted sound hires per melodic track, a melody character,
+baked send rides, and a touch of humanize) plus a 🎲 button that rerolls it all;
 the chop deck (melody's second source: load any sample, sliced at hits or grid,
 piano-roll rows become slices, upper rows replay at double speed); stored chord
 extensions (arm ● and release the bloom on a pad — diatonic 7ths keep their function

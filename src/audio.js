@@ -23,7 +23,7 @@
 // point a finger or a dice can reach is already mixed.
 
 import * as Tone from "tone";
-import { CHORDS, DRUM_VOICES, voiceLead, harmonyChord, clipAt, arrangeLength, clipLaunch, clipLengthBars, noteSlot, stepsFor } from "./model.js";
+import { CHORDS, DRUM_VOICES, voiceLead, harmonyChord, clipAt, arrangeLength, clipLaunch, clipLengthBars, noteSlot, stepsFor, compHitAt, arpNoteAt } from "./model.js";
 
 // Per-track swing: offbeat lane steps get delayed by up to a third of a 16th
 // (1.0 = full triplet feel). Each track reads its own amount, falling back to
@@ -1345,12 +1345,39 @@ function chordVoicing(entry, vstate) {
   return { notes, top, bass: ch.bass ?? ch.pcs[0] };
 }
 
-function playChordOn(g, patches, vstate, entry, time, oct = 0) {
-  const { notes, top, bass } = chordVoicing(entry, vstate);
+// The comp path: one call per 16th for the harmony clip, so the rolled
+// gesture (vibe.comp) can place hits anywhere in the bar instead of only on
+// the downbeat. The bar voices ONCE at step 0 — voice-leading continuity and
+// the halo/sub floor are per-bar facts regardless of gesture — and the cached
+// voicing carries the rest of the bar's hits. A clip launched mid-bar skips
+// hits until its first bar boundary, exactly like the old downbeat-only call.
+// Returns true when it made a sound (the live transport's park waker needs
+// to know). "sustain" reproduces the pre-comp trigger bit for bit: same
+// step-0 time, "1n" length, default velocity.
+function playCompStepOn(g, patches, vstate, song, entry, stepInBar, time, oct = 0) {
+  const comp = song.vibe?.comp;
+  if (stepInBar === 0) {
+    vstate.compVoicing = chordVoicing(entry, vstate);
+    const { top, bass } = vstate.compVoicing;
+    const shift = 12 * oct;
+    g.halo?.triggerAttackRelease(midiToFreq(top + 12 + shift), "1n", time);
+    g.sub.triggerAttackRelease(midiToFreq(48 + bass), "1n", time);
+  }
+  const hit = compHitAt(comp, stepInBar);
+  if (!hit || !vstate.compVoicing) return stepInBar === 0;
+  const { notes } = vstate.compVoicing;
   const shift = 12 * oct;
-  eachActiveLayer(g, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(notes.map((m) => midiToFreq(m + shift)), "1n", time));
-  g.halo?.triggerAttackRelease(midiToFreq(top + 12 + shift), "1n", time);
-  g.sub.triggerAttackRelease(midiToFreq(48 + bass), "1n", time);
+  const at = Math.max(0, time + swingOffsetFor(song, "harmony", stepInBar));
+  const dur = hit.len >= 16 ? "1n" : sixteenth() * hit.len;
+  if (hit.arp != null) {
+    const n = arpNoteAt(notes, hit.arp);
+    eachActiveLayer(g, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(midiToFreq(n + shift), dur, at, hit.vel));
+  } else if (hit.vel == null) {
+    eachActiveLayer(g, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(notes.map((m) => midiToFreq(m + shift)), dur, at));
+  } else {
+    eachActiveLayer(g, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(notes.map((m) => midiToFreq(m + shift)), dur, at, hit.vel));
+  }
+  return true;
 }
 
 function playNoteStackOn(g, patches, track, slot, time) {
@@ -1514,14 +1541,14 @@ function playArrangementStepOn(g, patches, vstate, song, bar, stepInBar, time) {
   // vstate.wake is the live transport's track-park waker (absent offline);
   // it must fire on every path that makes a sound, and only those.
   let chord = null;
-  if (stepInBar === 0 && !gated("harmony")) {
+  if (!gated("harmony")) {
     const h = clipAt(song, "harmony", bar);
     if (h) {
       const sc = song.scenes[h.scene];
       if (sc?.harmony?.length) {
-        chord = sc.harmony[(bar - h.start) % sc.harmony.length];
-        vstate.wake?.("harmony");
-        playChordOn(g, patches, vstate, chord, time, sc.harmonyOct || 0);
+        const entry = sc.harmony[(bar - h.start) % sc.harmony.length];
+        if (playCompStepOn(g, patches, vstate, song, entry, stepInBar, time, sc.harmonyOct || 0)) vstate.wake?.("harmony");
+        if (stepInBar === 0) chord = entry;
       }
     }
   }
@@ -1801,10 +1828,6 @@ export function createAudio(song) {
       lanes[param][step % lanes[param].length] = valueOf(param);
     }
   }
-  const playChord = (ci, time, oct) => {
-    wakeTrack("harmony");
-    playChordOn(live, patches, liveVoice, ci, time, oct);
-  };
   const playNoteStack = (track, slot, time) => {
     if (!noteSlot(slot).length) return; // empty step: no sound, no wake
     wakeTrack(track);
@@ -2018,9 +2041,9 @@ export function createAudio(song) {
       const bar = Math.floor(harmonyState.step / 16) % harmonyScene.harmony.length;
       visualStep = stepInBar;
       visualBar = bar;
+      const ci = harmonyScene.harmony[bar];
+      if (playCompStepOn(live, patches, liveVoice, song, ci, stepInBar, time, harmonyScene.harmonyOct || 0)) wakeTrack("harmony");
       if (stepInBar === 0) {
-        const ci = harmonyScene.harmony[bar];
-        playChord(ci, time, harmonyScene.harmonyOct || 0);
         scheduleVisual(() => visualCb({ type: "chord", scene: harmonyState.scene, bar, chord: ci, activeScenes: activeBefore }), time);
       }
     }

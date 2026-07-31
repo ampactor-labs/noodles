@@ -402,6 +402,44 @@ fill on one-bar loops. Verified statistically (20k-roll distributions,
 zero dim-drones beyond wander's residue, offbeat notes all
 root-or-fifth) and end-to-end headless.
 
+### D24 — The roll learns gesture: comp patterns, sound hires, melody characters, rides, a hand
+
+The range audit found the ceiling wasn't in the random numbers but in
+five fixed skeletons every roll shared: the pad always played one
+whole-note block chord per bar, one motif engine sang every melody,
+timbre rolled uniform with no link to the groove (only drums had the
+kit hire), five drummers all in the same corner of 4/4, and the
+space/timing axes (motion lanes, humanize) sat unrolled. The fix is
+selection again, one layer up.
+
+Now a vibe also rolls: a **comp gesture** (sustain / tresillo / skank
+/ pulse / arp, weighted per groove) that playback asks about per 16th
+via compHitAt — the bar still voices once at step 0 for voice-leading
+continuity and the halo/sub floor, and "sustain" reproduces the old
+downbeat call exactly, which is also what any pre-comp save plays.
+**Sound hires** extend the kit-hire idiom to the melodic tracks: 60%
+of rolls pull each track's morph point into a groove-weighted corner's
+quadrant (within 0.35 per axis the corner stays dominant), with one
+hard rule — a rhythmic comp always hires a fast-attack right hand,
+because ambient's 1 s swell turns skank hits into near-silent blips
+and that is a dud, not a soft wall. A **melody character** (hook —
+the old engine — plus runner, sparse, and arc) rolls per vibe, so
+✨b re-sings the same voice. 30% of rolls bake a **send ride** into
+the scene's motion lanes (dub throw on the melody echo, pad-verb
+bloom, a drum-room lift through the fill bar) — the same lanes the
+sound sheet records, still under the dice-owns-sends contract. Half
+of rolls set a small **humanize** from the groove's own drift band,
+and the HUMAN slider starts where the roll put it. Two drummers
+joined: breaks (the broken backbeat, second kick sliding 10/11,
+ghost snares) and dembow (four steady kicks under the 3-6-11-14
+snare figure). The tap-a-wedge path keeps the plain sustained chord —
+the comp is the band's arrangement, not the instrument's.
+
+Receipts: 400 model-level rolls clean (.tmp/dbg-dice-range.mjs — no
+degenerate lanes, every rhythmic comp carries a fast hire, every ride
+lane 64 steps in range), smoke green, and the full audit's dice
+section for LUFS/true-peak.
+
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 
 Reading §7 straight: the couch-songwriting cold open is the milestone, the backing-track/Link scenario is phase two. Confirm this is the priority order before the research pass sets its emphasis.

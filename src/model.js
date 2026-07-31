@@ -591,7 +591,11 @@ const GROOVES = {
     tempo: [116, 130],
     swing: [0, 0.12],
     bass: [["offbeat8", 3], ["bounce", 2], ["roots", 1]],
+    comp: [["sustain", 2], ["skank", 2], ["pulse", 1], ["tresillo", 1]],
+    sounds: { harmony: [["keys", 2], ["stab", 2], ["pad", 1]], bass: [["bright", 2], ["pluck", 2], ["deep", 1]], melody: [["synth", 2], ["pluck", 2], ["lead", 1]] },
     melodyGap: 0.55,
+    melodyChars: [["hook", 2], ["runner", 2], ["arc", 1]],
+    human: [0, 0.1],
     kits: ["clean", "street", "funk"],
     drums() {
       const kick = dlane((s) => (s % 4 === 0 ? 0.92 + rnd() * 0.08 : 0));
@@ -610,7 +614,11 @@ const GROOVES = {
     tempo: [84, 110],
     swing: [0.06, 0.22],
     bass: [["roots", 3], ["bounce", 1], ["offbeat8", 1]],
+    comp: [["sustain", 3], ["tresillo", 2], ["arp", 1]],
+    sounds: { harmony: [["keys", 2], ["pad", 2], ["stab", 1]], bass: [["pluck", 2], ["bright", 1], ["sub", 1]], melody: [["lead", 2], ["pluck", 2], ["bell", 1]] },
     melodyGap: 0.5,
+    melodyChars: [["hook", 3], ["arc", 2], ["sparse", 1]],
+    human: [0.05, 0.3],
     kits: ["funk", "warm", "street"],
     drums() {
       const kick = dlane((s) => {
@@ -632,7 +640,11 @@ const GROOVES = {
     tempo: [70, 92],
     swing: [0, 0.15],
     bass: [["drone", 3], ["roots", 2]],
+    comp: [["sustain", 4], ["arp", 1], ["tresillo", 1]],
+    sounds: { harmony: [["pad", 2], ["ambient", 2], ["keys", 1]], bass: [["sub", 2], ["deep", 2], ["bright", 1]], melody: [["bell", 2], ["lead", 2], ["synth", 1]] },
     melodyGap: 0.65,
+    melodyChars: [["sparse", 2], ["hook", 2], ["arc", 1]],
+    human: [0.05, 0.35],
     kits: ["808", "heavy", "dusty"],
     drums() {
       // One pickup, chosen once — a per-step coin here fires 7 AND 10.
@@ -653,7 +665,11 @@ const GROOVES = {
     tempo: [118, 134],
     swing: [0.25, 0.45],
     bass: [["roots", 2], ["offbeat8", 2], ["bounce", 1]],
+    comp: [["skank", 2], ["tresillo", 2], ["sustain", 2]],
+    sounds: { harmony: [["stab", 2], ["keys", 2], ["pad", 1]], bass: [["pluck", 2], ["sub", 2], ["bright", 1]], melody: [["pluck", 2], ["synth", 2], ["bell", 1]] },
     melodyGap: 0.45,
+    melodyChars: [["hook", 2], ["runner", 2], ["arc", 1]],
+    human: [0, 0.15],
     kits: ["garage", "street", "dusty"],
     drums() {
       const second = pickW([[6, 2], [7, 2], [10, 3]]);
@@ -678,7 +694,11 @@ const GROOVES = {
     tempo: [96, 124],
     swing: [0.1, 0.3],
     bass: [["drone", 2], ["roots", 2], ["offbeat8", 1]],
+    comp: [["sustain", 2], ["pulse", 2], ["arp", 2]],
+    sounds: { harmony: [["ambient", 2], ["pad", 1], ["keys", 1]], bass: [["sub", 2], ["deep", 1], ["pluck", 1]], melody: [["bell", 2], ["pluck", 2], ["lead", 1]] },
     melodyGap: 0.7,
+    melodyChars: [["sparse", 3], ["hook", 1], ["arc", 1]],
+    human: [0, 0.25],
     kits: ["dusty", "warm", "clean"],
     drums() {
       const kicks = euclid(16, rint(2, 3), 0);
@@ -690,7 +710,100 @@ const GROOVES = {
       return { kick, snare, hat, clap };
     },
   },
+  breaks: {
+    weight: 12,
+    tempo: [126, 142],
+    swing: [0.05, 0.2],
+    bass: [["roots", 2], ["offbeat8", 2], ["drone", 1]],
+    comp: [["skank", 2], ["sustain", 2], ["tresillo", 1], ["arp", 1]],
+    sounds: { harmony: [["pad", 2], ["keys", 2], ["stab", 1]], bass: [["sub", 2], ["bright", 2], ["pluck", 1]], melody: [["pluck", 2], ["bell", 2], ["lead", 1]] },
+    melodyChars: [["hook", 2], ["sparse", 2], ["runner", 1]],
+    human: [0, 0.15],
+    melodyGap: 0.6,
+    kits: ["street", "funk", "dusty"],
+    drums() {
+      // The broken backbeat: the second kick slides between 10 and 11, ghost
+      // snares breathe around the 2 and 4 — funky-drummer grammar, not rock.
+      const late = rnd() < 0.4;
+      const kick = dlane((s) => {
+        if (s === 0) return 0.95;
+        if (s === (late ? 11 : 10)) return 0.85 + rnd() * 0.1;
+        if (s === 6 && rnd() < 0.3) return 0.6 + rnd() * 0.15;
+        return 0;
+      });
+      const snare = dlane((s) => {
+        if (s === 4 || s === 12) return 0.85 + rnd() * 0.1;
+        if ((s === 7 || s === 15) && rnd() < 0.5) return 0.3 + rnd() * 0.15;
+        return 0;
+      });
+      const hat = dlane((s) => {
+        if (s % 2 === 0) return (s % 8 === 2 ? 0.75 : 0.5) + rnd() * 0.15;
+        return rnd() < 0.3 ? 0.3 + rnd() * 0.1 : 0;
+      });
+      const clap = rnd() < 0.35 ? dlane((s) => (s === 12 ? 0.6 + rnd() * 0.1 : 0)) : null;
+      return { kick, snare, hat, clap };
+    },
+  },
+  dembow: {
+    weight: 10,
+    tempo: [90, 104],
+    swing: [0, 0.1],
+    bass: [["drone", 2], ["roots", 2], ["bounce", 1]],
+    comp: [["tresillo", 3], ["sustain", 2], ["skank", 1]],
+    sounds: { harmony: [["keys", 2], ["pad", 2], ["stab", 1]], bass: [["sub", 2], ["deep", 2], ["pluck", 1]], melody: [["synth", 2], ["bell", 2], ["pluck", 1]] },
+    melodyChars: [["hook", 3], ["arc", 1], ["sparse", 1]],
+    human: [0, 0.1],
+    melodyGap: 0.5,
+    kits: ["808", "street", "garage"],
+    drums() {
+      // The dembow: four steady kicks under the 3-6-11-14 snare figure — the
+      // boom-ch-boom-chick that IS the genre; everything else stays light.
+      const kick = dlane((s) => (s % 4 === 0 ? (s === 0 ? 0.95 : 0.85) + rnd() * 0.08 : 0));
+      const snare = dlane((s) => (s === 3 || s === 6 || s === 11 || s === 14 ? 0.8 + rnd() * 0.12 : 0));
+      const hat = dlane((s) => {
+        if (s % 2 === 0) return 0.45 + rnd() * 0.15;
+        return rnd() < 0.2 ? 0.3 : 0;
+      });
+      const clap = rnd() < 0.4 ? dlane((s) => (s === 6 || s === 14 ? 0.55 + rnd() * 0.1 : 0)) : null;
+      return { kick, snare, hat, clap };
+    },
+  },
 };
+
+// Comp gestures: how the pad plays the chord it was dealt. For the whole
+// life of the dice the answer was one whole-note block per bar — the same
+// right hand on every roll. Now the gesture is rolled per vibe, weighted by
+// the groove, and playback asks compHitAt per 16th instead of assuming the
+// downbeat. hits are [step, len, vel]; "sustain" is the old gesture exactly
+// (vel null keeps the trigger identical to the pre-comp call). The arp is
+// procedural — it cycles the bar's voiced tones up and back down.
+const COMP_PATTERNS = {
+  sustain: [[0, 16, null]],
+  tresillo: [[0, 5, 0.95], [6, 5, 0.8], [12, 4, 0.85]],
+  skank: [[2, 2, 0.85], [6, 2, 0.7], [10, 2, 0.85], [14, 2, 0.7]],
+  pulse: [[0, 2, 0.95], [2, 2, 0.55], [4, 2, 0.8], [6, 2, 0.55], [8, 2, 0.9], [10, 2, 0.55], [12, 2, 0.8], [14, 2, 0.6]],
+  arp: "arp",
+};
+export function compHitAt(name, stepInBar) {
+  const pat = COMP_PATTERNS[name] || COMP_PATTERNS.sustain;
+  // len 3 keeps arp tones speaking under slow-attack corners (ambient's 1 s
+  // attack turns a 2-step hit into a near-silent blip); overlaps are legato.
+  if (pat === "arp") return stepInBar % 2 === 0 ? { arp: stepInBar / 2, len: 3, vel: stepInBar === 0 ? 0.85 : 0.7 } : null;
+  const hit = pat.find(([s]) => s === stepInBar);
+  return hit ? { len: hit[1], vel: hit[2] } : null;
+}
+// The arp's walk over the bar's voiced tones: up the stack and back down the
+// middle (3 notes -> 0 1 2 1, 4 -> 0 1 2 3 2 1), so an 8-count bar lands a
+// different accent each cycle without ever leaving the voicing.
+export function arpNoteAt(notes, k) {
+  if (notes.length < 2) return notes[0];
+  const cycle = notes.length * 2 - 2;
+  const i = k % cycle;
+  return notes[i < notes.length ? i : cycle - i];
+}
+// Corners whose attack is fast enough to carry each rhythmic comp; sustain
+// and arp take any right hand (the arp's len-3 hits survive a slow attack).
+const FAST_COMP = { skank: ["keys", "stab"], pulse: ["keys", "stab"], tresillo: ["keys", "stab", "pad"] };
 
 // The vibe holds ONLY rolled values (plus the groove name) — archetype
 // constants stay in GROOVES and are derived where needed, so the vibe can
@@ -708,9 +821,28 @@ function rollVibe() {
   lastRoll.groove = groove;
   const g = GROOVES[groove];
   const wildcard = rnd() < 0.06;
+  // The right hand: how the pad plays its chords, weighted by the groove.
+  const comp = pickW(g.comp);
+  // The session players: each melodic track hires a corner from the groove's
+  // taste 60% of the time (the same idiom as the kit hire — a garage 2-step
+  // with stab keys and a plucked bass reads as a THING); a null hire keeps
+  // the surprise. One hard rule: a rhythmic comp always hires a right hand
+  // whose attack can speak it — ambient's 1 s swell turns skank hits into
+  // near-silent blips, which is a dud roll, not a soft wall.
+  const hires = Object.fromEntries(
+    ["harmony", "bass", "melody"].map((t) => [t, rnd() < 0.6 ? pickW(g.sounds[t]) : null])
+  );
+  const fast = FAST_COMP[comp];
+  if (fast && !fast.includes(hires.harmony)) hires.harmony = pickFrom(fast);
   return {
     groove,
     wildcard,
+    comp,
+    hires,
+    // The singer: which melodic character the roll writes in (magicMelody
+    // branches on it; ✨b's fresh melody keeps it, so the B side re-sings
+    // the same voice rather than becoming a different person).
+    melodyChar: pickW(g.melodyChars),
     tempo: wildcard ? (rnd() < 0.5 ? g.tempo[0] : g.tempo[1]) : rint(g.tempo[0], g.tempo[1]),
     swing: Math.round((g.swing[0] + rnd() * (g.swing[1] - g.swing[0])) * 100) / 100,
     // The groove hires its kit more often than not; the rest keep the
@@ -746,6 +878,14 @@ function rollVibe() {
     harmonyOct: rnd() < 0.15 ? (rnd() < 0.5 ? 1 : -1) : 0,
     polymeter: wildcard || rnd() < 0.1 ? (rnd() < 0.5 ? "bass" : "melody") : null,
     bScene: rnd() < 0.6,
+    // The hand: half of rolls take a little of the groove's timing drift
+    // (the HUMAN slider's own scale — dusty grooves drift more, machine
+    // grooves stay near the grid), the rest sit tight.
+    humanize: rnd() < 0.5 ? Math.round((g.human[0] + rnd() * (g.human[1] - g.human[0])) * 100) / 100 : 0,
+    // The performance: some rolls bake a send ride into the scene's motion
+    // lanes — a dub throw, a pad bloom, a fill-bar drum lift — phrased
+    // against the four-bar loop (makeMagicScene materializes it).
+    ride: rnd() < 0.3 ? pickFrom(["throw", "bloom", "drumlift"]) : null,
   };
 }
 
@@ -838,14 +978,62 @@ function magicMelody(vibe, harmony = null, bars = 4, steps = 0) {
     }
     return idx;
   };
+  const clampIdx = (i) => Math.max(0, Math.min(win.length - 1, i));
+  const anchor = rint(4, 9);
+  const melody = new Array(total).fill(null);
+  // The singer's character, rolled per vibe: hook (the motif engine), runner
+  // (driving straight-8th lines), sparse (a few long chord tones), arc (the
+  // motif engine with a contour instead of coin-flip shifts). Old saves have
+  // no melodyChar and sing hook, which is the pre-character engine exactly.
+  const char = vibe.melodyChar || "hook";
+  if (char === "runner") {
+    // A persistent direction that turns at the window edge or on a coin;
+    // strong beats snap to the chord, and the breathing scales down from the
+    // groove's gap hint because the runner IS the busy character.
+    let idx = anchor;
+    let dir = rnd() < 0.5 ? 1 : -1;
+    for (let s = 0; s < total; s += 2) {
+      if (rnd() < gap * 0.4) continue;
+      if (idx <= 0) dir = 1;
+      else if (idx >= win.length - 1) dir = -1;
+      else if (rnd() < 0.25) dir = -dir;
+      idx = clampIdx(idx + dir * (rnd() < 0.15 ? 2 : 1));
+      const bar = Math.floor(s / 16);
+      const at = s % 4 === 0 ? snapToChord(idx, bar) : idx;
+      melody[s] = [{ midi: win[at], len: 2, vel: (s % 4 === 0 ? 0.8 : 0.6) + rnd() * 0.15 }];
+    }
+    if (melody.filter(Boolean).length < 3) {
+      for (const s of [0, 4, 8]) melody[s] = [{ midi: win[snapToChord(anchor, 0)], len: 2, vel: 0.75 }];
+    }
+    return melody;
+  }
+  if (char === "sparse") {
+    // One long chord tone per half-bar at most, leaning on the front halves;
+    // the space between notes is the character, so the dud floor is two
+    // tones, not three.
+    for (let h = 0; h * 8 < total; h++) {
+      if (rnd() > (h % 2 === 0 ? 0.6 : 0.3)) continue;
+      const s = h * 8 + (rnd() < 0.25 && h * 8 + 4 < total ? 4 : 0);
+      const bar = Math.floor(s / 16);
+      const idx = snapToChord(clampIdx(anchor + rint(-2, 3)), bar);
+      melody[s] = [{ midi: win[idx], len: rnd() < 0.4 ? 8 : 6, vel: 0.55 + rnd() * 0.25 }];
+    }
+    if (melody.filter(Boolean).length < 2) {
+      // Halfway lands on the 8th grid even for the 12-step polymeter lane
+      // (total/2/2*2: 12 -> 6, 64 -> 32); a plain /2/8*8 rounded 12 to 0 and
+      // stacked both floor tones on the downbeat.
+      for (const s of [0, Math.floor(total / 4) * 2]) {
+        melody[s] = [{ midi: win[snapToChord(anchor, Math.floor(s / 16))], len: Math.min(8, total - s), vel: 0.65 }];
+      }
+    }
+    return melody;
+  }
   const motifLen = rnd() < 0.5 ? 4 : 8;
   const count = motifLen === 4 ? rint(2, 3) : rint(3, 5);
   const offs = new Set([0]);
   while (offs.size < count) {
     offs.add(rnd() < 0.8 ? 2 * rint(0, motifLen / 2 - 1) : rint(0, motifLen - 1));
   }
-  const clampIdx = (i) => Math.max(0, Math.min(win.length - 1, i));
-  const anchor = rint(4, 9);
   const events = [...offs].sort((a, b) => a - b).map((off, i, arr) => ({
     off,
     strong: off === 0 || i === arr.length - 1,
@@ -853,7 +1041,6 @@ function magicMelody(vibe, harmony = null, bars = 4, steps = 0) {
     len: rnd() < 0.35 ? 2 : 1,
     vel: 0.65 + rnd() * 0.3,
   }));
-  const melody = new Array(total).fill(null);
   const writeRep = (rep, shift, always) => {
     for (const ev of events) {
       if (!always && rnd() < 0.15) continue;
@@ -865,13 +1052,20 @@ function magicMelody(vibe, harmony = null, bars = 4, steps = 0) {
       melody[s] = [{ midi: win[idx], len: ev.len, vel: Math.max(0.4, Math.min(1, ev.vel + rnd() * 0.1 - 0.05)) }];
     }
   };
-  writeRep(0, 0, true);
+  // arc: the shifts walk a phrase-length contour (rise, answer, fall, dip)
+  // instead of flipping coins, so the four bars read as one gesture; a rep's
+  // shift comes from the bar it lands in. hook keeps the coin flips.
+  const contour = char === "arc" ? pickFrom([[0, 1, 2, 3], [0, 2, 1, 0], [3, 2, 1, 0], [0, -1, 1, 0]]) : null;
+  const cscale = contour && rnd() < 0.4 ? 2 : 1;
+  const shiftFor = (rep) => (contour ? contour[Math.floor((rep * motifLen) / 16) % 4] * cscale : pickW(MOTIF_SHIFTS));
+  const gapEff = contour ? gap * 0.8 : gap;
+  writeRep(0, contour ? shiftFor(0) : 0, true);
   for (let rep = 1; rep * motifLen < total; rep++) {
-    if (rnd() < gap) continue;
-    writeRep(rep, pickW(MOTIF_SHIFTS), false);
+    if (rnd() < gapEff) continue;
+    writeRep(rep, shiftFor(rep), false);
   }
   // Never a dud: if the gaps ate too much, the motif answers itself.
-  if (melody.filter(Boolean).length < 3) writeRep(Math.floor(total / 2 / motifLen), 0, true);
+  if (melody.filter(Boolean).length < 3) writeRep(Math.floor(total / 2 / motifLen), contour ? shiftFor(0) : 0, true);
   return melody;
 }
 
@@ -1014,6 +1208,37 @@ export function rollDrumPhrase(bars = 4, groove = null) {
   return drums;
 }
 
+// A rolled ride, spoken in the same motion lanes the sound sheet records
+// (values are the lane's 0..1 normalization of the -30..0 dB send range).
+// Every shape is phrased against the four-bar loop: flat until bar 4 for the
+// throw and the lift, one long opening for the bloom. Peaks are capped where
+// the send starts to wash (the returns are highpassed and ride the kick
+// duck, so even the caps stay clean).
+const laneOf = (db) => Math.max(0, Math.min(1, (db + 30) / 30));
+function rideLanes(vibe) {
+  const lane = new Array(64).fill(0);
+  const barFour = (base, peak) => {
+    for (let i = 0; i < 64; i++) lane[i] = i < 48 ? base : base + (peak - base) * ((i - 48) / 15);
+  };
+  if (vibe.ride === "throw") {
+    // the melody's echo swells through bar 4 into the turnaround
+    const base = laneOf(vibe.wet?.melody?.echo ?? -30);
+    barFour(base, Math.min(0.85, Math.max(base + 0.3, 0.55)));
+    return { melody: { echo: lane } };
+  }
+  if (vibe.ride === "drumlift") {
+    // the room opens under the drums through the fill bar
+    const base = laneOf(vibe.wet?.drums?.verb ?? -30);
+    barFour(base, Math.min(0.6, Math.max(base + 0.25, 0.45)));
+    return { drums: { verb: lane } };
+  }
+  // bloom: the pad's room opens across the whole phrase, resets at the top
+  const base = laneOf(vibe.wet?.harmony?.verb ?? -30);
+  const peak = Math.min(0.8, base + 0.22);
+  for (let i = 0; i < 64; i++) lane[i] = base + (peak - base) * (i / 63);
+  return { harmony: { verb: lane } };
+}
+
 export function makeMagicScene(vibe) {
   // Tolerate no vibe (fresh roll) and pre-vibe or trimmed song.vibe shapes
   // from older saves — anything that can't drive the generators re-rolls.
@@ -1027,7 +1252,7 @@ export function makeMagicScene(vibe) {
   // generated on the 12-step grid they'll actually loop.
   const bass = vibe.polymeter === "bass" ? magicBass(vibe, 12) : magicBassFollow(vibe, harmony);
   const melody = vibe.polymeter === "melody" ? magicMelody(vibe, harmony, 1, 12) : magicMelody(vibe, harmony);
-  const scene = makeScene(harmony, drums, melody, bass);
+  const scene = makeScene(harmony, drums, melody, bass, vibe.ride ? rideLanes(vibe) : null);
   scene.steps.drums = 64;
   scene.steps.bass = vibe.polymeter === "bass" ? 12 : harmony.length * 16;
   scene.steps.melody = vibe.polymeter === "melody" ? 12 : 64;
@@ -1182,7 +1407,7 @@ export function makeSong() {
     mutes: {},
     loop: { on: false, start: 0, len: 4 },
     swing: vibe.swing, // global groove, rolled inside the archetype's pocket
-    humanize: 0, // per-hit timing drift, 0..1 — the HUMAN slider
+    humanize: vibe.humanize || 0, // per-hit timing drift, 0..1 — the HUMAN slider starts where the roll put it
   };
 }
 
