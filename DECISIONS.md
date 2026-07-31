@@ -374,6 +374,34 @@ the builder's "no backward-compatibility needed," the master stopped
 traveling in project files at all: every song, fresh or loaded, plays
 through the compiled character, and the panel moves it live only.
 
+### D23 — The dice audit: floor rules for the roll, one drummer for every 🎲
+
+A full parameter audit of the three dice surfaces, landed at the
+builder's "fix 1-6." The floor rules: the harmony families that dwell
+on a chord route around the scale's diminished triad — statics never
+hold it, vamp pairs containing it sit out ([0,6] is I-vii° in major,
+[1,4] is ii°-v in minor) — while cadences and wander keep it as a
+passing bar. The scale draw stops being uniform: major and minor carry
+24% each, dorian and mixolydian 16%, lydian 12%, phrygian 8% — the
+builder's call that the exotic modes should land less often, not
+never. The follow bass got back the 25% fifth its offbeat-8ths lost in
+the D21 rewrite (and, found by the verifier: borrowed bars no longer
+pedal the scale tonic — the diatonic window can't contain a violet
+root, so the true pc now lands above the window floor). Melody rolls
+at base 72 cap their window at 11 rows (~F6 ceiling instead of B6
+screech on a phone speaker). Polymeter lanes generate on the 12-step
+grid they loop instead of writing 16 and truncating. The bass
+sound-dice honors "never deal dead air" without moving notes: over a
+bassline living below octave 2 the roll rejects the deep-dominant
+quadrant (the driveless sine), since fitBassRegister's fold is only
+for fresh dice notes, never hand-placed ones. And the drum editor's 🎲
+stopped spraying fixed densities over a flat rock template: the roll
+is rollDrumPhrase now, the same archetype-bar/breath/fill treatment
+the transport dice uses, hiring the song's own groove and skipping the
+fill on one-bar loops. Verified statistically (20k-roll distributions,
+zero dim-drones beyond wander's residue, offbeat notes all
+root-or-fifth) and end-to-end headless.
+
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 
 Reading §7 straight: the couch-songwriting cold open is the milestone, the backing-track/Link scenario is phase two. Confirm this is the priority order before the research pass sets its emphasis.

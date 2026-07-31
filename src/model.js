@@ -749,12 +749,18 @@ function rollVibe() {
   };
 }
 
-// Weighted progression families in scale degrees. Length is part of the roll:
-// cadences run 4 bars, vamps 2, statics 1 — the arrangement and clip loops
-// follow the harmony length wherever it lands.
+// Weighted progression families in scale degrees. Since D21 every family
+// lands as a four-bar phrase: vamps play their pair twice over, statics hold
+// one chord across all four bars.
 const CADENCES = [[0, 4, 5, 3], [0, 5, 3, 4], [5, 3, 0, 4], [0, 3, 4, 3], [1, 4, 0, 0], [0, 3, 0, 4], [0, 0, 3, 4], [5, 4, 3, 4]];
 const VAMPS = [[0, 5], [0, 3], [5, 3], [1, 4], [0, 4], [5, 4], [0, 6], [3, 4]];
 const n12h = (v) => ((v % 12) + 12) % 12;
+// The scale's one diminished triad, found by interval. Fine as a passing bar
+// in a cadence or a wander; a floor-breaker held static or vamped every
+// other bar, so those two families route around it. Which degree it is moves
+// with the mode: index 6 in major, 1 in minor, 4 in phrygian.
+const dimDegree = () =>
+  CHORDS.findIndex((c) => (c.pcs[1] - c.pcs[0] + 12) % 12 === 3 && (c.pcs[2] - c.pcs[0] + 12) % 12 === 6);
 function magicHarmony(vibe) {
   const fam = pickW([["cadence", 45], ["vamp", 25], ["static", 10], ["wander", 20]]);
   let line;
@@ -765,14 +771,20 @@ function magicHarmony(vibe) {
     line = CADENCES[i].slice();
   } else if (fam === "vamp") {
     // Every roll is a four-bar phrase (D21): a vamp is its pair twice over.
-    let i = rint(0, VAMPS.length - 1);
-    if (i === lastRoll.vamp) i = rint(0, VAMPS.length - 1);
+    // Pairs holding the diminished degree sit out — [0, 6] is I–vii° in
+    // major, [1, 4] is ii°–v in minor — half a phrase on a dim chord.
+    const dim = dimDegree();
+    const ok = VAMPS.flatMap((v, i) => (v.includes(dim) ? [] : [i]));
+    let i = ok[rint(0, ok.length - 1)];
+    if (i === lastRoll.vamp) i = ok[rint(0, ok.length - 1)];
     lastRoll.vamp = i;
     const [a, b] = VAMPS[i];
     line = [a, b, a, b];
   } else if (fam === "static") {
-    // One chord held four bars; the seventh pass below can still shade it.
-    const d = rint(0, 6);
+    // One chord held four bars — any but the diminished one (a four-bar dim
+    // drone breaks the floor); the seventh pass below can still shade it.
+    const dim = dimDegree();
+    const d = pickFrom([0, 1, 2, 3, 4, 5, 6].filter((x) => x !== dim));
     line = [d, d, d, d];
   } else {
     line = Array.from({ length: 4 }, () => rint(0, 6)); // the surprise generator
@@ -799,10 +811,16 @@ function magicHarmony(vibe) {
 // step transposition and drop-note variation, and let the groove's gap hint
 // leave breathing room. Uniform scatter can't hook; repetition can.
 const MOTIF_SHIFTS = [[0, 5], [1, 2], [-1, 2], [2, 1], [-2, 1]];
-function magicMelody(vibe, harmony = null, bars = 4) {
-  const win = scaleNotes(vibe.melodyBase, 14);
+// steps: the loop the lane will actually play when it isn't bars*16 (the
+// melody polymeter runs a 12-step cycle) — generating past it wrote notes
+// no one could ever hear, and the anti-dud counter believed in them.
+function magicMelody(vibe, harmony = null, bars = 4, steps = 0) {
+  // Octave-5 rolls keep the brightness, lose the screech: 14 rows over base
+  // 72 let motif shifts reach B6 (~2 kHz of saw fundamental on a phone
+  // speaker); 11 rows cap the ceiling near F6. Lower bases keep the span.
+  const win = scaleNotes(vibe.melodyBase, vibe.melodyBase >= 72 ? 11 : 14);
   const gap = GROOVES[vibe.groove].melodyGap;
-  const total = bars * 16;
+  const total = steps || bars * 16;
   // Chord-tone gravity, per bar: with four-bar lanes (D21) the motif can
   // track the progression for real. Each repetition's strong notes snap to
   // the tones of the chord UNDER that bar; the middle keeps its freedom.
@@ -859,7 +877,10 @@ function magicMelody(vibe, harmony = null, bars = 4) {
 
 // Bass behaviors, weighted per groove: root-quarters with pickups (the old
 // default), offbeat 8ths (house), a drone (halftime weight), octave bounce.
-function magicBass(vibe) {
+// steps: the loop this lane will actually play (12 for the bass polymeter).
+// Generating on the true grid — not writing 16 and truncating — keeps every
+// note audible and lands the drone halves inside the cycle.
+function magicBass(vibe, steps = 16) {
   const notes = scaleNotes(vibe.bassBase, 12);
   const low = notes.slice(0, 5);
   const root = notes[0];
@@ -867,27 +888,28 @@ function magicBass(vibe) {
   const bass = new Array(16).fill(null);
   const behavior = pickW(GROOVES[vibe.groove].bass);
   if (behavior === "drone") {
-    bass[0] = [{ midi: root, len: 8, vel: 0.9 }];
-    bass[8] = [{ midi: rnd() < 0.3 ? root + 12 : root, len: 8, vel: 0.85 }];
+    const half = Math.floor(steps / 2);
+    bass[0] = [{ midi: root, len: half, vel: 0.9 }];
+    bass[half] = [{ midi: rnd() < 0.3 ? root + 12 : root, len: steps - half, vel: 0.85 }];
   } else if (behavior === "offbeat8") {
-    for (let s = 2; s < 16; s += 4) {
+    for (let s = 2; s < steps; s += 4) {
       bass[s] = [{ midi: rnd() < 0.25 ? fifth : root, len: 2, vel: 0.85 + rnd() * 0.1 }];
     }
   } else if (behavior === "bounce") {
-    for (let s = 0; s < 16; s += 2) {
+    for (let s = 0; s < steps; s += 2) {
       if (rnd() < 0.2) continue;
       bass[s] = [{ midi: s % 4 === 2 ? root + 12 : root, len: 2, vel: (s % 4 === 0 ? 0.9 : 0.75) + rnd() * 0.1 }];
     }
     if (!bass[0]) bass[0] = [{ midi: root, len: 2, vel: 0.9 }];
   } else {
     const pickLow = () => pickFrom(low);
-    for (let s = 0; s < 16; s += 4) {
+    for (let s = 0; s < steps; s += 4) {
       if (rnd() < 0.8) bass[s] = [{ midi: pickLow(), len: 4, vel: 0.9 }];
     }
     if (!bass.some(Boolean)) bass[0] = [{ midi: pickLow(), len: 4, vel: 0.9 }];
     // Syncopation: a short pickup on the "and" — the held note underneath
     // gets cut short so the low end never doubles up.
-    for (const s of [6, 14]) {
+    for (const s of [6, steps - 2]) {
       if (rnd() < 0.45 && !bass[s]) {
         const held = bass[s - 2]?.[0];
         if (held) held.len = 2;
@@ -908,10 +930,24 @@ function magicBassFollow(vibe, harmony) {
   const lane = new Array(bars * 16).fill(null);
   const win = scaleNotes(vibe.bassBase, 12);
   const n12b = (v) => ((v % 12) + 12) % 12;
-  const rootFor = (b) => {
-    const pc = n12b(harmonyChord(normalizeHarmonyEntry(harmony[b])).pcs[0]);
+  const noteFor = (b, i) => {
+    const pcs = harmonyChord(normalizeHarmonyEntry(harmony[b])).pcs;
+    const pc = n12b(pcs[Math.min(i, pcs.length - 1)]);
     const cands = win.filter((m) => n12b(m) === pc);
-    return cands.length ? cands[0] : win[0];
+    // A borrowed bar's tones aren't in the diatonic window — place the true
+    // pc just above the window floor instead of pedaling the scale tonic
+    // under a violet chord (pre-D13 this fallback could never fire).
+    return cands.length ? cands[0] : win[0] + ((pc - n12b(win[0]) + 12) % 12);
+  };
+  const rootFor = (b) => noteFor(b, 0);
+  // The bar chord's fifth (pcs[2] in every stored shape), voiced above the
+  // root where the window allows — the same 25% color magicBass gives its
+  // offbeat 8ths, which the D21 rewrite dropped from the branch most rolls
+  // actually play.
+  const fifthFor = (b) => {
+    const root = rootFor(b);
+    const fifth = noteFor(b, 2);
+    return win.find((m) => m > root && n12b(m) === n12b(fifth)) ?? fifth;
   };
   const behavior = pickW(GROOVES[vibe.groove].bass);
   for (let b = 0; b < bars; b++) {
@@ -921,7 +957,7 @@ function magicBassFollow(vibe, harmony) {
       lane[at] = [{ midi: root, len: 8, vel: 0.9 }];
       lane[at + 8] = [{ midi: rnd() < 0.3 ? root + 12 : root, len: 8, vel: 0.85 }];
     } else if (behavior === "offbeat8") {
-      for (let s = 2; s < 16; s += 4) lane[at + s] = [{ midi: root, len: 2, vel: 0.85 + rnd() * 0.1 }];
+      for (let s = 2; s < 16; s += 4) lane[at + s] = [{ midi: rnd() < 0.25 ? fifthFor(b) : root, len: 2, vel: 0.85 + rnd() * 0.1 }];
     } else if (behavior === "bounce") {
       for (let s = 0; s < 16; s += 2) {
         if (rnd() < 0.2) continue;
@@ -937,48 +973,60 @@ function magicBassFollow(vibe, harmony) {
   return lane;
 }
 
-export function makeMagicScene(vibe) {
-  // Tolerate no vibe (fresh roll) and pre-vibe or trimmed song.vibe shapes
-  // from older saves — anything that can't drive the generators re-rolls.
-  if (!GROOVES[vibe?.groove] || vibe.melodyBase == null) vibe = rollVibe();
-  // Every roll is a four-bar phrase (D21): one archetype bar, tiled with a
-  // fresh velocity breath per bar, a lift into the downbeat some rolls, and
-  // a real fill at the end of bar 4. The treadmill dies here.
-  const oneBar = GROOVES[vibe.groove].drums();
+// The drum roll itself, shared by the transport dice and the drum editor's
+// own 🎲 (which used to spray fixed densities over one flat rock template no
+// archetype plays): one archetype bar, tiled with a fresh velocity breath
+// per bar, a hat lift into the turnaround some rolls, and a real fill at the
+// end of the LAST bar when the phrase has one to fill toward — on a one-bar
+// loop a repeating fill isn't a fill. Voices the archetype sits out come
+// back zero-filled, so every lane is playable data at bars*16 steps.
+export function rollDrumPhrase(bars = 4, groove = null) {
+  const g = GROOVES[groove] ? groove : pickW(Object.entries(GROOVES).map(([name, gr]) => [name, gr.weight]));
+  const oneBar = GROOVES[g].drums();
   oneBar.kick[0] = Math.max(oneBar.kick[0], 0.95); // the downbeat anchor, always
+  const total = bars * 16;
   const drums = {};
-  for (const v of Object.keys(oneBar)) {
+  for (const v of DRUM_VOICES) {
+    drums[v] = new Array(total).fill(0);
     const src = oneBar[v];
-    if (!src) {
-      drums[v] = null;
-      continue;
-    }
-    drums[v] = new Array(64).fill(0);
-    for (let b = 0; b < 4; b++) {
+    if (!src) continue;
+    for (let b = 0; b < bars; b++) {
       for (let st = 0; st < 16; st++) {
         const vel = src[st];
         drums[v][b * 16 + st] = vel > 0 ? Math.max(0.05, Math.min(1, vel + (b ? rnd() * 0.08 - 0.04 : 0))) : 0;
       }
     }
   }
-  if (rnd() < 0.4 && drums.hat) {
-    drums.hat[62] = Math.max(drums.hat[62], 0.45 + rnd() * 0.1);
-    drums.hat[63] = Math.max(drums.hat[63], 0.6 + rnd() * 0.15);
+  if (rnd() < 0.4) {
+    drums.hat[total - 2] = Math.max(drums.hat[total - 2], 0.45 + rnd() * 0.1);
+    drums.hat[total - 1] = Math.max(drums.hat[total - 1], 0.6 + rnd() * 0.15);
   }
-  if (rnd() < 0.6 && drums.snare && drums.hat) {
-    // The bar-4 fill: snare pickups walking in, hats opening under them,
+  if (bars >= 2 && rnd() < 0.6) {
+    // The last-bar fill: snare pickups walking in, hats opening under them,
     // and half the time the kick steps aside for the last beat.
-    drums.snare[60] = Math.max(drums.snare[60], 0.45 + rnd() * 0.1);
-    drums.snare[62] = Math.max(drums.snare[62], 0.6 + rnd() * 0.15);
-    if (rnd() < 0.5) drums.snare[63] = 0.75 + rnd() * 0.15;
-    for (let st = 60; st < 64; st++) drums.hat[st] = Math.max(drums.hat[st], 0.35 + (st - 60) * 0.12);
-    if (rnd() < 0.5 && drums.kick) for (let st = 61; st < 64; st++) drums.kick[st] = 0;
+    const at = total - 4;
+    drums.snare[at] = Math.max(drums.snare[at], 0.45 + rnd() * 0.1);
+    drums.snare[at + 2] = Math.max(drums.snare[at + 2], 0.6 + rnd() * 0.15);
+    if (rnd() < 0.5) drums.snare[at + 3] = 0.75 + rnd() * 0.15;
+    for (let st = at; st < total; st++) drums.hat[st] = Math.max(drums.hat[st], 0.35 + (st - at) * 0.12);
+    if (rnd() < 0.5) for (let st = at + 1; st < total; st++) drums.kick[st] = 0;
   }
+  return drums;
+}
+
+export function makeMagicScene(vibe) {
+  // Tolerate no vibe (fresh roll) and pre-vibe or trimmed song.vibe shapes
+  // from older saves — anything that can't drive the generators re-rolls.
+  if (!GROOVES[vibe?.groove] || vibe.melodyBase == null) vibe = rollVibe();
+  // Every roll is a four-bar phrase (D21): the drum roll carries the tiling,
+  // the breath, and the bar-4 fill. The treadmill dies here.
+  const drums = rollDrumPhrase(4, vibe.groove);
   const harmony = magicHarmony(vibe);
   // The bass walks the changes on every roll now; polymeter keeps the old
-  // one-bar behaviors (a 12-step phase and a 4-bar walk can't share a lane).
-  const bass = vibe.polymeter === "bass" ? magicBass(vibe) : magicBassFollow(vibe, harmony);
-  const melody = vibe.polymeter === "melody" ? magicMelody(vibe, harmony, 1) : magicMelody(vibe, harmony);
+  // one-bar behaviors (a 12-step phase and a 4-bar walk can't share a lane),
+  // generated on the 12-step grid they'll actually loop.
+  const bass = vibe.polymeter === "bass" ? magicBass(vibe, 12) : magicBassFollow(vibe, harmony);
+  const melody = vibe.polymeter === "melody" ? magicMelody(vibe, harmony, 1, 12) : magicMelody(vibe, harmony);
   const scene = makeScene(harmony, drums, melody, bass);
   scene.steps.drums = 64;
   scene.steps.bass = vibe.polymeter === "bass" ? 12 : harmony.length * 16;
@@ -1089,10 +1137,15 @@ export function clipLengthBars(scene, track) {
   return track === "harmony" ? Math.max(1, scene.harmony.length) : 1;
 }
 
+// The cold open leans familiar: majors and minors carry half the rolls, the
+// friendly modes keep a real presence, and the exotic ends of the deck —
+// lydian's ♯4 and phrygian's ♭2 — stay in rotation but land less often.
+const SCALE_WEIGHTS = { major: 24, minor: 24, dorian: 16, mixolydian: 16, lydian: 12, phrygian: 8 };
+
 export function makeSong() {
   // Randomize key and scale on each fresh load — pairs well with Magic scenes
   const key = Math.floor(Math.random() * 12);
-  const scale = SCALE_NAMES[Math.floor(Math.random() * SCALE_NAMES.length)];
+  const scale = pickW(SCALE_NAMES.map((n) => [n, SCALE_WEIGHTS[n] ?? 12]));
   setScaleContext(key, scale);
   // One vibe per song: tempo, pocket, and space come from the same roll the
   // patterns do, so the parts agree on what kind of thing they're playing.

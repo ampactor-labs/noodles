@@ -25,6 +25,7 @@ import {
   setScaleContext,
   snapToScale,
   makeMagicScene,
+  rollDrumPhrase,
   stepsFor,
   keyDisplayName,
   keySignature,
@@ -39,7 +40,7 @@ import {
   stationOfPc,
   relMajorPc,
 } from "./model.js";
-import { createAudio, KIT_NAMES, SAMPLE_KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, colorNamesFor, DRUM_BANKS, drumCornerNames, MASTER_DEFAULTS } from "./audio.js";
+import { createAudio, KIT_NAMES, SAMPLE_KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, colorNamesFor, dominantCorner, DRUM_BANKS, drumCornerNames, MASTER_DEFAULTS } from "./audio.js";
 import { createCircleView } from "./circle.js";
 
 // Pitch range shown in the piano roll, per track.
@@ -152,6 +153,17 @@ function fitBassRegister(scene) {
     for (const n of notes) n.midi += 12;
   }
   return scene;
+}
+// The bass sound-dice keeps the same promise the other way around:
+// fitBassRegister folds FRESH dice notes at boot/reroll, but an established
+// bassline may hold hand-placed low notes the fold must not move — so when
+// any scene lives below octave 2, the roll itself stays out of the
+// deep-dominant quadrant (the driveless sine those notes vanish under).
+function rolledBassPatch() {
+  const low = song.scenes.some((sc) => sc.bass.some((slot) => noteSlot(slot).some((n) => n.midi < 36)));
+  let p = rolledPatch("bass");
+  for (let i = 0; low && i < 8 && dominantCorner("bass", p) === "deep"; i++) p = rolledPatch("bass");
+  return p;
 }
 randomizePresets(song.vibe);
 for (const sc of song.scenes) fitBassRegister(sc);
@@ -2462,7 +2474,7 @@ function openSoundSheet(track) {
     text: "🎲",
     "data-action": `sound-dice-${track}`,
     onclick: () => {
-      audio.setPatch(track, rolledPatch(track));
+      audio.setPatch(track, track === "bass" ? rolledBassPatch() : rolledPatch(track));
       openSoundSheet(track);
     },
   });
@@ -2847,20 +2859,14 @@ function buildDrumEditor(scene) {
       text: "🎲",
       onclick: () => {
         pushUndo();
-        const dens = { kick: 0.32, snare: 0.14, hat: 0.5, clap: 0.12 };
-        const len = stepsFor(scene, "drums");
+        // The same drummer the song hired (a weighted stranger when an old
+        // save carries no vibe), dealing a fresh take at the clip's own
+        // length — this button used to spray fixed densities over one flat
+        // rock backbeat no archetype plays.
+        const len = Math.max(16, stepsFor(scene, "drums"));
+        const rolled = rollDrumPhrase(Math.floor(len / 16), song.vibe?.groove);
         for (const v of DRUM_VOICES) {
-          for (let s = 0; s < Math.max(16, len); s++) {
-            if (v === "kick" && s % 2 !== 0 && Math.random() > 0.1) { scene.drums[v][s] = 0; continue; }
-            if (v === "snare" && s % 4 !== 0) { scene.drums[v][s] = 0; continue; }
-            scene.drums[v][s] = Math.random() < dens[v] ? 0.7 + Math.random() * 0.3 : 0;
-          }
-        }
-        for (let b = 0; b * 16 < Math.max(16, len); b++) {
-          scene.drums.kick[b * 16] = 0.9;
-          scene.drums.kick[b * 16 + 8] = 0.9;
-          scene.drums.snare[b * 16 + 4] = 0.9;
-          scene.drums.snare[b * 16 + 12] = 0.9;
+          for (let s = 0; s < len; s++) scene.drums[v][s] = rolled[v][s];
         }
         openEditor(editor.scene, "drums");
         refreshClip(editor.scene, "drums");
