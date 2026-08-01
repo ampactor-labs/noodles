@@ -182,6 +182,21 @@ base build 866 Tone buffer-source constructions and 2 mid-jam voice disposals; n
 and 0, warmup constructions identical. The five meter analysers also park while the mixer
 sheet is closed.
 
+The 2026-08-01 hunt (an un-listenable on-device demo after D24): the layer pools were
+never capped — Tone's positional PolySynth form swallows `maxPolyphony` into the voice
+options, so every pool ran at the class default of 32 — and the comp gestures were the
+first workload dense enough to use the room. Measured (.tmp/dbg-comp-drops.mjs): a pulse
+comp on a hire patch rang 36 voices (24 on the pad-release layer) and priced the
+full-band offline render at 826 ms per rendered second against 499 for the same song on
+sustain. The object-form constructor makes the caps real (pad 8, melody 5, bass 4), the
+pool steals at the cap instead of dropping (D25, with two timeline guards bought with
+.tmp/dbg-steal-chaos.mjs), and post-fix the same render reads 472 vs a 396 sustain
+baseline (+19%, was +65%). A baked send ride still adds its honest wet premium (~130
+ms/s desktop) — that's the return sounding, not waste. Same hunt, small: `trimVoices`
+no longer fires mid-jam (the dice path called it 1.5 s after every roll); a trimmed pool
+under a comp refills within a bar, so the playing-time trim was pure
+dispose-and-reconstruct churn.
+
 Remaining, in honesty: the always-on chain while PLAYING (verb combs, chorus, five
 compressors, master stack) is the floor and it IS the sound; shrinking it means a measured
 device tier that makes weak phones sound different from the export, a fork the builder must

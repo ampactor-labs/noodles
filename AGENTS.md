@@ -283,6 +283,14 @@ Plus tier-2 performance work listed in `ROADMAP.md` (diff-based cell repaints, p
 - **Scale-aware is the core.** It's the "can't-make-it-wrong" promise and the Ableton-12 idea.
   Harmony is degree-based (follows key/scale automatically); bass/melody transpose + re-snap on
   key change. Keep every new note-producing surface scale-snapped by default.
+- **Tone.PolySynth's positional form eats the cap.** `new Tone.PolySynth(Tone.Synth,
+  {...})` treats the whole second argument as per-voice options — a `maxPolyphony` in it
+  is silently ignored and the pool runs at the class default of 32 (that was the D25
+  regression). Use the object form with voice options nested under `options`, and keep
+  per-voice `volume` inside `options` (a top-level volume only moves the shared output
+  node). Layer pools also carry steal-at-the-cap and silence hand-back guards
+  (`stealDontDrop` in audio.js); construct layer synths only through `makeLayers` so
+  they get them.
 - **Modern-browser features in use:** `structuredClone`, CSS `color-mix()`, `esnext` build
   target. Fine for the target phones; don't add polyfills.
 - **Two gates before claiming anything works:** `npm run smoke` (headless Chrome drives the

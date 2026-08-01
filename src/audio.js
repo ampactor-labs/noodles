@@ -124,6 +124,77 @@ function trimVoicePool(synth, keep = 1) {
   }
 }
 
+// At the polyphony cap the stock pool DROPS the incoming note and
+// console.warns — per note, forever. A capped pool under the comp gestures
+// (D24: the same chord re-struck per 16th, tails overlapping) reaches the
+// cap by design, and the musical behavior there is a restrike, not a hole:
+// take the oldest released voice — its tail is the oldest sound in the pool
+// — and re-attack it at the new pitch. Envelope attacks ramp from the
+// current level, so a steal is click-free. An un-released voice is taken
+// only when every voice is still held, a burst denser than the cap, where
+// choking the oldest is still the right sound.
+//
+// One law bounds the theft: only take a voice the re-attack cannot throw
+// on. Transport callbacks run lookAhead-early and JIT-write attacks ahead
+// of the clock, so the pool holds voices claimed at FUTURE times, and
+// Source.start enforces a monotone state timeline (the 1-in-7 smoke flake
+// this replaced). Mirror Source.start's two branches: a voice that reads
+// "started" now restarts safely — Tone cancels its pending tail-end stop —
+// but only if its last start is at least a render quantum old (an
+// equal-time restart trips the strict assert); a voice that reads
+// "stopped" appends, so nothing on its timeline may lie in the future (a
+// double-released voice carries a second, later stop). Guarded like the
+// GC patch: if Tone's internals move, the stock drop-and-warn keeps
+// running.
+function stealDontDrop(synth) {
+  if (!Array.isArray(synth._availableVoices) || !Array.isArray(synth._activeVoices)) return;
+  const orig = synth._getNextAvailableVoice.bind(synth);
+  // A stolen voice's PREVIOUS life still has its silence watch pending; when
+  // it fires, the stock hand-back would return the voice to the available
+  // pool mid-new-life — the next allocation then writes a start time behind
+  // the new life's claim and Tone throws (measured: every residual
+  // chaos-harness throw carried this double-free signature). Bookkeeping
+  // can't referee it: transport JIT runs lookAhead-early, so a whole future
+  // life (start AND stop) may already sit on the timeline with its entry
+  // marked released. The state timeline is the ground truth — honor a
+  // silence signal only for a voice with nothing scheduled ahead of now,
+  // exactly once.
+  if (typeof synth._makeVoiceAvailable === "function") {
+    const origFree = synth._makeVoiceAvailable.bind(synth);
+    synth._makeVoiceAvailable = (voice) => {
+      if (synth._activeVoices.some((e) => e.voice === voice && !e.released)) return;
+      if (synth._availableVoices.includes(voice)) return;
+      const last = voice?.oscillator?._state?.get?.(1e9);
+      if (last && last.time > synth.context.currentTime) return;
+      origFree(voice);
+    };
+  }
+  const stealable = (v, now) => {
+    const st = v?.oscillator?._state;
+    if (!st?.getValueAtTime || !st.getLastState || !st.get) return false;
+    if (st.getValueAtTime(now) === "started") {
+      const started = st.getLastState("started", 1e9);
+      return !!started && started.time < now - 0.01;
+    }
+    const last = st.get(1e9);
+    return !last || last.time <= now;
+  };
+  synth._getNextAvailableVoice = () => {
+    if (synth._availableVoices.length || synth._voices.length < synth.maxPolyphony) return orig();
+    const list = synth._activeVoices;
+    const now = synth.context.currentTime;
+    let pick = -1;
+    for (let i = 0; i < list.length; i++) {
+      if (!stealable(list[i].voice, now)) continue;
+      if (pick < 0) pick = i;
+      if (list[i].released) { pick = i; break; }
+    }
+    if (pick < 0) return orig();
+    const [e] = list.splice(pick, 1);
+    return e.voice;
+  };
+}
+
 // A compressor that only compresses.
 function makeComp(spec) {
   const comp = new Tone.Compressor({
@@ -978,16 +1049,29 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true } = {}) {
   // the output node), so this is where the voice level — and the level that
   // hits the drive stage — gets set. The output node then carries only the
   // morph weight (applyMorphTo).
+  // Tone's positional form — PolySynth(voice, opts) — treats the WHOLE
+  // second argument as per-voice options: a maxPolyphony in there is
+  // silently swallowed and the pool runs at the class default of 32. The
+  // cap is only real in the object form, with the voice options nested
+  // under `options` (volume must stay nested too — it bakes into each
+  // voice; a top-level volume would only move the shared output node).
+  // Measured uncapped (.tmp/dbg-comp-drops.mjs): a pulse comp on the hire
+  // patch rang the pad layer to 24 voices and priced the full-band render
+  // at 1.65x its sustain equivalent — the D24 on-device regression.
   const makeLayers = (table, poly, dest, srcDb) =>
     Object.values(table).map((p) => {
-      const synth = new Tone.PolySynth(Tone.Synth, {
+      const synth = new Tone.PolySynth({
+        voice: Tone.Synth,
         maxPolyphony: poly,
-        oscillator: { type: p.osc || p.wave, detune: p.detune || 0 },
-        envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release },
-        volume: srcDb,
+        options: {
+          oscillator: { type: p.osc || p.wave, detune: p.detune || 0 },
+          envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release },
+          volume: srcDb,
+        },
       }).connect(dest);
       if ((p.osc || p.wave) === "fmsquare") synth.set({ oscillator: { modulationType: "sawtooth", harmonicity: 0.5, modulationIndex: 2 } });
       disableVoiceGC(synth);
+      stealDontDrop(synth);
       return synth;
     });
 
@@ -2189,8 +2273,12 @@ export function createAudio(song) {
       setTimeout(() => this.trimVoices(), 1800);
     },
     // Dispose idle voices beyond a warm floor across every layer pool — the
-    // boundary-time complement to disableVoiceGC (see trimVoicePool).
+    // boundary-time complement to disableVoiceGC (see trimVoicePool). Only
+    // at rest: mid-jam the comp path refills a trimmed pool within a bar,
+    // so a playing-time trim buys nothing and bills the main thread for the
+    // disposals plus the reconstruction burst. The stop path re-runs it.
     trimVoices() {
+      if (playing) return;
       for (const t of MELODIC_TRACKS) for (const layer of live.layers[t]) trimVoicePool(layer);
     },
     get playing() {

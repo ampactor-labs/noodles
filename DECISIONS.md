@@ -440,6 +440,47 @@ degenerate lanes, every rhythmic comp carries a fast hire, every ride
 lane 64 steps in range), smoke green, and the full audit's dice
 section for LUFS/true-peak.
 
+### D25 — The pools get their caps back, and the cap steals instead of dropping
+
+D24 shipped on pools that were never capped. Tone's positional form —
+`new Tone.PolySynth(voice, options)` — treats the whole second
+argument as per-voice options, so the `maxPolyphony` in it was
+silently swallowed and every layer pool ran at the class default of
+32. One block chord per bar never had the density to expose it; a
+pulse comp did. Measured on the hire patch (.tmp/dbg-comp-drops.mjs):
+36 simultaneous voices, 24 of them on the pad-release layer, and the
+full-band offline render at 826 ms per rendered second against 499
+for the same song on sustain — +65%, which on the A16 is the
+difference between playing and crackling. That was the un-listenable
+demo of 2026-07-31.
+
+The object form (`{ voice, maxPolyphony, options }`) makes the cap
+real, and the moment it is real Tone's behavior at the cap is wrong
+for this instrument: it drops the incoming note and console.warns,
+per note, forever. A comp re-striking the same chord per 16th reaches
+the cap by design, and the musical answer there is a restrike, not a
+hole. So the layers steal: oldest released voice first — its tail is
+the oldest sound in the pool — and the envelope re-attack ramps from
+the current level, click-free.
+
+Two laws bound the theft, both bought with a chaos harness
+(.tmp/dbg-steal-chaos.mjs, random dice/preview/toggle/launch actions
+for 8 minutes). Never steal a voice whose re-attack would write
+behind its own oscillator state timeline: transport callbacks run
+lookAhead-early, so the pool holds voices claimed at future times,
+and Source.start's monotone timeline throws — the mid-bar transport
+death behind the smoke flake. And never honor a silence hand-back
+for a voice with anything still scheduled ahead of now: a stolen
+voice's previous life reports silence mid-new-life, and the stock
+hand-back double-frees it into the available pool. Before the
+guards the harness threw 65 times in 8 minutes; after, 2331 actions
+and zero.
+
+Receipts: post-fix renders (.tmp/dbg-comp-drops.mjs) band+pulse 472
+against the 396 sustain baseline (+19%, was +65%) and
+band+pulse+ride 604 (was 1069); calibrate spreads unchanged; full
+audit green, dice section LUFS -9.2..-11.0, max tp -0.69 dBTP.
+
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 
 Reading §7 straight: the couch-songwriting cold open is the milestone, the backing-track/Link scenario is phase two. Confirm this is the priority order before the research pass sets its emphasis.
