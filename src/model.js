@@ -442,12 +442,20 @@ export function euclid(steps, pulses, rotation = 0) {
 // --- Song / Scene ---
 // A Scene is a loop AND a song section. Harmony is one chord per bar; drums are
 // a step-sequencer grid: one 16-step row per voice, a small drum rack.
-export const DRUM_VOICES = ["kick", "snare", "hat", "clap"];
+// Six voices. hat/open are one instrument in two states — open rings until a
+// closed hit chokes it (the choke lives in audio's hitDrumOn, the single
+// trigger path). perc is the shaker/tambourine family: reference grooves run
+// a shaker as its own continuous 16th line, and folding it into the hats
+// destroyed both (measured on a house reference: 1461 of 2644 hits lost).
+// Old projects load clean — normalizeScene zero-fills lanes that aren't there.
+export const DRUM_VOICES = ["kick", "snare", "hat", "open", "clap", "perc"];
 export const DRUM_META = {
   kick: { label: "kick", hue: 32, sat: 68, light: 62 },
   snare: { label: "snare", hue: 336, sat: 52, light: 68 },
   hat: { label: "hat", hue: 190, sat: 40, light: 76 },
+  open: { label: "open", hue: 190, sat: 46, light: 60 },
   clap: { label: "clap", hue: 276, sat: 52, light: 72 },
+  perc: { label: "perc", hue: 226, sat: 46, light: 72 },
 };
 
 export function cloneNoteSlot(slot) {
@@ -520,8 +528,24 @@ export function normalizeSteps(steps = null) {
 }
 export const stepsFor = (scene, track) => scene?.steps?.[track] || 16;
 
+// Chords per bar. 1 is the instrument's default; 2 lets a bar split in half —
+// the ii-V that shares a bar, the gospel turnaround, the anticipated change.
+// Entries are half-bar slots when rate is 2, so the lane must be even-length.
+export const HARMONY_RATES = [1, 2];
+export function harmonyIndexAt(scene, barOffset, stepInBar = 0) {
+  const len = scene?.harmony?.length;
+  if (!len) return 0;
+  const rate = scene.harmonyRate === 2 ? 2 : 1;
+  const idx = (barOffset * rate + (rate === 2 && stepInBar >= 8 ? 1 : 0)) % len;
+  return idx < 0 ? idx + len : idx;
+}
+
 export function normalizeScene(scene) {
   scene.harmony = Array.isArray(scene.harmony) ? scene.harmony.map(normalizeHarmonyEntry) : [];
+  scene.harmonyRate = scene.harmonyRate === 2 ? 2 : 1;
+  // An odd lane at rate 2 would drift the grid half a bar per cycle: the last
+  // half-bar chord doubles instead, which keeps what the player wrote audible.
+  if (scene.harmonyRate === 2 && scene.harmony.length % 2) scene.harmony.push(scene.harmony[scene.harmony.length - 1]);
   scene.melody = normalizeNoteLane(scene.melody);
   scene.bass = normalizeNoteLane(scene.bass);
   const drums = scene.drums || {};
@@ -538,11 +562,15 @@ let sceneSeq = 0;
 const SCENE_TAGS = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
 export function makeScene(harmony, drums, melody = null, bass = null, motion = null, steps = null) {
-  const tag = SCENE_TAGS[sceneSeq % SCENE_TAGS.length];
+  // Unique past H: A..H, then A2..H2, A3… A 19-scene import used to hand out
+  // three scenes named "A", which made the session grid a guessing game.
+  const cycle = Math.floor(sceneSeq / SCENE_TAGS.length);
+  const tag = SCENE_TAGS[sceneSeq % SCENE_TAGS.length] + (cycle ? cycle + 1 : "");
   sceneSeq += 1;
   const scene = {
     tag,
     harmony: harmony.map(normalizeHarmonyEntry),
+    harmonyRate: 1,
     drums: Object.fromEntries(DRUM_VOICES.map((v) => [v, normalizeDrumLane(drums[v])])),
     // Bass and melody: per-step note stacks (or null) for scale-snapped chords.
     // Each note is { midi, len, vel }; old single-note slots normalize to stacks.
@@ -606,7 +634,15 @@ const GROOVES = {
         return sixteens ? 0.35 + rnd() * 0.15 : 0;
       });
       const clap = rnd() < 0.5 ? dlane((s) => (s === 4 || s === 12 ? 0.7 + rnd() * 0.15 : 0)) : null;
-      return { kick, snare, hat, clap };
+      // The house "and": an open hat on the offbeat, choked by the next
+      // closed hit. When it plays, the closed lane steps off that slot so the
+      // open one actually rings.
+      let open = null;
+      if (rnd() < 0.6) {
+        open = dlane((s) => (s % 4 === 2 ? 0.6 + rnd() * 0.2 : 0));
+        for (let s = 2; s < 16; s += 4) hat[s] = 0;
+      }
+      return { kick, snare, hat, open, clap };
     },
   },
   backbeat: {
@@ -707,7 +743,10 @@ const GROOVES = {
       const hats = euclid(16, rint(5, 7), rint(0, 2));
       const hat = dlane((s) => (hats[s] ? 0.4 + rnd() * 0.2 : 0));
       const clap = dlane((s) => (s === 8 && rnd() < 0.3 ? 0.55 : 0));
-      return { kick, snare, hat, clap };
+      // A quiet shaker under a sparse kit — running 16ths at low velocity,
+      // breathing on the offbeats. The texture voice, not a rhythm voice.
+      const perc = rnd() < 0.4 ? dlane((s) => 0.18 + (s % 2 ? 0.1 : 0) + rnd() * 0.08) : null;
+      return { kick, snare, hat, clap, perc };
     },
   },
   breaks: {

@@ -38,7 +38,7 @@ that parse/waterfall cost is large and misleading. Judge speed on the prod build
 
 The prod build is also a **PWA** (`vite-plugin-pwa`, config in `vite.config.js`): installed,
 it runs standalone with no browser chrome and works with no network at all — the service
-worker precaches everything including the 16 drum WAVs (~915 KB, 28 entries). The app has
+worker precaches everything including the 24 drum WAVs (36 entries, ~1.2 MB). The app has
 zero external requests, so offline is total, not partial. `npm run icons` regenerates the
 clip-grid home-screen icons into `public/icons/` (only if the mark or track colors change).
 Service workers do not exist on the dev server — test install/offline on `preview`.
@@ -98,15 +98,17 @@ projection of the model, wired by main), index.html is the shell + CSS.
 
 ```
 song = {
-  tempo: 92, key: 0 /*0..11, 0=C*/, scale: "major", swing: 0.16 /*0..0.6*/,
+  tempo: 92, key: 0 /*0..11, 0=C*/, scale: "major", swing: 0.16 /*0..1*/,
   scenes: [ Scene ],
   arrangement: { harmony:[Clip], drums:[Clip], bass:[Clip], melody:[Clip] },
   loop: { on:false, start:0, len:4 },
 }
 Scene = {
-  tag: "A",
-  harmony: [degreeIdx × 4],                 // index 0..6 into CHORDS, one chord per bar
-  drums:   { kick:[bool×16], snare, hat, clap },
+  tag: "A",                                 // unique past H: A2, B2, …
+  harmony: [degreeIdx | {pcs,inv} × N],     // one chord per SLOT; a slot is a bar,
+  harmonyRate: 1,                           //   or half a bar when harmonyRate is 2
+  drums:   { kick:[vel×16], snare, hat, open, clap, perc },  // open = ringing hat,
+                                            //   choked by a closed hit; perc = shaker family
   melody:  [ [{midi,len,vel}...] | null × 16 ],  // scale-snapped note stacks
   bass:    [ [{midi,len,vel}...] | null × 16 ],
 }
@@ -221,6 +223,18 @@ a key/scale change or an undo (and re-applies `setScaleContext`).
 `#arrangement`, `#scrim`, `#sheet`. Colors are per-track. `vite.config.js` targets `esnext`.
 
 ## What works today
+
+Six drum voices — kick, snare, closed and open hat, clap, perc — across both banks
+(synth kit params, 24 generated one-shots) with a real hat choke: a closed hit ends a
+ringing open one on every path, live, preview, and offline render. Harmony scenes run
+one or two chords per bar (the editor's ×2 toggle; `harmonyRate` in the file), so a
+ii-V sharing a bar and the anticipated change survive import and playback. The groove
+slider reaches 1.0 (a full triplet-feel third of a 16th; the engine always could — the
+UI stopped at 0.6). **MIDI import**: the File panel loads a `.mid` directly (header
+sniff, not extension) — parts fold onto the four tracks, loose percussion is placed by
+measuring which lane loses the fewest hits, and an on-screen ledger reports fidelity
+and anything the grid could not hold. `src/midi.js` is the canonical importer;
+`woodshed/tools/mid2noodles.mjs` shims it for the CLI.
 
 Session clip grid with quantized launch, per-clip launch modes (loop/one-shot) and
 follow-actions; Arrangement timeline with drag-move, edge-resize, split, duplicate, delete,

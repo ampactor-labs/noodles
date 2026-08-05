@@ -23,7 +23,7 @@
 // point a finger or a dice can reach is already mixed.
 
 import * as Tone from "tone";
-import { CHORDS, DRUM_VOICES, voiceLead, harmonyChord, clipAt, arrangeLength, clipLaunch, clipLengthBars, noteSlot, stepsFor, compHitAt, arpNoteAt } from "./model.js";
+import { CHORDS, DRUM_VOICES, voiceLead, harmonyChord, harmonyIndexAt, clipAt, arrangeLength, clipLaunch, clipLengthBars, noteSlot, stepsFor, compHitAt, arpNoteAt } from "./model.js";
 
 // Per-track swing: offbeat lane steps get delayed by up to a third of a 16th
 // (1.0 = full triplet feel). Each track reads its own amount, falling back to
@@ -230,7 +230,9 @@ const SOURCE_LEVEL_DB = {
   kick: 0,
   snare: 5,
   hat: -5,
+  open: -8,
   clap: 3,
+  perc: -10,
 };
 const KICK_DUCK_GAIN = Tone.dbToGain(-12);
 // Both drum bus levels mean what they say now. They used not to: the return's
@@ -323,21 +325,27 @@ const KITS = {
     kick: { pitchDecay: 0.018, octaves: 4, envelope: { attack: 0.001, decay: 0.16, sustain: 0 } },
     snare: 0.09,
     hat: { decay: 0.018, resonance: 6000 },
+    open: { decay: 0.22, resonance: 6400 },
     clap: 0.09,
+    perc: { decay: 0.055, center: 5600 },
     gain: 4,
   },
   funk: {
     kick: { pitchDecay: 0.03, octaves: 5, envelope: { attack: 0.001, decay: 0.2, sustain: 0 } },
     snare: 0.12,
     hat: { decay: 0.026, resonance: 5000 },
+    open: { decay: 0.32, resonance: 5200 },
     clap: 0.11,
+    perc: { decay: 0.07, center: 4800 },
     gain: 2.5,
   },
   clean: {
     kick: { pitchDecay: 0.04, octaves: 6, envelope: { attack: 0.001, decay: 0.4, sustain: 0 } },
     snare: 0.17,
     hat: { decay: 0.05, resonance: 4000 },
+    open: { decay: 0.45, resonance: 4300 },
     clap: 0.14,
+    perc: { decay: 0.09, center: 4200 },
     gain: -1.5,
   },
   // The fourth corner: trap/808 register — long boomy kick, crisp tight hats,
@@ -347,7 +355,9 @@ const KITS = {
     kick: { pitchDecay: 0.08, octaves: 7, envelope: { attack: 0.001, decay: 0.7, sustain: 0 } },
     snare: 0.22,
     hat: { decay: 0.012, resonance: 9000 },
+    open: { decay: 0.16, resonance: 8600 },
     clap: 0.18,
+    perc: { decay: 0.045, center: 6400 },
     gain: -5,
   },
 };
@@ -368,11 +378,11 @@ const SAMPLE_KITS = {
 export const SAMPLE_KIT_NAMES = ["street", "warm", "dusty", "808"];
 // Voice balance inside the sample bank (one-shots are peak-normalized, so
 // musical balance is set here, then verified by the calibrate drum stems).
-const SAMPLE_VOICE_DB = { kick: 0, snare: -2, hat: -8, clap: -5 };
+const SAMPLE_VOICE_DB = { kick: 0, snare: -2, hat: -8, open: -9, clap: -5, perc: -12 };
 // Conditioning targets for user-recorded one-shots: the median per-voice RMS
 // of the bundled library INCLUDING each kit's trim (measured, .tmp receipt).
 // A mouth-boom lands at library loudness by construction, not by luck.
-const USER_TARGET_RMS_DB = { kick: -14, snare: -17, hat: -27, clap: -23 };
+const USER_TARGET_RMS_DB = { kick: -14, snare: -17, hat: -27, open: -25, clap: -23, perc: -26 };
 export const DRUM_BANKS = ["sample", "synth"];
 
 const sampleBuffers = {};
@@ -1135,10 +1145,14 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true } = {}) {
 
   // Sample playback lands here: one static gain per voice, straight into the
   // drum color junction. The one-shots are pre-shaped, so they skip the
-  // synth-shaping filters below.
+  // synth-shaping filters below. The open voice detours through its choke
+  // gain (built first, used by both banks) so a closed hat can end a ringing
+  // open one-shot exactly like it ends the synth tail.
+  g.openTone = new Tone.Filter({ type: "lowpass", frequency: 16000, rolloff: -24, Q: 0.7 }).connect(g.colorIn.drums);
+  g.openChoke = new Tone.Gain(1).connect(g.openTone);
   g.sampleGains = {};
   for (const v of DRUM_VOICES) {
-    g.sampleGains[v] = new Tone.Gain(Tone.dbToGain(SAMPLE_VOICE_DB[v])).connect(g.colorIn.drums);
+    g.sampleGains[v] = new Tone.Gain(Tone.dbToGain(SAMPLE_VOICE_DB[v])).connect(v === "open" ? g.openChoke : g.colorIn.drums);
   }
 
   // Kit. Hat is a filtered noise burst on purpose — MetalSynth's 6 FM
@@ -1162,8 +1176,18 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true } = {}) {
   g.hatTone = new Tone.Filter({ type: "lowpass", frequency: 16000, rolloff: -24, Q: 0.7 }).connect(g.colorIn.drums);
   g.hatFilter = new Tone.Filter({ type: "highpass", frequency: 7500 }).connect(g.hatTone);
   g.hat = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.02, sustain: 0 }, volume: SOURCE_LEVEL_DB.hat }).connect(g.hatFilter);
+  // The open hat is the same instrument in its ringing state: same noise
+  // recipe, longer envelope, slightly lower highpass so the ring has body.
+  // Routed through g.openChoke (built above, shared with the sample bank).
+  g.openFilter = new Tone.Filter({ type: "highpass", frequency: 6800 }).connect(g.openChoke);
+  g.open = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.02 }, volume: SOURCE_LEVEL_DB.open }).connect(g.openFilter);
   g.clapFilter = new Tone.Filter({ type: "bandpass", frequency: 1400, Q: 1.2 }).connect(g.colorIn.drums);
   g.clap = new Tone.NoiseSynth({ noise: { type: "pink" }, volume: SOURCE_LEVEL_DB.clap }).connect(g.clapFilter);
+  // Shaker: a short band of noise in the 4-6 kHz pocket, under everything and
+  // over nothing. The bandpass center morphs with the kit like the hat's
+  // resonance does.
+  g.percFilter = new Tone.Filter({ type: "bandpass", frequency: 5200, Q: 1.6 }).connect(g.colorIn.drums);
+  g.perc = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.004, decay: 0.06, sustain: 0 }, volume: SOURCE_LEVEL_DB.perc }).connect(g.percFilter);
 
   return g;
 }
@@ -1393,11 +1417,17 @@ function applyKitMorphTo(g, patch) {
   g.snare.set({ envelope: { attack: 0.001, decay: log((k) => k.snare), sustain: 0 } });
   g.hat.set({ envelope: { attack: 0.001, decay: log((k) => k.hat.decay), sustain: 0 } });
   g.hatFilter.frequency.value = log((k) => k.hat.resonance);
+  g.open.set({ envelope: { attack: 0.001, decay: log((k) => k.open.decay), sustain: 0, release: 0.02 } });
+  g.openFilter.frequency.value = log((k) => k.open.resonance) - 1200;
+  g.perc.set({ envelope: { attack: 0.004, decay: log((k) => k.perc.decay), sustain: 0 } });
+  g.percFilter.frequency.value = log((k) => k.perc.center);
   g.clap.set({ envelope: { attack: 0.001, decay: log((k) => k.clap), sustain: 0 } });
   const gainDb = lin((k) => k.gain);
   g.kick.volume.value = SOURCE_LEVEL_DB.kick + gainDb;
   g.snare.volume.value = SOURCE_LEVEL_DB.snare + gainDb;
   g.hat.volume.value = SOURCE_LEVEL_DB.hat + gainDb;
+  g.open.volume.value = SOURCE_LEVEL_DB.open + gainDb;
+  g.perc.volume.value = SOURCE_LEVEL_DB.perc + gainDb;
   g.clap.volume.value = SOURCE_LEVEL_DB.clap + gainDb;
 }
 
@@ -1438,17 +1468,19 @@ function chordVoicing(entry, vstate) {
 // Returns true when it made a sound (the live transport's park waker needs
 // to know). "sustain" reproduces the pre-comp trigger bit for bit: same
 // step-0 time, "1n" length, default velocity.
-function playCompStepOn(g, patches, vstate, song, entry, stepInBar, time, oct = 0) {
+function playCompStepOn(g, patches, vstate, song, entry, stepInBar, time, oct = 0, attack = stepInBar === 0, ringHalf = false) {
   const comp = song.vibe?.comp;
-  if (stepInBar === 0) {
+  if (attack) {
     vstate.compVoicing = chordVoicing(entry, vstate);
     const { top, bass } = vstate.compVoicing;
     const shift = 12 * oct;
-    g.halo?.triggerAttackRelease(midiToFreq(top + 12 + shift), "1n", time);
-    g.sub.triggerAttackRelease(midiToFreq(48 + bass), "1n", time);
+    // Half-bar chords ring half a bar; whole-bar chords keep their whole note.
+    const ringDur = ringHalf ? "2n" : "1n";
+    g.halo?.triggerAttackRelease(midiToFreq(top + 12 + shift), ringDur, time);
+    g.sub.triggerAttackRelease(midiToFreq(48 + bass), ringDur, time);
   }
   const hit = compHitAt(comp, stepInBar);
-  if (!hit || !vstate.compVoicing) return stepInBar === 0;
+  if (!hit || !vstate.compVoicing) return attack;
   const { notes } = vstate.compVoicing;
   const shift = 12 * oct;
   const at = Math.max(0, time + swingOffsetFor(song, "harmony", stepInBar));
@@ -1513,8 +1545,28 @@ function playSampleHit(g, buffer, voice, time, gain) {
   src.start(time);
 }
 
+// The hat choke: a closed hit ends whatever the open hat is still ringing,
+// which is the "tss-t" every house and funk pattern is built on. One gain
+// node (g.openChoke) carries both banks — the synth voice and the sample
+// voice's per-hit path are wired through it — so the rule is: closed hat
+// ramps it to zero in ~4 ms, the next open hit snaps it back to one.
+// Scheduling runs in step order on every path (live and offline), so the
+// cancel only ever removes automation this same step-walk will re-add.
+function chokeOpenAt(g, time) {
+  const p = g.openChoke.gain;
+  p.cancelScheduledValues(time);
+  p.setTargetAtTime(0, time, 0.004);
+}
+function wakeOpenAt(g, time) {
+  const p = g.openChoke.gain;
+  p.cancelScheduledValues(time);
+  p.setValueAtTime(1, time);
+}
+
 function hitDrumOn(g, patches, v, time, vel = 0.9) {
   if (v === "kick") scheduleKickDuck(g.musicDuck.gain, time);
+  if (v === "hat") chokeOpenAt(g, time);
+  else if (v === "open") wakeOpenAt(g, time);
   const patch = patches.drums;
   if (patch.bank === "sample" && samplesReady) {
     const pin = patch.pins?.[v];
@@ -1545,6 +1597,8 @@ function hitDrumOn(g, patches, v, time, vel = 0.9) {
   if (v === "kick") g.kick.triggerAttackRelease("C1", "8n", time, vel);
   else if (v === "snare") g.snare.triggerAttackRelease("16n", time, vel);
   else if (v === "clap") g.clap.triggerAttackRelease("16n", time, vel);
+  else if (v === "open") g.open.triggerAttackRelease("2n", time, vel);
+  else if (v === "perc") g.perc.triggerAttackRelease("16n", time, vel);
   else g.hat.triggerAttackRelease("32n", time, vel);
 }
 
@@ -1630,8 +1684,14 @@ function playArrangementStepOn(g, patches, vstate, song, bar, stepInBar, time) {
     if (h) {
       const sc = song.scenes[h.scene];
       if (sc?.harmony?.length) {
-        const entry = sc.harmony[(bar - h.start) % sc.harmony.length];
-        if (playCompStepOn(g, patches, vstate, song, entry, stepInBar, time, sc.harmonyOct || 0)) vstate.wake?.("harmony");
+        // Rate-aware: at 2 chords per bar the entry can change at step 8, and
+        // that change is a real attack (new voicing, halo, sub). A repeated
+        // entry across the halves is one chord held — no retrigger.
+        const idx = harmonyIndexAt(sc, bar - h.start, stepInBar);
+        const entry = sc.harmony[idx];
+        const half = sc.harmonyRate === 2;
+        const attack = stepInBar === 0 || (half && stepInBar === 8 && idx !== harmonyIndexAt(sc, bar - h.start, 0));
+        if (playCompStepOn(g, patches, vstate, song, entry, stepInBar, time, sc.harmonyOct || 0, attack, half)) vstate.wake?.("harmony");
         if (stepInBar === 0) chord = entry;
       }
     }
@@ -2122,13 +2182,17 @@ export function createAudio(song) {
     let visualBar = 0;
     if (harmonyScene?.harmony?.length) {
       const stepInBar = harmonyState.step % 16;
-      const bar = Math.floor(harmonyState.step / 16) % harmonyScene.harmony.length;
+      const rate = harmonyScene.harmonyRate === 2 ? 2 : 1;
+      const barCount = Math.max(1, Math.ceil(harmonyScene.harmony.length / rate));
+      const barOffset = Math.floor(harmonyState.step / 16) % barCount;
+      const idx = harmonyIndexAt(harmonyScene, barOffset, stepInBar);
       visualStep = stepInBar;
-      visualBar = bar;
-      const ci = harmonyScene.harmony[bar];
-      if (playCompStepOn(live, patches, liveVoice, song, ci, stepInBar, time, harmonyScene.harmonyOct || 0)) wakeTrack("harmony");
-      if (stepInBar === 0) {
-        scheduleVisual(() => visualCb({ type: "chord", scene: harmonyState.scene, bar, chord: ci, activeScenes: activeBefore }), time);
+      visualBar = barOffset; // the playhead's bar; the chord event carries the slot
+      const ci = harmonyScene.harmony[idx];
+      const attack = stepInBar === 0 || (rate === 2 && stepInBar === 8 && idx !== harmonyIndexAt(harmonyScene, barOffset, 0));
+      if (playCompStepOn(live, patches, liveVoice, song, ci, stepInBar, time, harmonyScene.harmonyOct || 0, attack, rate === 2)) wakeTrack("harmony");
+      if (attack) {
+        scheduleVisual(() => visualCb({ type: "chord", scene: harmonyState.scene, bar: idx, chord: ci, activeScenes: activeBefore }), time);
       }
     }
 

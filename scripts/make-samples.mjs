@@ -6,7 +6,8 @@
 // processing that realtime synthesis on a phone cannot — click transients
 // phase-aligned over pitch-enveloped subs, modal snare bodies under shaped
 // noise, six detuned metallic partials per hat, multi-burst claps — then bake
-// the saturation in and normalize. Sixteen one-shots, four kits:
+// the saturation in and normalize. Twenty-four one-shots, four kits
+// (kick, snare, closed and open hat, clap, shaker):
 //
 //   street  — tight UK-garage register: short punchy kick, crisp snare
 //   warm    — funk register: round kick with beater click, fat snare, loose hat
@@ -142,6 +143,41 @@ function hat({ len, tau, base = 40, hp = 7000, bp = 10000, seed = 0xfeed, grit =
   return normalize(out);
 }
 
+// Open hat: the closed hat's six metallic partials left to ring. Same
+// generator, longer decay, plus a slow amplitude wobble so the tail breathes
+// like loose cymbals instead of holding a static buzz.
+function openhat({ len, tau, base = 40, hp = 6500, bp = 9500, seed = 0xfee1, grit = 0.1, wobble = 3.2 }) {
+  const ratios = [2, 3.01, 4.16, 5.43, 6.79, 8.21];
+  const out = buf(len);
+  for (let i = 0; i < out.length; i++) {
+    const t = i / SR;
+    let v = 0;
+    for (const r of ratios) v += Math.sign(Math.sin(TAU * base * r * t + r));
+    out[i] = (v / ratios.length) * expDecay(t, tau) * (1 + 0.12 * Math.sin(TAU * wobble * t));
+  }
+  if (grit > 0) {
+    const noise = makeNoise(seed);
+    for (let i = 0; i < out.length; i++) out[i] += noise() * grit * expDecay(i / SR, tau * 0.8);
+  }
+  bandpass(out, bp, 9000);
+  onePoleHP(out, hp);
+  return normalize(out);
+}
+
+// Shaker: two micro-bursts of banded noise — the forward stroke and the
+// lighter return stroke ~55 ms behind it. That double transient is what makes
+// a shaker read as a hand instrument instead of a hi-hat with a cold.
+function shaker({ len, tau, bp = 5200, width = 2600, ret = 0.055, retGain = 0.45, seed = 0x5aae }) {
+  const out = buf(len);
+  const noise = makeNoise(seed);
+  for (let i = 0; i < out.length; i++) out[i] = noise() * expDecay(i / SR, tau);
+  const back = buf(tau * 8);
+  for (let i = 0; i < back.length; i++) back[i] = noise() * expDecay(i / SR, tau * 0.8);
+  mixInto(out, back, retGain, ret);
+  bandpass(out, bp, width);
+  return normalize(out);
+}
+
 // Clap: several tight noise bursts, then a longer bandpassed tail.
 function clap({ len, bursts, burstTau, tailTau, bp = 1500, width = 1400, seed = 0xd00d, drive = 1.1 }) {
   const out = buf(len);
@@ -175,25 +211,33 @@ const KITS = {
     kick: () => kick({ len: 0.28, f0: 165, f1: 52, pitchTau: 0.022, ampTau: 0.075, drive: 1.6, click: 0.5, punch: 0.25 }),
     snare: () => snare({ len: 0.22, modes: [[196, 1], [342, 0.6]], bodyTau: 0.035, bodyMix: 0.9, noiseTau: 0.045, noiseHP: 1600, drive: 1.5 }),
     hat: () => hat({ len: 0.09, tau: 0.016, hp: 8200, bp: 10500 }),
+    open: () => openhat({ len: 0.42, tau: 0.11, hp: 7600, bp: 10000, grit: 0.08 }),
     clap: () => clap({ len: 0.28, bursts: [[0, 1], [0.011, 0.9], [0.023, 0.8]], burstTau: 0.006, tailTau: 0.05, bp: 1600 }),
+    perc: () => shaker({ len: 0.16, tau: 0.028, bp: 5600, width: 2400 }),
   },
   warm: {
     kick: () => kick({ len: 0.4, f0: 130, f1: 58, pitchTau: 0.035, ampTau: 0.12, drive: 1.25, click: 0.3, clickHz: 2400 }),
     snare: () => snare({ len: 0.32, modes: [[180, 1], [278, 0.75], [405, 0.35]], bodyTau: 0.06, bodyMix: 1.2, noiseTau: 0.08, noiseHP: 900, drive: 1.15, seed: 0xfade }),
     hat: () => hat({ len: 0.14, tau: 0.03, hp: 6800, bp: 9000, grit: 0.15 }),
+    open: () => openhat({ len: 0.6, tau: 0.16, hp: 6200, bp: 8800, grit: 0.2, wobble: 2.6 }),
     clap: () => clap({ len: 0.36, bursts: [[0, 0.9], [0.012, 1], [0.026, 0.85], [0.038, 0.6]], burstTau: 0.008, tailTau: 0.09, bp: 1300, width: 1800, seed: 0xf01c }),
+    perc: () => shaker({ len: 0.2, tau: 0.04, bp: 4700, width: 2800, retGain: 0.55, seed: 0x5eed }),
   },
   dusty: {
     kick: () => dustify(kick({ len: 0.34, f0: 120, f1: 48, pitchTau: 0.03, ampTau: 0.1, drive: 1.4, click: 0.2, clickHz: 1800 }), { lp: 3800, driveK: 2.2 }),
     snare: () => dustify(snare({ len: 0.26, modes: [[172, 1], [301, 0.5]], bodyTau: 0.045, bodyMix: 1, noiseTau: 0.06, noiseHP: 1100, noiseLP: 6500, seed: 0xb00c }), { lp: 5200, driveK: 1.9 }),
     hat: () => dustify(hat({ len: 0.11, tau: 0.022, hp: 5800, bp: 8000, grit: 0.25 }), { lp: 8500, driveK: 1.3, floor: 0.002 }),
+    open: () => dustify(openhat({ len: 0.5, tau: 0.13, hp: 5400, bp: 7800, grit: 0.3 }), { lp: 7800, driveK: 1.4, floor: 0.002 }),
     clap: () => dustify(clap({ len: 0.3, bursts: [[0, 1], [0.013, 0.85], [0.028, 0.7]], burstTau: 0.007, tailTau: 0.07, bp: 1150, seed: 0xdead }), { lp: 4800, driveK: 1.8 }),
+    perc: () => dustify(shaker({ len: 0.18, tau: 0.035, bp: 4300, width: 2400, seed: 0xd057 }), { lp: 6800, driveK: 1.5, floor: 0.002 }),
   },
   "808": {
     kick: () => kick({ len: 1.05, f0: 96, f1: 39, pitchTau: 0.05, ampTau: 0.42, drive: 2.4, click: 0.35, clickHz: 3000, punch: 0.18 }),
     snare: () => snare({ len: 0.24, modes: [[210, 1], [372, 0.7]], bodyTau: 0.028, bodyMix: 0.75, noiseTau: 0.05, noiseHP: 2400, drive: 1.8, seed: 0xace5 }),
     hat: () => hat({ len: 0.07, tau: 0.011, hp: 9000, bp: 11500 }),
+    open: () => openhat({ len: 0.34, tau: 0.085, hp: 8400, bp: 11000, grit: 0.05, wobble: 4 }),
     clap: () => clap({ len: 0.32, bursts: [[0, 1], [0.009, 0.95], [0.019, 0.85], [0.03, 0.65]], burstTau: 0.005, tailTau: 0.075, bp: 1750, drive: 1.5, seed: 0x8088 }),
+    perc: () => shaker({ len: 0.13, tau: 0.022, bp: 6300, width: 2200, retGain: 0.35, seed: 0x8085 }),
   },
 };
 
