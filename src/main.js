@@ -432,7 +432,10 @@ function renderFooter() {
   const grooveSlider = el("input", {
     type: "range",
     min: "0",
-    max: "0.6",
+    // 1.0 = offbeats a full third of a 16th late, the engine's designed
+    // ceiling (see audio's swingOffsetFor) and a true triplet feel. The old
+    // 0.6 cap made hard-swung references import straighter than they play.
+    max: "1",
     step: "0.01",
     value: String(song.swing),
     class: "swingslider",
@@ -3680,11 +3683,31 @@ function buildHarmonyEditor(sceneIndex, scene) {
     await ensureStarted();
     audio.preview(scene.harmony[selected], scene.harmonyOct);
   };
+  // Chords per bar. ×2 splits every bar in half — the ii-V that shares a
+  // bar, the anticipated change — by doubling each slot so nothing the
+  // player wrote moves; ×1 keeps the first chord of each pair. A soft wall:
+  // the default stays one chord per bar, and stepping through it is one tap.
+  const rateLabel = () => (scene.harmonyRate === 2 ? "2/bar" : "1/bar");
+  const rateBtn = el("div", { class: "tfbtn", text: rateLabel() });
+  rateBtn.addEventListener("click", () => {
+    pushUndo();
+    if (scene.harmonyRate === 2) {
+      scene.harmonyRate = 1;
+      scene.harmony = scene.harmony.filter((_, i) => i % 2 === 0);
+    } else {
+      scene.harmonyRate = 2;
+      scene.harmony = scene.harmony.flatMap((e) => [e, e]);
+    }
+    selected = Math.min(selected, scene.harmony.length - 1);
+    rateBtn.textContent = rateLabel();
+    openEditor(sceneIndex, "harmony"); // rebuild: the slot row changed shape
+  });
   sheet.appendChild(
     el("div", { class: "tfrow oct-row" }, [
       el("div", { class: "tfbtn", text: "Oct−", onclick: () => setOct(-1) }),
       octVal,
       el("div", { class: "tfbtn", text: "Oct+", onclick: () => setOct(1) }),
+      rateBtn,
     ])
   );
   const scrollContainer = el("div", { class: "editor-scroll" });
@@ -4590,6 +4613,24 @@ function showDareBanner(text) {
 async function loadProjectFile(file, status) {
   if (!file) return;
   try {
+    // A MIDI file is a project that hasn't been translated yet. Sniff the
+    // header, not the extension — phones rename downloads freely.
+    const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+    if (head[0] === 0x4d && head[1] === 0x54 && head[2] === 0x68 && head[3] === 0x64) {
+      const { importMidi } = await import("./midi.js");
+      const { project, summary, report } = importMidi(await file.arrayBuffer());
+      applyProject(project);
+      status.textContent = summary;
+      // The honest ledger: what the grid could not hold, in plain lines under
+      // the status. Imports must say what they cost — nothing silent.
+      status.parentElement?.querySelector(".import-report")?.remove();
+      if (report.length) {
+        status.parentElement?.appendChild(
+          el("div", { class: "exp-status import-report", style: "white-space:pre-line;opacity:.75" }, [document.createTextNode(report.join("\n"))])
+        );
+      }
+      return;
+    }
     applyProject(JSON.parse(await file.text()));
     status.textContent = "Project loaded";
   } catch (e) {
@@ -4760,7 +4801,7 @@ function openExport() {
   const links = el("div", { class: "exp-links" });
   expStatusEl = status;
   expLinksEl = links;
-  const fileInput = el("input", { class: "project-file", type: "file", accept: ".noodles,application/json" });
+  const fileInput = el("input", { class: "project-file", type: "file", accept: ".noodles,.mid,.midi,application/json,audio/midi" });
   fileInput.addEventListener("change", () => loadProjectFile(fileInput.files?.[0], status));
 
   sheet.appendChild(sheetBar("Export", "project · WAV"));
