@@ -12,16 +12,28 @@ by ear, and the mapping does the teaching.
 
 ## The grand staff and the routing rule
 
-A slash chord seats its bass around C2, and eight ledger lines under a
-treble staff is how you spot software pretending to engrave. Each note
-routes to whichever staff needs fewer ledger lines. Ties go to treble, so
-middle C hangs from its own ledger below the treble staff, which is the
-convention. That caps every note at two or three ledgers by construction:
-the treble keeps an 8va guard for pinched registers, and the bass staff
-never needs one. Both staves wear the signature, the bass positions two
-steps lower, the same rule the roll staffs already followed. Bar columns are
-returned to the caller, and the chord slots adopt them as their own grid,
-so every tower stands exactly over the slot it sounds from.
+Voice-led towers dip under middle C, and a slash chord adds a real bass
+tone under those — ledger soup beneath a lone treble staff is how you
+spot software pretending to engrave. Each note routes to whichever staff
+needs fewer ledger lines. Ties go to treble, so middle C hangs from its
+own ledger below the treble staff, which is the convention. That caps
+every note at two or three ledgers by construction: the treble keeps an
+8va guard for pinched registers, and the bass staff never needs one. Both
+staves wear the signature, the bass positions two steps lower, the same
+rule the roll staffs already followed. Bar columns are returned to the
+caller, and the chord slots adopt them as their own grid, so every tower
+stands exactly over the slot it sounds from.
+
+The slash bass engraves at the octave the instrument sounds it: the sub
+plays `48 + bass` on every path — playback, editor preview, the circle's
+audition — anchored regardless of the harmony octave, so the notehead
+sits in the C3 band inside the bass staff and cancels the octave shift
+the rest of the tower takes. It seated at C2 for a while, an octave below
+anything that sounded; now every notehead on the plate is a pitch the
+harmony instrument plays that bar, and the two layers that go un-notated
+(the halo doubling the top voice an octave up, the sub doubling the root
+in root position) are pure octave doublings of drawn tones —
+registration, the thing charts have never notated.
 
 ## Voice leading, drawn on the engraving
 

@@ -871,8 +871,9 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyRate = 1, har
   const B_BOT = 25; // G2: bass bottom line
   // Vertical plan: 4S treble + 3S gap + 4S bass, centered with at least
   // 3.5S of air above (three ledger lines plus the head - the 8va guard
-  // caps anything taller) and 2.5S of cellar below (C2 sits two ledgers
-  // under the bass staff and never deeper - the routing guarantees it).
+  // caps anything taller) and 2.5S of cellar below. The deepest drawn note
+  // is the slash bass at its sounding octave (C3 band, inside the bass
+  // staff), so the cellar is margin now, not working space.
   const M = Math.max(3.5 * S, (h - 13.5 * S) / 2);
   const trebleBottom = M + 4 * S;
   const bassBottom = trebleBottom + 7 * S;
@@ -1071,7 +1072,12 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyRate = 1, har
     const tones = spellChordTones(entry);
     const cx = startX + i * (cellW + gridGap) + cellW / 2;
     // The full tower: led triad, then the stack climbing tone over tone -
-    // the same shape playback voices - plus the slash bass at its low seat.
+    // the same shape playback voices - plus the slash bass at the octave the
+    // sub actually sounds (48 + bass, audio.js chordVoicing / preview): every
+    // notehead is a pitch the instrument plays this bar. It engraved at
+    // 36 + bass for a while - an octave below anything that sounded. The sub
+    // is anchored regardless of harmonyOct (it is the glue under the chord),
+    // so its notehead cancels the octave shift the rest of the tower takes.
     const midis = voiced.slice();
     let topM = Math.max(...voiced);
     for (const pc of ch.pcs.slice(3)) {
@@ -1080,7 +1086,11 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyRate = 1, har
       topM = m;
     }
     const inv = (typeof entry === "object" && entry.inv) || 0;
-    if (inv > 0) midis.push(36 + ch.bass);
+    // Deduped: when the led triad's own bottom voice already sits on the
+    // sub's pitch (a first inversion often does), that's one sounding
+    // unison and it gets one head, not a doubled outline.
+    const slashMidi = 48 + ch.bass - oct;
+    if (inv > 0 && !midis.includes(slashMidi)) midis.push(slashMidi);
     const notes = midis
       .map((m, mi) => {
         const midi = m + oct;
@@ -3530,10 +3540,15 @@ function buildPianoEditor(sceneIndex, scene, track) {
     }
     const sig = keySignature(song.key, song.scale);
     const units = sig > 0 ? [8, 5, 9, 6, 3, 7, 4] : [4, 7, 3, 6, 2, 5, 1];
+    // Whisper opacity, the circle sheet's idiom: the roll's noteheads are
+    // grid-aligned, so a five-sharp signature necessarily runs under the
+    // first columns - it layers as ambient context and the filled heads
+    // read over it. The plate keeps its full-strength signatures; it owns
+    // its own left edge.
     let sx = S * 5.9;
     for (let i = 0; i < Math.abs(sig); i++) {
       const u = units[i] - (bass ? 2 : 0);
-      drawAccidental(c, sx + S * 0.45, yOf(baseStep + u), S, sig > 0 ? 1 : -1, "rgba(240,240,244,0.9)");
+      drawAccidental(c, sx + S * 0.45, yOf(baseStep + u), S, sig > 0 ? 1 : -1, "rgba(240,240,244,0.45)");
       sx += S * 0.9;
     }
     const cell0 = rowCells[0]?.[viewOff];
