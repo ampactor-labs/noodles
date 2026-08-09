@@ -2293,7 +2293,13 @@ export function createAudio(song) {
     const drumState = trackState.drums;
     const drumScene = drumState.active ? song.scenes[drumState.scene] : null;
     if (drumScene) {
-      const idx = drumState.step % stepsFor(drumScene, "drums");
+      // Lane position runs on st.total, the free-running counter motion
+      // lanes already use: st.step wraps at the clip's lifecycle length
+      // (follow-actions, oneshot), which for a polymeter lane is one bar -
+      // indexing on it reset a 12-step cycle every bar instead of letting
+      // it phase, and before clipLengthBars learned real lane lengths it
+      // pinned every multi-bar lane to bar one.
+      const idx = drumState.total % stepsFor(drumScene, "drums");
       const at = Math.max(0, time + swingOffsetFor(song, "drums", idx));
       for (const v of DRUM_VOICES) {
         if (drumScene.drums[v][idx] > 0) {
@@ -2307,7 +2313,7 @@ export function createAudio(song) {
       const st = trackState[track];
       const scene = st.active ? song.scenes[st.scene] : null;
       if (!scene) continue;
-      const idx = st.step % stepsFor(scene, track);
+      const idx = st.total % stepsFor(scene, track); // free-running, like drums above
       playNoteStack(track, scene[track][idx], Math.max(0, time + swingOffsetFor(song, track, idx)));
     }
 

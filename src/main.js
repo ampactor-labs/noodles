@@ -2995,25 +2995,46 @@ let pianoView = 0; // 0 = 16 steps, 1 = steps 1-8, 2 = steps 9-16
 let gridBar = 0; // which bar of a multi-bar lane the editors show
 // Bar pager for multi-bar lanes: the same chip idiom the motion-lane picker
 // uses. Null when the lane is one bar - no chrome for the common case.
+// When the lane spans the scene's whole phrase (the "walk the progression"
+// case D19 built the stretch for), each chip also wears its bar's roman in
+// the function tint - the progression map inside the beat editor, so bar 3
+// of the drum lane knows it lands on the IV without leaving the sheet. A
+// lane shorter than the phrase cycles against the changes, so its chips
+// stay plain numbers rather than claim an alignment that rotates.
 function barPager(sceneIndex, track, clipLen) {
   const bars = Math.ceil(clipLen / 16);
   if (bars <= 1) return null;
+  const scene = song.scenes[sceneIndex];
+  const rate = scene?.harmonyRate === 2 ? 2 : 1;
+  const phraseBars = scene?.harmony?.length ? Math.ceil(scene.harmony.length / rate) : 0;
+  const romansFor = (b) => {
+    if (track === "harmony" || bars !== phraseBars) return null;
+    const parts = [];
+    for (let k = 0; k < rate; k++) {
+      const entry = scene.harmony[b * rate + k];
+      if (entry == null) break;
+      const ch = harmonyChord(entry);
+      if (ch) parts.push(`<i style="color:${hex(hslInt(ch.hue, ch.sat, 70))}">${ch.roman}</i>`);
+    }
+    return parts.length ? parts.join("<span>·</span>") : null;
+  };
   return el(
     "div",
     { class: "lane-ctl grid-bars" },
     [
       el("div", { class: "swlabel", text: "bar" }),
-      ...Array.from({ length: bars }, (_, b) =>
-        el("div", {
-          class: "lane-bar" + (b === gridBar ? " on" : ""),
-          text: String(b + 1),
+      ...Array.from({ length: bars }, (_, b) => {
+        const roman = romansFor(b);
+        return el("div", {
+          class: "lane-bar" + (b === gridBar ? " on" : "") + (roman ? " with-roman" : ""),
+          html: `<b>${b + 1}</b>` + (roman ? `<em class="lb-roman">${roman}</em>` : ""),
           "data-action": `grid-bar-${b}`,
           onclick: () => {
             gridBar = b;
             openEditor(sceneIndex, track);
           },
-        })
-      ),
+        });
+      }),
     ]
   );
 }

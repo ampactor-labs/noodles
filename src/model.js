@@ -1397,8 +1397,21 @@ export function clipLaunch(scene, track) {
   return ensureLaunchSettings(scene)[track];
 }
 
+// A clip's natural length in whole bars - the phrase arithmetic the session
+// transport wraps on. For a long time this said 1 for every non-harmony
+// track, which quietly capped session playback of D19's multi-bar lanes at
+// their first bar: the editor paged four bars, the arrangement played four
+// bars, and the session grid looped bar one forever (measured,
+// .tmp/pa-phrase-probe.mjs: 9 s of a 64-step drum lane sounded only step 0).
+// Harmony counts bars, not entries - at two chords per bar, eight entries
+// are four bars, and saying 8 made rate-2 pies fill at half speed and made
+// queued launches wait out a phantom eight-bar phrase.
 export function clipLengthBars(scene, track) {
-  return track === "harmony" ? Math.max(1, scene.harmony.length) : 1;
+  if (track === "harmony") {
+    const rate = scene.harmonyRate === 2 ? 2 : 1;
+    return Math.max(1, Math.ceil((scene.harmony?.length || 0) / rate));
+  }
+  return Math.max(1, Math.ceil(stepsFor(scene, track) / 16));
 }
 
 // The cold open leans familiar: majors and minors carry half the rolls, the

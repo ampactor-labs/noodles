@@ -16,6 +16,21 @@ yet agreed: all-scenes sheet music, mixer ∿ badges for send-ride lanes
 (dice sets follow-actions so A→B→A plays itself — deferred because it
 changes session-launch defaults, the builder's call to make).
 
+Session playback learned the phrase 2026-08-09: `clipLengthBars` said 1
+for every non-harmony track, so the session transport wrapped every
+drum/bass/melody clip at bar one — D19's multi-bar lanes paged four bars
+in the editor and played four in the arrangement, but the session grid
+looped bar 1 forever (measured, .tmp/pa-phrase-probe.mjs: 9 s of a
+64-step lane sounded only step 0), and a 12-step polymeter lane restarted
+each bar instead of phasing. Lane position now runs on the free-running
+counter the motion lanes already used, clip length counts real bars
+(harmony counts bars, not entries, so rate-2 pies stop filling at half
+speed and queued launches stop waiting out a phantom eight-bar phrase),
+and the probes read all four bars, both walked bass notes, and a true
+9-hit 12-cycle (.tmp/pa-poly-probe.mjs). Same pass: when a lane spans the
+scene's phrase, the editor's BAR chips wear each bar's roman in the
+function tint — the progression map inside the beat editor.
+
 The staff became real engraving 2026-08-09: `harmonyRate: 2` had quietly
 broken the painter's "each slot is its own measure" premise (eight
 half-bar slots engraved as eight whole-note bars, and a borrowed A♭
