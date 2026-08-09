@@ -481,6 +481,39 @@ against the 396 sustain baseline (+19%, was +65%) and
 band+pulse+ride 604 (was 1069); calibrate spreads unchanged; full
 audit green, dice section LUFS -9.2..-11.0, max tp -0.69 dBTP.
 
+## Ratified 2026-08-09
+
+### D26 — The ceiling clips at 4x: intersample overshoot dies at its source
+
+The builder heard the limiter working too hard and asked for a chain
+audit; the audit split the complaint in two and this decision takes the
+half that is an engineering defect, not taste. A 24-roll distribution
+(.tmp/audit-dist-*.txt — six rolls per audit pass is sample luck on the
+tail, which is how D22's "-0.59 dBTP worst" got recorded; the real worst
+was -0.13) showed every hot roll's sample peak sitting exactly at the
+0.64 ceiling while reconstruction rang 2.2-3.75 dB past the clipped
+tops: the ceiling's own flat edges were manufacturing the true-peak
+problem, concentrated in the bright funk/garage kits.
+
+The call, delegated by the builder ("do what must be done"): the ceiling
+waveshaper runs at 4x oversampling — one argument into makeShaper, native
+browser resampling, the curve untouched. Receipts: 24-roll worst true
+peak -0.13 -> -1.76 dBTP with zero rolls above -1.5 (was 4); CAL fixture
+tp -0.75 -> -2.45; render cost none/2x/4x = 291/313/302 ms per rendered
+second on the pinned-vibe harness (.tmp/pa-os-cost.mjs), differences
+inside trial noise (an unpinned first measurement said +24% and was
+measuring the cold open's random vibe, not the change); audit harmonics
+table byte-identical at every drive level; calibrate deterministic rows
+within the documented ±0.1 dB noise floor; smoke green. Sample peaks now
+read -2 to -3 instead of pinning at -3.88 — the samples showing the
+reconstruction honestly rather than hiding it between them.
+
+Left deliberately open, the taste half: 15 of 24 rolls ride the clip
+continuously at PSR under 6 (street/warm/808/dusty) while funk/garage
+breathe at 8.5-10. Trimming those kits into the bus or moving level are
+the builder's knobs; PSR 5 on dense kits is what D22's full character
+measures as, and nothing clips.
+
 ### P1 — Use case 1 leads v0; the cold-open harmony playground is the whole first milestone
 
 Reading §7 straight: the couch-songwriting cold open is the milestone, the backing-track/Link scenario is phase two. Confirm this is the priority order before the research pass sets its emphasis.

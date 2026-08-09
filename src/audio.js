@@ -854,11 +854,25 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   // anyway. Re-measure worst-case tp across the audit dice on any change.
   const CEIL = 0.64;
   const KNEE = 0.28;
+  // "4x": the ceiling clips at four times the sample rate. At 1x its flat
+  // tops MANUFACTURED intersample peaks - the samples sat obediently at CEIL
+  // while the reconstruction filter rang 2.2-3.75 dB past them, which is how
+  // a chain whose sample peak never exceeds -3.88 dBFS still grazed
+  // -0.13 dBTP on bright funk/garage rolls (24-roll distribution, 2026-08-09
+  // audit). Oversampling clips the peaks the DAC will actually reconstruct,
+  // so true peak lands near the sample ceiling instead of miles above it.
+  // Native browser resampling on one node, and it measures FREE: none/2x/4x
+  // read 291/313/302 ms per rendered second on the pinned-vibe harness
+  // (.tmp/pa-os-cost.mjs), differences inside trial noise. An earlier
+  // unpinned run said +24% - that was the cold open rolling a different
+  // vibe per page load, a lesson the harness now pins away. The audit's
+  // harmonics table is the character receipt: the curve is unchanged, only
+  // the rate it runs at.
   const [ceilIn, ceilOut] = makeShaper((a) => {
     const mag = Math.abs(a);
     const out = mag < KNEE ? mag : KNEE + (CEIL - KNEE) * Math.tanh((mag - KNEE) / (CEIL - KNEE));
     return Math.sign(a) * Math.min(out, CEIL);
-  }, 4, 8192);
+  }, 4, 8192, "4x");
   g.ceiling = ceilIn;
   g.ceilDrive = new Tone.Gain(Tone.dbToGain(CEIL_DRIVE_DB)).connect(g.ceiling);
   g.masterOut = ceilOut.toDestination();

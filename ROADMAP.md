@@ -71,11 +71,12 @@ clipped tops). Six random rolls per audit pass is sample luck on the tail;
 the distribution is the instrument. Same audit, the other face: 15 of 24
 rolls sit at PSR < 6 (min 4.99) with peaks living on the ceiling - the
 street/warm/808/dusty kits ride the clip continuously while funk/garage
-breathe at PSR 8.5-10. Open forks from it, the builder's call: oversample
-the ceiling shaper (native WaveShaper "4x" - kills the overshoot at its
-source, costs master-bus DSP, slightly smooths the clip tone), trim the
-four hot kits into the bus, move level, or accept - nothing actually
-clips, and PSR 5 on the dense kits is what full character measures as.
+breathe at PSR 8.5-10. The overshoot half is closed (D26, same day): the
+ceiling clips at 4x now, worst roll -0.13 -> -1.76 dBTP, harmonics
+byte-identical, and the render cost measured free once the cost harness
+pinned the vibe. Still open, the taste half: trim the four hot kits into
+the bus, move level, or accept - nothing actually clips, and PSR 5 on
+the dense kits is what full character measures as.
 
 Every roll is a four-bar phrase since 2026-07-29 (D21): harmony always four
 entries, drums tiled with a bar-4 fill, the bass walking the changes every
