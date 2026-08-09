@@ -62,7 +62,20 @@ and glue at 100% with level at -6 (the builder's numbers, measured before
 adoption - glue's uncompensated drive refills the level cut at the bus comp,
 so the mix lands 0.7 dB hotter with the soft-clip stage running 6 dB
 cleaner), and CEIL moved 0.66 to 0.64 to buy back the true-peak margin the
-full weight shelf spent (worst roll -0.16 dBTP to -0.59).
+full weight shelf spent (worst roll -0.16 dBTP to -0.59). The -0.59 didn't
+survive a bigger sample: the 2026-08-09 chain audit rendered 24 rolls
+(.tmp/audit-dist-*.txt) and read worst -0.13 dBTP, with 3 of 24 above -0.6
+- all funk/garage, all pure intersample overshoot (sample peaks pinned at
+the 0.64 ceiling = -3.88 dBFS, reconstruction ringing 2.2-3.75 dB past the
+clipped tops). Six random rolls per audit pass is sample luck on the tail;
+the distribution is the instrument. Same audit, the other face: 15 of 24
+rolls sit at PSR < 6 (min 4.99) with peaks living on the ceiling - the
+street/warm/808/dusty kits ride the clip continuously while funk/garage
+breathe at PSR 8.5-10. Open forks from it, the builder's call: oversample
+the ceiling shaper (native WaveShaper "4x" - kills the overshoot at its
+source, costs master-bus DSP, slightly smooths the clip tone), trim the
+four hot kits into the bus, move level, or accept - nothing actually
+clips, and PSR 5 on the dense kits is what full character measures as.
 
 Every roll is a four-bar phrase since 2026-07-29 (D21): harmony always four
 entries, drums tiled with a bar-4 fill, the bass walking the changes every

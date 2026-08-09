@@ -583,8 +583,13 @@ try {
     // to sum 6 ms apart, which is a comb with its first null at 83 Hz — right
     // through the kick.
     {
-      const kickOnly = { ...scene.drums, snare: new Array(16).fill(0), hat: new Array(16).fill(0), clap: new Array(16).fill(0) };
+      // Built from the NORMALIZED lanes, every voice but the kick silenced -
+      // spreading the local four-voice fixture here crashed the render the day
+      // the roster grew to six (open/perc arrived and sc.drums.open was
+      // undefined at the first step). The roster owns the shape; this just
+      // mutes it.
       const saved = song.scenes[0].drums;
+      const kickOnly = Object.fromEntries(Object.entries(saved).map(([v, lane]) => [v, v === "kick" ? lane : lane.map(() => 0)]));
       song.scenes[0].drums = kickOnly;
       const buf = await audio.renderOffline("drums");
       song.scenes[0].drums = saved;
