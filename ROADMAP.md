@@ -16,6 +16,21 @@ yet agreed: all-scenes sheet music, mixer ∿ badges for send-ride lanes
 (dice sets follow-actions so A→B→A plays itself — deferred because it
 changes session-launch defaults, the builder's call to make).
 
+The staff became real engraving 2026-08-09: `harmonyRate: 2` had quietly
+broken the painter's "each slot is its own measure" premise (eight
+half-bar slots engraved as eight whole-note bars, and a borrowed A♭
+beside the diatonic vi in one measure showed an unmarked A that a reader
+hears as A♭). The grand staff now groups slots into measures by the
+scene's rate — barlines through both staves, a 4/4, half-note stems at
+two chords per bar, an end-repeat where the wrap stubs already pointed —
+and both painters track accidental state through the measure, so the
+cancelling ♮ prints and restates exactly as a reader needs. Accidentals
+(signatures included) are drawn Path2D geometry now, same
+determinism-over-luck call as the clefs, with real 𝄪/𝄫 shapes guarded.
+Roll staffs sort note stacks, displace seconds, and stagger accidental
+columns. Receipts: .tmp/pa-staff-receipts.mjs renders four plates and
+three editor shots; DESIGN-STAFF.md carries the corrected argument.
+
 The roll learned gesture 2026-07-31 (D24): a comp pattern per vibe
 (sustain/tresillo/skank/pulse/arp, groove-weighted, played per-16th by
 compHitAt with the bar voiced once at step 0), sound hires for the

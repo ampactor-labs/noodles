@@ -42,21 +42,36 @@ voicing drawn is the exact `voiceLead` chain playback walks; the staff
 shows what the pad will play, inversions and all, not textbook root
 position. The spelling comes from the degree-letter arithmetic, so F♯
 major's seventh degree engraves E♯ on E's line and a borrowed ♭VI arrives
-as A♭ C E♭, never G♯ B♯ D♯. And because harmony is one chord per bar,
-per-chord accidentals are engraving-correct by construction: each slot is
-its own measure, so accidental state legitimately resets. The naive
-implementation is the correct one.
+as A♭ C E♭, never G♯ B♯ D♯. The third alignment used to be "one chord per
+bar, so each slot is its own measure and accidental state legitimately
+resets" — true when written, false the day `harmonyRate: 2` shipped, and
+the painter carried the stale premise for two commits. Measures are real
+now (below), so the naive reset is retired instead of quietly wrong.
 
-## Accidentals only where the promise breaks
+## Measures, and accidentals only where the promise breaks
+
+The painter groups slots into measures by the scene's rate and draws the
+notation that says so: barlines through both staves at every boundary, a
+4/4 after the signature (the grid is sixteenths of a 4/4 bar everywhere in
+the app), and an end-repeat at the far right, because the progression
+loops and repeat dots are the notation for that — the wrap stubs already
+pointed there. At two chords per bar the towers wear half-note stems
+(direction by where the tower sits against the middle line, per staff),
+since two stemless towers in one measure would claim eight beats.
 
 The signature is a promise about letters; an accidental prints only when a
-tone breaks it, including the natural that cancels. Diatonic chords in
-their home key therefore engrave bare, which is the lesson working: flip
-through keys and the staff stays clean while the signature does the moving.
-A borrowed chord shows up wearing accidentals, the same "visitor" signal
-the violet roman carries in the minis.
+tone breaks what is IN FORCE — the signature, or an accidental earlier in
+the same measure on the same staff position. State carries across towers
+and resets at barlines, so a borrowed A♭ followed by the diatonic vi in
+one measure prints the cancelling ♮ on A exactly where a reader needs it;
+before this, that A engraved bare and read as A♭ to anyone applying the
+measure rule. Diatonic chords in their home key still engrave bare, which
+is the lesson working: flip through keys and the staff stays clean while
+the signature does the moving. A borrowed chord shows up wearing
+accidentals, the same "visitor" signal the violet roman carries in the
+minis.
 
-## The drawn clef
+## The drawn clef, and the drawn accidentals
 
 U+1D11E needs a music font, and neither headless Chrome nor a stock phone
 reliably ships one; the glyph silently rendered as nothing on the first
@@ -67,6 +82,18 @@ G line and the F dots flank the F line, anchored by measured constants
 from the source viewBoxes, and a path renders identically on every
 device. Same determinism-over-luck call as the synthesized drums.
 
+The accidentals joined them (`drawAccidental` in main.js): a text ♯ is a
+font glyph that varies per platform and sits next to those engraved clefs
+looking like UI; these are parametric filled paths in staff-space units —
+beams thick and rising, verticals thin but clamped to a CSS pixel (0.09
+spaces at roll scale is 0.66 px, and a sub-pixel upright is how the first
+draft's natural read as a box with antennae), the flat's bowl a crescent
+of two beziers centered on its line. Key signatures and per-note
+accidentals both draw through it, and the doubles (𝄪, 𝄫) get real
+geometry so a chord that ever reaches one doesn't wear a lying single.
+The 4/4 numerals stay text on purpose: digits ship everywhere — it was
+only the music glyphs that don't.
+
 ## Scope and the bank
 
 v1 was read-only engraving in the chord editor; the roll staffs landed the
@@ -74,9 +101,13 @@ same week. Each piano roll now draws its lane as noteheads on the step grid,
 x aligned to the cells below, zoom window included, redrawn with every
 edit. The grand-staff question is answered by the editors' own shape:
 melody gets the treble clef, bass gets a drawn F clef, and no grand staff
-is needed because the tracks are separate surfaces. Accidentals print
-per note where they break the signature (a bar-long lane makes that noisy
-in principle and fine in practice at sixteen steps). Chops mode hides the
+is needed because the tracks are separate surfaces. The visible window is
+one bar (multi-bar lanes page per bar), so it is the measure: accidental
+state carries left to right across it, an accidental holds its staff
+position until cancelled, and the F that follows an F♯ prints its ♮
+instead of silently reading sharp — restating after a cancel included.
+Stacked notes sort bottom-up and a second displaces its head to the
+right, ledger lines following the displaced head. Chops mode hides the
 staff: slices aren't pitches.
 
 Staff PNG shipped 2026-07-28: the export sheet renders the first harmony
@@ -85,7 +116,9 @@ scene in the caption, so the engraving leaves the app. The round-trip
 principle, on paper.
 
 Still deliberately not built: note entry on the staff (the roll and picker
-are the editors; the staff is a mirror), rhythm values (noteheads sit where
-the grid says; duration is the grid's job), courtesy accidentals, and
-all-scenes sheet music (the plate takes one scene; a full-song engraving is
-named follow-up).
+are the editors; the staff is a mirror), rhythm values beyond the rate-2
+stems (roll noteheads sit where the grid says; duration is the grid's
+job), courtesy accidentals across barlines (state resets clean; the
+restatement inside a measure is the one that prevents misreading), and
+all-scenes sheet music (the plate takes one scene; a full-song engraving
+is named follow-up).

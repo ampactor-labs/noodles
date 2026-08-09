@@ -768,6 +768,88 @@ function drawStaffLetters(c, yOf, baseStep, bass, S) {
   for (let u = 0; u <= 8; u++) c.fillText(letters[u], u % 2 ? 2.5 + S * 0.8 : 2.5, yOf(baseStep + u));
 }
 
+// Drawn accidentals, same determinism argument as the clefs: a font's ♯ is a
+// text glyph that varies per platform and sits on a text baseline; these are
+// filled paths in staff-space units, so a sharp is 2.5 spaces tall wherever it
+// prints and identical on every device. Geometry follows engraving proportions
+// (beams thick, verticals thin, the flat's bowl centered on its line). kind:
+// +1 sharp, -1 flat, 0 natural, ±2 doubles (unreachable with today's six mode
+// scales and station borrowing, but a chord that ever needs one gets the real
+// glyph, not a lying single). xRight aligns the glyph column to the notehead's
+// left edge; y is the note's staff position. Returns the glyph width so
+// callers can stagger a column of them.
+const ACC_W = { "1": 0.92, "-1": 0.9, "0": 0.54, "2": 0.98, "-2": 1.38 };
+function drawAccidental(c, xRight, y, S, kind, fill = "rgba(240,240,244,0.95)") {
+  const w = (ACC_W[String(kind)] || 0.9) * S;
+  const cx = xRight - w / 2;
+  c.save();
+  c.fillStyle = fill;
+  const beam = (xl, xr, yc, t, rise) => {
+    // A slanted beam as a filled quad: engraving's thick stroke, rising right.
+    c.beginPath();
+    c.moveTo(xl, yc + rise / 2 - t / 2);
+    c.lineTo(xr, yc - rise / 2 - t / 2);
+    c.lineTo(xr, yc - rise / 2 + t / 2);
+    c.lineTo(xl, yc + rise / 2 + t / 2);
+    c.closePath();
+    c.fill();
+  };
+  // Thin strokes clamp to a CSS pixel: 0.09 staff spaces at roll scale is
+  // 0.66 px, and a sub-pixel vertical is how a natural turns into a blob.
+  const vert = (x, y0, y1, t) => {
+    const tw = Math.max(1.05, t);
+    c.fillRect(x - tw / 2, y0, tw, y1 - y0);
+  };
+  const flatAt = (xs) => {
+    // Stem, then the bowl as one crescent path: outer curve sweeping up from
+    // the bottom tip, a short run down the stem, inner curve closing it.
+    vert(xs, y - 1.72 * S, y + 0.56 * S, 0.1 * S);
+    c.beginPath();
+    c.moveTo(xs, y + 0.54 * S);
+    c.bezierCurveTo(xs + 0.9 * S, y + 0.02 * S, xs + 0.82 * S, y - 0.68 * S, xs, y - 0.34 * S);
+    c.lineTo(xs, y - 0.06 * S);
+    c.bezierCurveTo(xs + 0.5 * S, y - 0.3 * S, xs + 0.52 * S, y + 0.08 * S, xs, y + 0.4 * S);
+    c.closePath();
+    c.fill();
+  };
+  if (kind === 1 || kind === 2) {
+    if (kind === 1) {
+      vert(cx - 0.17 * S, y - 0.98 * S, y + 1.24 * S, 0.1 * S);
+      vert(cx + 0.17 * S, y - 1.24 * S, y + 0.98 * S, 0.1 * S);
+      beam(cx - 0.45 * S, cx + 0.45 * S, y - 0.44 * S, 0.34 * S, 0.28 * S);
+      beam(cx - 0.45 * S, cx + 0.45 * S, y + 0.44 * S, 0.34 * S, 0.28 * S);
+    } else {
+      // Double sharp: the bold pinwheel x - thick diagonals, squared serifs.
+      c.lineWidth = 0.24 * S;
+      c.strokeStyle = fill;
+      c.beginPath();
+      c.moveTo(cx - 0.34 * S, y - 0.34 * S);
+      c.lineTo(cx + 0.34 * S, y + 0.34 * S);
+      c.moveTo(cx - 0.34 * S, y + 0.34 * S);
+      c.lineTo(cx + 0.34 * S, y - 0.34 * S);
+      c.stroke();
+      for (const [dx2, dy2] of [[-0.38, -0.38], [0.38, -0.38], [-0.38, 0.38], [0.38, 0.38]])
+        c.fillRect(cx + dx2 * S - 0.13 * S, y + dy2 * S - 0.13 * S, 0.26 * S, 0.26 * S);
+    }
+  } else if (kind === -1) {
+    flatAt(cx - 0.08 * S);
+  } else if (kind === -2) {
+    flatAt(cx - 0.5 * S);
+    flatAt(cx + 0.16 * S);
+  } else {
+    // Natural: the left vertical rides high, the right hangs low, verticals
+    // FLUSH with the beam ends (beams poking past the uprights is what made
+    // the first draft read as a box with antennae), beams carrying the
+    // weight like the sharp's.
+    vert(cx - 0.21 * S, y - 1.25 * S, y + 0.55 * S, 0.1 * S);
+    vert(cx + 0.21 * S, y - 0.55 * S, y + 1.25 * S, 0.1 * S);
+    beam(cx - 0.26 * S, cx + 0.26 * S, y - 0.31 * S, 0.32 * S, 0.17 * S);
+    beam(cx - 0.26 * S, cx + 0.26 * S, y + 0.31 * S, 0.32 * S, 0.17 * S);
+  }
+  c.restore();
+  return w;
+}
+
 // Engrave a harmony line onto a 2d context — as a GRAND STAFF, the way a
 // chart with a real bass register is actually written: treble and bass
 // staves joined by a system line, each note routed to whichever staff needs
@@ -780,7 +862,7 @@ function drawStaffLetters(c, yOf, baseStep, bass, S) {
 // Returns { startX, right } so a caller can align its own grid (the chord
 // slots) under the bars; gridGap makes bar centers match a CSS grid's
 // gapped cells exactly.
-function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyOct = 0, bg = null, title = "", gridGap = 0 }) {
+function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyRate = 1, harmonyOct = 0, bg = null, title = "", gridGap = 0 }) {
   if (bg) {
     c.fillStyle = bg;
     c.fillRect(0, 0, w, h);
@@ -822,59 +904,117 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyOct = 0, bg =
   const sig = keySignature(key, scale);
   const SHARP_UNITS = [8, 5, 9, 6, 3, 7, 4];
   const FLAT_UNITS = [4, 7, 3, 6, 2, 5, 1];
-  c.font = `600 ${Math.round(S * 2.2)}px system-ui, sans-serif`;
-  c.textAlign = "center";
   let x = S * 5.2;
   for (let i = 0; i < Math.abs(sig); i++) {
     const u = (sig > 0 ? SHARP_UNITS : FLAT_UNITS)[i];
-    const glyph = sig > 0 ? "\u266f" : "\u266d";
-    const lift = sig > 0 ? 0 : S * 0.3;
-    c.fillText(glyph, x, yT(T_BOT + u) - lift);
-    c.fillText(glyph, x, yB(B_BOT + u - 2) - lift); // bass signature: two steps lower
+    drawAccidental(c, x + S * 0.46, yT(T_BOT + u), S, sig > 0 ? 1 : -1);
+    drawAccidental(c, x + S * 0.46, yB(B_BOT + u - 2), S, sig > 0 ? 1 : -1); // bass signature: two steps lower
     x += S * 0.95;
   }
-  const startX = x + S * 1.0;
+  // The time signature: the grid is sixteenths of a 4/4 bar everywhere in the
+  // app, so the staff says so. Heavy serif numerals are the engraving face;
+  // digits render everywhere (it was the clef glyph fonts don't ship).
+  x += S * 1.05;
+  c.fillStyle = "rgba(240,240,244,0.92)";
+  c.font = `900 ${Math.round(S * 2.15)}px Georgia, "Times New Roman", serif`;
+  c.textAlign = "center";
+  c.textBaseline = "middle";
+  for (const [yOf, base] of [[yT, T_BOT], [yB, B_BOT]]) {
+    c.fillText("4", x, yOf(base + 6));
+    c.fillText("4", x, yOf(base + 2));
+  }
+  const startX = x + S * 1.5;
   const right = w - 10;
+  const rate = harmonyRate === 2 ? 2 : 1;
+  const measures = Math.ceil(harmony.length / rate);
   const oct = 12 * harmonyOct;
   let prev = null;
-  const span = Math.max(40, right - startX);
+  // The end-repeat owns the far right: the progression loops, and repeat dots
+  // are the notation that says so - the wrap stubs already point at them.
+  const repeatW = S * 1.9;
+  const cellsRight = Math.max(startX + 40, right - repeatW);
+  const span = cellsRight - startX;
   const cellW = (span - gridGap * (harmony.length - 1)) / harmony.length;
+  const sysTop = trebleBottom - 4 * S;
+  // Barlines through both staves at every measure boundary, the piano
+  // convention. At one chord per bar every slot is a measure; at two, the
+  // pairs share one and the line says which - the staff stopped pretending
+  // eight half-bar slots were eight whole-note bars.
+  c.strokeStyle = "rgba(255,255,255,0.34)";
+  c.lineWidth = 1;
+  for (let m = 1; m < measures; m++) {
+    const bx = startX + m * rate * (cellW + gridGap) - gridGap / 2;
+    c.beginPath();
+    c.moveTo(bx, sysTop);
+    c.lineTo(bx, bassBottom);
+    c.stroke();
+  }
+  // The end-repeat itself: dots in the middle spaces of each staff, thin
+  // line, thick line.
+  const thinX = cellsRight + S * 0.62;
+  c.beginPath();
+  c.moveTo(thinX, sysTop);
+  c.lineTo(thinX, bassBottom);
+  c.stroke();
+  c.fillStyle = "rgba(240,240,244,0.9)";
+  c.fillRect(thinX + S * 0.42, sysTop, S * 0.42, bassBottom - sysTop);
+  for (const [yOf, base] of [[yT, T_BOT], [yB, B_BOT]]) {
+    for (const u of [3, 5]) {
+      c.beginPath();
+      c.arc(cellsRight + S * 0.08, yOf(base + u), S * 0.17, 0, Math.PI * 2);
+      c.fill();
+    }
+  }
   // How many ledger lines a note at rel (steps above a staff's bottom line)
   // would need; the router sends each note to the cheaper staff, treble on
   // ties - middle C goes up, exactly the convention.
   const ledgers = (rel) => (rel < 0 ? Math.floor(-rel / 2) : rel > 8 ? Math.floor((rel - 8) / 2) : 0);
-  // One staff's worth of engraving: ledgers, accidentals against the
-  // signature, open noteheads with their low-key letters inside.
-  function engrave(notes, yOf, base, cx) {
-    for (let k = 1; k < notes.length; k++) {
-      if (notes[k].step - notes[k - 1].step === 1 && !notes[k - 1].dx) notes[k].dx = S * 0.95;
+  // One staff's worth of engraving: ledgers, accidentals against what is IN
+  // FORCE - the signature, or an accidental earlier in this measure on the
+  // same staff position (state carries across towers and resets at barlines,
+  // so the cancelling natural prints exactly where a reader needs it) - open
+  // noteheads with their low-key letters, and at two chords per bar a
+  // half-note stem, because two stemless towers in one measure would claim
+  // eight beats of 4/4.
+  function engrave(notes, yOf, base, cx, state, stemDir) {
+    // A second displaces its head to the far side of the stem: right of an
+    // up-stem, left of a down-stem (whole-note towers displace right, the
+    // same side a stem would sit).
+    if (stemDir < 0) {
+      for (let k = notes.length - 1; k > 0; k--) {
+        if (notes[k].step - notes[k - 1].step === 1 && !notes[k].dx) notes[k - 1].dx = -S * 0.95;
+      }
+    } else {
+      for (let k = 1; k < notes.length; k++) {
+        if (notes[k].step - notes[k - 1].step === 1 && !notes[k - 1].dx) notes[k].dx = S * 0.95;
+      }
     }
     let accCount = 0;
     for (const n of notes) {
       const rel = n.step - base;
+      // Ledgers span the head that sits on them, displaced or not.
+      const lx0 = cx + Math.min(0, n.dx || 0) - S;
+      const lx1 = cx + Math.max(0, n.dx || 0) + S;
       c.strokeStyle = "rgba(255,255,255,0.34)";
       c.lineWidth = 1;
       for (let u = -2; u >= rel; u -= 2) {
         const y = yOf(base + u);
         c.beginPath();
-        c.moveTo(cx - S, y);
-        c.lineTo(cx + S, y);
+        c.moveTo(lx0, y);
+        c.lineTo(lx1, y);
         c.stroke();
       }
       for (let u = 10; u <= rel; u += 2) {
         const y = yOf(base + u);
         c.beginPath();
-        c.moveTo(cx - S, y);
-        c.lineTo(cx + S, y);
+        c.moveTo(lx0, y);
+        c.lineTo(lx1, y);
         c.stroke();
       }
-      if (n.acc !== signatureAccFor(n.letter, sig)) {
-        c.fillStyle = "rgba(240,240,244,0.95)";
-        c.font = `600 ${Math.round(S * 1.9)}px system-ui, sans-serif`;
-        c.textAlign = "right";
-        const glyph = n.acc > 0 ? "\u266f" : n.acc < 0 ? "\u266d" : "\u266e";
-        c.fillText(glyph, cx - S * 0.9 - accCount * S * 0.75, yOf(n.step) - (n.acc < 0 ? S * 0.3 : 0));
-        c.textAlign = "left";
+      const inForce = state.has(n.step) ? state.get(n.step) : signatureAccFor(n.letter, sig);
+      if (n.acc !== inForce) {
+        drawAccidental(c, cx - S * 0.85 - accCount * S * 0.95, yOf(n.step), S, Math.max(-2, Math.min(2, n.acc)));
+        state.set(n.step, n.acc);
         accCount += 1;
       }
       c.strokeStyle = "#f0f0f4";
@@ -889,6 +1029,23 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyOct = 0, bg =
       c.textAlign = "center";
       c.fillText("CDEFGAB"[n.letter], cx + (n.dx || 0), yOf(n.step) + S * 0.04);
     }
+    // The half-note stem: from the outermost head, through the tower, 3.2
+    // spaces past the far head - reaching at least the middle line, the rule
+    // that keeps far-ledger chords from wearing stubby stems.
+    if (stemDir && notes.length) {
+      const yMid = yOf(base + 4);
+      const sx = cx + stemDir * S * 0.66; // tangent to the head's edge, not through it
+      const y0 = stemDir > 0 ? yOf(notes[0].step) : yOf(notes[notes.length - 1].step);
+      const yEnd = stemDir > 0
+        ? Math.min(yOf(notes[notes.length - 1].step) - 3.2 * S, yMid)
+        : Math.max(yOf(notes[0].step) + 3.2 * S, yMid);
+      c.strokeStyle = "#f0f0f4";
+      c.lineWidth = Math.max(1.2, S * 0.11);
+      c.beginPath();
+      c.moveTo(sx, y0);
+      c.lineTo(sx, yEnd);
+      c.stroke();
+    }
     return accCount;
   }
   // Voice leading, drawn where the voices actually live: after every tower
@@ -898,7 +1055,17 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyOct = 0, bg =
   // between towers: they start past a head's edge and stop short of the
   // next bar's accidental column, so nothing overlaps a symbol.
   const barThreads = [];
+  // Accidental state per staff, carried across towers, cleared at barlines.
+  const accState = { T: new Map(), B: new Map() };
+  // Stems only exist at two chords per bar; direction by where the tower
+  // sits against the staff's middle line, per staff, piano practice.
+  const stemDirFor = (ns, base) =>
+    rate === 2 && ns.length ? (ns.reduce((a, n) => a + n.step, 0) / ns.length > base + 4 ? -1 : 1) : 0;
   harmony.forEach((entry, i) => {
+    if (i % rate === 0) {
+      accState.T.clear();
+      accState.B.clear();
+    }
     const ch = harmonyChord(entry);
     const voiced = (prev = voiceLead(ch.pcs.slice(0, 3), prev));
     const tones = spellChordTones(entry);
@@ -936,9 +1103,9 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyOct = 0, bg =
       c.textAlign = "center";
       c.fillText(octDrop === 1 ? "8va" : "15ma", cx, Math.max(S * 0.8, yT(treble[treble.length - 1].step) - S * 1.6));
     }
-    const accT = engrave(treble, yT, T_BOT, cx);
-    const accB = engrave(bass, yB, B_BOT, cx);
-    const pad = (acc) => S * 0.95 + acc * S * 0.75 + S * 0.85;
+    const accT = engrave(treble, yT, T_BOT, cx, accState.T, stemDirFor(treble, T_BOT));
+    const accB = engrave(bass, yB, B_BOT, cx, accState.B, stemDirFor(bass, B_BOT));
+    const pad = (acc) => S * 0.95 + acc * S * 0.95 + S * 0.85;
     const voices = [0, 1, 2].map((j) => {
       const onT = treble.find((n) => n.voiceIdx === j);
       const n = onT || bass.find((n2) => n2.voiceIdx === j);
@@ -948,7 +1115,10 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyOct = 0, bg =
     barThreads.push({ voices, midis: voiced.map((v) => v + oct), pcs: ch.pcs.slice(0, 3), raw: voiced });
   });
   const seg = (x0, y0, x1, y1, held, alpha) => {
-    if (x1 <= x0) return;
+    // A thread squeezed under half a space (eight rate-2 towers on a phone
+    // canvas) is confetti, not information; the editor's slots carry the
+    // adjacency there and the plate has the room to draw it properly.
+    if (x1 - x0 < S * 0.6) return;
     c.strokeStyle = held ? `rgba(232,184,75,${0.85 * alpha})` : `rgba(210,210,216,${0.34 * alpha})`;
     c.lineWidth = held ? 2 : 1.2;
     c.beginPath();
@@ -974,7 +1144,8 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyOct = 0, bg =
       const dyPerX = 0.12; // gentle exit slope toward the wrap target
       const dir = Math.sign(wrapV[j] - last.raw[j]);
       const x0 = last.voices[j].x + S * 0.85;
-      seg(x0, last.voices[j].y, Math.min(right - 2, x0 + S * 2.4), last.voices[j].y - dir * S * dyPerX * 12, wrapV[j] === last.raw[j], 0.5);
+      // Stubs stop short of the repeat dots they point at.
+      seg(x0, last.voices[j].y, Math.min(cellsRight - S * 0.15, x0 + S * 2.4), last.voices[j].y - dir * S * dyPerX * 12, wrapV[j] === last.raw[j], 0.5);
     }
   }
   // The plate caption takes the top-left corner: the treble 8va guard keeps
@@ -985,7 +1156,9 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyOct = 0, bg =
     c.textAlign = "left";
     c.fillText(title, 10, S * 1.1);
   }
-  return { startX, right };
+  // right is the CELL span's end - the slots align to bars; the end-repeat
+  // stands past it, over the caller's padding.
+  return { startX, right: cellsRight };
 }
 
 // The compass: twelve station dots, the sector arc, and a bright dot on the
@@ -3357,12 +3530,10 @@ function buildPianoEditor(sceneIndex, scene, track) {
     }
     const sig = keySignature(song.key, song.scale);
     const units = sig > 0 ? [8, 5, 9, 6, 3, 7, 4] : [4, 7, 3, 6, 2, 5, 1];
-    c.textAlign = "center";
-    c.font = `600 ${Math.round(S * 2)}px system-ui, sans-serif`;
     let sx = S * 5.9;
     for (let i = 0; i < Math.abs(sig); i++) {
       const u = units[i] - (bass ? 2 : 0);
-      c.fillText(sig > 0 ? "♯" : "♭", sx, yOf(baseStep + u) - (sig < 0 ? S * 0.3 : 0));
+      drawAccidental(c, sx + S * 0.45, yOf(baseStep + u), S, sig > 0 ? 1 : -1, "rgba(240,240,244,0.9)");
       sx += S * 0.9;
     }
     const cell0 = rowCells[0]?.[viewOff];
@@ -3371,37 +3542,50 @@ function buildPianoEditor(sceneIndex, scene, track) {
     const gRect = cell0.getBoundingClientRect();
     const colW = gRect.width;
     const x0 = gRect.left - cRect.left + colW / 2;
+    // The visible window is one bar (multi-bar lanes page per bar), so it is
+    // the measure: accidental state carries left to right across it and an
+    // accidental holds its staff position until cancelled - the F that
+    // follows an F♯ prints its natural instead of silently reading sharp.
+    const accState = new Map();
     for (let s = viewOff; s < viewOff + viewCount; s++) {
       const x = x0 + (s - viewOff) * colW;
-      for (const n of noteSlot(lane[s])) {
-        const sp = spellPitch(n.midi + written);
+      // Stacked notes engrave bottom-up so seconds can displace like the
+      // chord towers do (no stems here, so the far side is always right).
+      const spelled = noteSlot(lane[s])
+        .map((n) => spellPitch(n.midi + written))
+        .sort((a, b) => a.step - b.step);
+      for (let k = 1; k < spelled.length; k++) {
+        if (spelled[k].step - spelled[k - 1].step === 1 && !spelled[k - 1].dx) spelled[k].dx = S * 0.9;
+      }
+      let printed = 0;
+      for (const sp of spelled) {
         const rel = sp.step - baseStep;
+        const hx = x + (sp.dx || 0);
         c.strokeStyle = "rgba(255,255,255,0.3)";
         c.lineWidth = 1;
         for (let u = -2; u >= rel; u -= 2) {
           const y = yOf(baseStep + u);
           c.beginPath();
-          c.moveTo(x - S, y);
-          c.lineTo(x + S, y);
+          c.moveTo(hx - S * 0.9, y);
+          c.lineTo(hx + S * 0.9, y);
           c.stroke();
         }
         for (let u = 10; u <= rel; u += 2) {
           const y = yOf(baseStep + u);
           c.beginPath();
-          c.moveTo(x - S, y);
-          c.lineTo(x + S, y);
+          c.moveTo(hx - S * 0.9, y);
+          c.lineTo(hx + S * 0.9, y);
           c.stroke();
         }
-        if (sp.acc !== signatureAccFor(sp.letter, sig)) {
-          c.fillStyle = "rgba(240,240,244,0.9)";
-          c.font = `600 ${Math.round(S * 1.7)}px system-ui, sans-serif`;
-          c.textAlign = "right";
-          c.fillText(sp.acc > 0 ? "♯" : sp.acc < 0 ? "♭" : "♮", x - S * 0.75, yOf(sp.step) - (sp.acc < 0 ? S * 0.25 : 0));
-          c.textAlign = "center";
+        const inForce = accState.has(sp.step) ? accState.get(sp.step) : signatureAccFor(sp.letter, sig);
+        if (sp.acc !== inForce) {
+          drawAccidental(c, x - S * 0.62 - printed * S * 0.85, yOf(sp.step), S * 0.92, Math.max(-2, Math.min(2, sp.acc)), "rgba(240,240,244,0.9)");
+          accState.set(sp.step, sp.acc);
+          printed += 1;
         }
         c.fillStyle = "#f0f0f4";
         c.beginPath();
-        c.ellipse(x, yOf(sp.step), S * 0.55, S * 0.42, -0.25, 0, Math.PI * 2);
+        c.ellipse(hx, yOf(sp.step), S * 0.55, S * 0.42, -0.25, 0, Math.PI * 2);
         c.fill();
       }
     }
@@ -3737,6 +3921,7 @@ function buildHarmonyEditor(sceneIndex, scene) {
       key: song.key,
       scale: song.scale,
       harmony: scene.harmony,
+      harmonyRate: scene.harmonyRate,
       harmonyOct: scene.harmonyOct || 0,
       gridGap: 8, // the chordrow's grid gap: bar centers land on slot centers
     });
@@ -4781,6 +4966,7 @@ function exportStaffPng() {
     key: song.key,
     scale: song.scale,
     harmony: sc.harmony,
+    harmonyRate: sc.harmonyRate,
     harmonyOct: sc.harmonyOct || 0,
     bg: "#0e0e0f",
     title: `${keyDisplayName(song.key, song.scale)} ${song.scale} · ${song.tempo} BPM · scene ${si + 1} · noodles`,
