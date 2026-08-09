@@ -140,9 +140,13 @@ only while the mixer is open; morph voices capped at the top-2 corners (2x a sin
 never 4x); colors pay-per-roll; sample drums cost buffer playback instead of synthesis;
 grid class sweeps dirty-checked per 16th; **idle park**: the context suspends ~6 s after
 stop (past the longest tails) and wakes on any trigger, so a stopped app costs zero audio
-CPU; **dry park**: with every send off (the default and most dice rolls) the reverb and
-echo returns disconnect from the graph entirely (~10% of a master render measured) and
-wake before a send opens; **track park**: a track untriggered for 6 s (an empty lane, a
+CPU; **dry park**: with every send off the reverb and
+echo returns disconnect from the graph entirely and wake before a send opens — worth
+27% of a master render, not the ~10% this line used to claim (measured 2026-08-08,
+680 vs 498 ms per rendered second with every send at -Infinity; D17's depth floor
+both made the returns pricier and left them open on most rolls, so the park is worth
+nearly three times what it was credited with and fires far less often);
+**track park**: a track untriggered for 6 s (an empty lane, a
 muted stem) drops its whole source side (layers, filters, chorus, color) out of the graph
 with one cut at the color junction and wakes synchronously on any trigger; stems export
 measured ~40% faster since a solo pass renders one track's DSP, not four; clock-pump
@@ -196,6 +200,32 @@ ms/s desktop) — that's the return sounding, not waste. Same hunt, small: `trim
 no longer fires mid-jam (the dice path called it 1.5 s after every roll); a trimmed pool
 under a comp refills within a bar, so the playing-time trim was pure
 dispose-and-reconstruct churn.
+
+The 2026-08-08 audit went after the cold open, which nobody had measured end to end
+(full report + 20 harness scripts: .tmp/perf-audit-2026-08-08.md, .tmp/pa-*.mjs). Two
+Tone.js taxes carried most of it, and neither is DSP. Freeverb's eight comb filters each
+build an `IIRFilterNode`, and Blink prices one by simulating its impulse response until
+it decays: 112 ms per filter on a 4x-throttled phone proxy, 869 ms for the bank, against
+0.14 ms for a biquad. And `Oscillator.getInitialValue` runs a 32-term scan of a
+2048-partial inverse FFT — roughly 131k trig calls — on every LFO construction and every
+phase write, which Chorus does twice at boot and a color swap does four to six more times
+per dice roll. Fixes: the live graph builds Freeverb in the first idle window instead of
+before the first paint (offline renders stay eager; deferring it to "when a send opens"
+bought nothing, because D17's depth floor means the boot's own setSend runs inside the
+same module evaluation), `getInitialValue` is memoized with its full side effect
+(`_partialCount` and the 2047-entry `_partials`), and color effects are kept per
+(track, type) and islanded when inactive instead of disposed and rebuilt. First paint at
+4x: 2108 → 804 ms; at 6x: 3244 → 1360 ms; worst boot task 1956 → 777 ms at 4x. A mid-jam
+dice roll's worst task at 6x went 481 ms to 125 ms, moving the tear threshold (a task past
+the 0.25 s lookAhead) from 6x to 8x. Sound-neutral with receipts: `npm run audit`
+byte-identical, `npm run calibrate` identical on every deterministic row. The trade: a tap
+inside the first second after paint can wait on the reverb build (worst measured 1289 ms at
+6x, with the harness tapping the instant the UI appears) — a cost that used to be paid ahead
+of the paint on every load. Same pass, the calibrate fixture now pins `humanize: 0`; half of
+all rolls set it, so half of all calibrate runs were rendering with up to ±8 ms of random
+per-hit drift. What's left on that gate is a ±0.1 dB floor on the drums high band, which is
+Tone randomizing its noise start offset — by design, and proof that a 0.1 dB move there is
+not a signal (.tmp/pa-8-determinism.mjs renders the same stem twice and the buffers differ).
 
 Remaining, in honesty: the always-on chain while PLAYING (verb combs, chorus, five
 compressors, master stack) is the floor and it IS the sound; shrinking it means a measured

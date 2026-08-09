@@ -113,6 +113,12 @@ try {
       key: 0,
       scale: "major",
       swing: 0,
+      // Pin the humanizer too. The cold open is a dice roll and half of all
+      // rolls set song.humanize, which puts up to ±8 ms of Math.random() drift
+      // on every hit — including the ones this harness renders. It reads as a
+      // ±0.1 dB wobble on the drums high band between runs of IDENTICAL code,
+      // which is exactly the size of difference a mix change gets judged on.
+      humanize: 0,
       scenes: [scene],
       arrangement: {
         harmony: [{ scene: 0, start: 0, len: 4 }],

@@ -44,6 +44,40 @@ const swingOffsetFor = (song, track, laneStep) =>
 // which is the only way its numbers stay true when the chain changes.
 if (typeof window !== "undefined") window.__noodlesTone = Tone;
 
+// Tone prices an oscillator's STOPPED value with a 32-term scan of a 2048-partial
+// inverse FFT — roughly 131k trig calls — and runs it on every LFO construction
+// and every phase write. Chorus builds two, and a dice roll that swaps a color
+// effect builds four to six more: measured 104-144 ms per roll and 252 ms of the
+// cold open on a 4x-throttled phone proxy (.tmp/pa-3d-rollcost.mjs,
+// .tmp/pa-1e-graphcost.mjs). The answer is a pure function of type, phase and
+// partials, and this app cycles through a handful of configurations, so it is
+// cacheable.
+//
+// The scan is not a pure function, though: `_getRealImaginary` rewrites
+// `_partialCount` and refills `_partials` with 2047 computed amplitudes on its
+// way through, and both are observable on the instance afterwards. So the entry
+// carries the whole side effect and a hit restores it — same value, same
+// `_partialCount`, same `_partials` — which makes the cache a drop-in for the
+// computation rather than a bet that nobody reads what it left behind. Copying
+// 2048 numbers still beats 131k trig calls by roughly fifty to one.
+{
+  const proto = Tone.Oscillator.prototype;
+  const compute = proto.getInitialValue;
+  const cache = new Map();
+  proto.getInitialValue = function getInitialValue() {
+    const key = this._type === "custom" ? `custom|${this._phase}|${this._partials}` : `${this._type}|${this._phase}`;
+    const hit = cache.get(key);
+    if (hit) {
+      this._partialCount = hit.partialCount;
+      this._partials = hit.partials.slice();
+      return hit.value;
+    }
+    const value = compute.call(this);
+    if (cache.size < 256) cache.set(key, { value, partialCount: this._partialCount, partials: this._partials.slice() });
+    return value;
+  };
+}
+
 // Plain arithmetic, not Tone.Frequency / Tone.Time: those minted a full Tone
 // object per triggered note and per note stack — the same per-hit allocation
 // class playSampleHit hunted (see its comment), steady GC food on the
@@ -741,7 +775,7 @@ function bassVelocityBoost(preset, midi) {
 // the moment they exist, connected or not (measured ~21x on a minimal graph),
 // so a dry export must never build them. Live always constructs (native
 // nodes; the dry park makes them free).
-function buildGraph({ meters = false, withVerb = true, withEcho = true } = {}) {
+function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb = false } = {}) {
   const g = {};
 
   // Master chain: bus trim → rumble HP → low shelf → saturation → DC block →
@@ -963,10 +997,6 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true } = {}) {
   // Its comb worklets do run whenever the context runs, but the idle park
   // suspends the context when nothing plays, and since D17's depth floor
   // the verb is in use whenever something does.
-  if (withVerb) {
-    g.reverb = new Tone.Freeverb({ roomSize: 0.72, dampening: 2600, wet: 1 }).connect(g.musicDuck);
-    g.reverbOut = g.reverb;
-  }
   // The HPs and send taps always exist (playback code sets their gains); a
   // skipped return just leaves them feeding a dangling — unrendered — edge.
   // 20 ms of pre-delay before the verb: the ear locks onto the dry signal
@@ -975,7 +1005,22 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true } = {}) {
   g.reverbHP = new Tone.Filter({ type: "highpass", frequency: 200, Q: 0.7 });
   g.reverbPre = new Tone.Delay({ delayTime: 0.02, maxDelay: 0.05 });
   g.reverbHP.connect(g.reverbPre);
-  if (g.reverb) g.reverbPre.connect(g.reverb);
+  // Freeverb is the single most expensive thing this file constructs, and none
+  // of it is DSP: its eight comb filters each build an IIRFilterNode, and Blink
+  // prices one by simulating the impulse response until it decays. Measured 112
+  // ms per filter on a 4x-throttled phone proxy — 869 ms for the bank, against
+  // 0.14 ms for a biquad. Eager, that lands in front of the first paint, so the
+  // live graph passes lazyVerb and calls ensureReverb from an idle window (see
+  // buildVerbNow in createAudio). Offline renders stay eager: a render that
+  // decided it needs the return needs it now, and there is no paint to protect.
+  const makeReverb = () => {
+    g.reverb = new Tone.Freeverb({ roomSize: 0.72, dampening: 2600, wet: 1 });
+    g.reverbOut = g.reverb;
+    g.reverbPre.connect(g.reverb);
+    return g.reverb;
+  };
+  if (withVerb && lazyVerb) g.ensureReverb = () => g.reverb || makeReverb();
+  else if (withVerb) makeReverb().connect(g.musicDuck);
   if (withEcho) {
     g.echo = new Tone.FeedbackDelay({ delayTime: "8n", feedback: 0.26, wet: 1 }).connect(g.musicDuck);
   }
@@ -1039,6 +1084,7 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true } = {}) {
   g.colorDest = {};
   g.colorNodes = {};
   g.colorTypes = {};
+  g.colorCache = {};
   g.trackOut = {};
   for (const k of TRACK_KEYS) {
     g.colorIn[k] = new Tone.Gain(1);
@@ -1046,6 +1092,7 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true } = {}) {
     g.colorIn[k].connect(g.colorDest[k]);
     g.trackOut[k] = g.colorIn[k];
     g.colorNodes[k] = null;
+    g.colorCache[k] = {};
     g.colorTypes[k] = "none";
   }
 
@@ -1367,6 +1414,20 @@ function updateColorNode(g, track, patch) {
   g.colorNodes[track]?.updateColor(colorAmount(track, g.colorTypes[track], patch.amount), patch.motion);
 }
 
+// Swapping a color used to dispose the old chain and construct the new one.
+// That is the other half of what a dice roll costs: every maker here builds an
+// LFO-bearing effect, and Tone's LFO constructor runs the inverse-FFT scan the
+// memo above exists to cache. Keep one chain per (track, type) instead and swap
+// by rewiring. A deactivated chain is islanded — colorIn is disconnected from
+// its head and its tail from colorDest — so Web Audio renders none of it, which
+// is the same reason the dry park works. Every maker's constructor-only
+// arguments are either constants (Phaser's stages/baseFrequency, Tremolo's
+// spread) or re-applied by updateColor on the way back in, so a reused chain is
+// bit-identical to a freshly built one. One honest difference: trem and wob
+// free-run their LFOs, so a reused chain re-enters at whatever phase it drifted
+// to instead of at its construction phase. That was never a fixed quantity — it
+// already depended on when in the bar the swap landed — and offline renders
+// build each chain exactly once, so exports are unaffected either way.
 function applyColorTo(g, track, patch) {
   const type = patch.color;
   if (g.colorTypes[track] === type) {
@@ -1375,7 +1436,7 @@ function applyColorTo(g, track, patch) {
   }
   g.colorIn[track].disconnect();
   if (g.colorNodes[track]) {
-    for (const n of g.colorNodes[track].nodes) n.dispose();
+    g.colorNodes[track].nodes.at(-1).disconnect();
     g.colorNodes[track] = null;
   }
   if (type === "none" || !COLOR_MAKERS[type]) {
@@ -1384,14 +1445,23 @@ function applyColorTo(g, track, patch) {
     g.colorTypes[track] = "none";
     return;
   }
-  const made = COLOR_MAKERS[type](colorAmount(track, type, patch.amount), patch.motion);
-  let prev = g.colorIn[track];
-  for (const n of made.nodes) {
-    prev.connect(n);
-    prev = n;
+  const amount = colorAmount(track, type, patch.amount);
+  const cached = g.colorCache[track][type];
+  const made = cached || (g.colorCache[track][type] = COLOR_MAKERS[type](amount, patch.motion));
+  if (cached) {
+    made.updateColor(amount, patch.motion);
+    // A reused chain keeps its internal wiring; only the two ends were cut.
+    made.nodes.at(-1).connect(g.colorDest[track]);
+    g.colorIn[track].connect(made.nodes[0]);
+  } else {
+    let prev = g.colorIn[track];
+    for (const n of made.nodes) {
+      prev.connect(n);
+      prev = n;
+    }
+    prev.connect(g.colorDest[track]);
   }
-  prev.connect(g.colorDest[track]);
-  g.trackOut[track] = prev;
+  g.trackOut[track] = made.nodes.at(-1);
   g.colorNodes[track] = made;
   g.colorTypes[track] = type;
 }
@@ -1828,7 +1898,7 @@ export function createAudio(song) {
   // just-past start to "as soon as possible", so this can never drop a note.)
   const tapTime = () => Tone.immediate() + 0.005;
 
-  const live = buildGraph({ meters: true });
+  const live = buildGraph({ meters: true, lazyVerb: true });
 
   // Meter park: five waveform analysers tap the strips full-time, but their
   // buffers are only ever read while the mixer sheet is open. An analyser is
@@ -1874,34 +1944,58 @@ export function createAudio(song) {
   // the tail has rung out. Sound-neutral by construction: a parked return
   // only ever carried silence.
   const RETURN_TAIL_MS = 6000;
+  // Both returns read their node through a getter, because the verb's may not
+  // exist yet: see buildVerbNow below.
   const returns = {
-    verb: { key: "verb", node: live.reverbOut, parked: false, timer: 0 },
-    echo: { key: "echo", node: live.echo, parked: false, timer: 0 },
+    verb: { key: "verb", parked: false, timer: 0, get node() { return live.reverbOut; } },
+    echo: { key: "echo", parked: false, timer: 0, get node() { return live.echo; } },
   };
   const anySendOn = (kind) => TRACK_KEYS.some((t) => sendGain(channelState[t][kind]) > 0);
   function wakeReturn(kind) {
     const r = returns[kind];
     clearTimeout(r.timer);
     r.timer = 0;
-    if (r.parked) {
-      r.node.connect(live.musicDuck);
-      r.parked = false;
-    }
+    if (!r.parked) return;
+    r.parked = false;
+    // A verb that hasn't been built yet joins the duck bus when it is.
+    r.node?.connect(live.musicDuck);
   }
   function parkReturnSoon(kind) {
     const r = returns[kind];
     clearTimeout(r.timer);
     r.timer = setTimeout(() => {
       if (!anySendOn(kind) && !r.parked) {
-        r.node.disconnect(live.musicDuck);
+        r.node?.disconnect(live.musicDuck);
         r.parked = true;
       }
     }, RETURN_TAIL_MS);
   }
   // Boot state is all-dry and nothing has played: park immediately, no tail.
   for (const kind of ["verb", "echo"]) {
-    returns[kind].node.disconnect(live.musicDuck);
+    returns[kind].node?.disconnect(live.musicDuck);
     returns[kind].parked = true;
+  }
+
+  // Building Freeverb "when a send opens" defers it by nothing: the cold open
+  // IS a dice roll, D17 gives every roll a depth floor, and so the boot's own
+  // setSend runs inside the module evaluation that has to finish before the app
+  // can paint. That is where the 869 ms went (measured .tmp/pa-7-when.mjs: the
+  // eight IIR filters landed at t=1191 ms inside a 2137 ms task, 1161 ms ahead
+  // of first paint). So the trigger is the clock, not the send: build it in the
+  // first idle window the browser offers, and let the first play force it if a
+  // tap somehow beats that. Until it exists the send taps feed a dangling edge,
+  // which is exactly what a parked return already was — the reverb cannot be
+  // heard before init() starts the transport, and init() forces it.
+  let verbPending = !!live.ensureReverb;
+  function buildVerbNow() {
+    if (!verbPending) return;
+    verbPending = false;
+    live.ensureReverb();
+    if (!returns.verb.parked) live.reverbOut.connect(live.musicDuck);
+  }
+  if (verbPending) {
+    if (typeof requestIdleCallback === "function") requestIdleCallback(buildVerbNow, { timeout: 4000 });
+    else setTimeout(buildVerbNow, 1200);
   }
 
   // Track park, same principle one level up: a track that hasn't been asked
@@ -2297,7 +2391,10 @@ export function createAudio(song) {
         primerGain.disconnect();
         // Samples preload at page build (loadSamples runs there); by first play
         // they're almost always in, so this awaits a settled promise, not a fetch.
-        if (live.reverb.ready) await live.reverb.ready;
+        // The idle window has almost always built the verb by now; this is the
+        // guarantee for the tap that beat it. Nothing has sounded yet either way.
+        buildVerbNow();
+        if (live.reverb?.ready) await live.reverb.ready;
         await loadSamples();
         clock.start(0);
       } catch (err) {
