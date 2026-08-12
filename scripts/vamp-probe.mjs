@@ -41,6 +41,31 @@ const ghosty = vamps.filter((s) =>
 check(`vamp rolls carry ghost snares (${ghosty}/${vamps.length}, expect most)`,
   ghosty / vamps.length > 0.6);
 
+// The arc (DESIGN-VILLAIN V-C): every vamp roll is a four-scene form —
+// A, drumless interlude, variation, one-shot pedal outro — chained by
+// the same follow actions a long-press could set.
+const TRACKS4 = ["harmony", "drums", "bass", "melody"];
+check(`vamp deals the arc (${vamps.filter((s) => s.scenes.length === 4).length}/${vamps.length} rolls carry 4 scenes)`,
+  vamps.every((s) => s.scenes.length === 4));
+check("arc interlude and outro drop the drums",
+  vamps.every((s) => [1, 3].every((i) =>
+    Object.values(s.scenes[i].drums).every((lane) => lane.every((v) => !v)))));
+check("arc outro holds one pedal chord and plays once",
+  vamps.every((s) => {
+    const h = s.scenes[3].harmony;
+    const first = JSON.stringify(h[0]);
+    return h.every((e) => JSON.stringify(e) === first) &&
+      TRACKS4.every((t) => s.scenes[3].launch[t].mode === "oneshot" && s.scenes[3].launch[t].follow === "none");
+  }));
+check("arc scenes chain by follow actions (next, 8 bars each)",
+  vamps.every((s) => s.scenes.slice(0, 3).every((sc) =>
+    TRACKS4.every((t) => sc.launch[t].follow === "next" && sc.launch[t].followBars === 8))));
+check("vamp rolls carry the drag kick (15-40 ms)",
+  vamps.every((s) => s.laneNudge?.kick >= 15 && s.laneNudge?.kick <= 40));
+check("everyone else keeps flat time and 1-2 scenes",
+  rolls.filter((s) => s.vibe.groove !== "vamp").every((s) =>
+    !Object.keys(s.laneNudge || {}).length && s.scenes.length <= 2));
+
 // no-regression: every roll of every archetype is normalizeScene-clean
 // and sits inside its own tempo band.
 import("../src/model.js").then(() => {});

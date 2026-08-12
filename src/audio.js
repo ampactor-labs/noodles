@@ -1788,7 +1788,9 @@ function playArrangementStepOn(g, patches, vstate, song, bar, stepInBar, time) {
     for (const v of DRUM_VOICES) {
       if (sc.drums[v][idx] > 0) {
         vstate.wake?.("drums");
-        hitDrumOn(g, patches, v, at, sc.drums[v][idx]);
+        // Per-lane pocket lag (song.laneNudge, ms): the vamp's drag kick
+        // sits a hair behind the band on purpose (DESIGN-VILLAIN V-D).
+        hitDrumOn(g, patches, v, at + (song.laneNudge?.[v] || 0) / 1000, sc.drums[v][idx]);
       }
     }
   }
@@ -2317,8 +2319,11 @@ export function createAudio(song) {
       const at = Math.max(0, time + swingOffsetFor(song, "drums", idx));
       for (const v of DRUM_VOICES) {
         if (drumScene.drums[v][idx] > 0) {
-          hitDrum(v, at, drumScene.drums[v][idx]);
-          scheduleVisual(() => visualCb({ type: "hit", scene: drumState.scene, voice: v, step: idx, activeScenes: activeBefore }), at);
+          // Same per-lane pocket lag as the arrangement path — both clocks
+          // drag the same kick (DESIGN-VILLAIN V-D).
+          const vAt = at + (song.laneNudge?.[v] || 0) / 1000;
+          hitDrum(v, vAt, drumScene.drums[v][idx]);
+          scheduleVisual(() => visualCb({ type: "hit", scene: drumState.scene, voice: v, step: idx, activeScenes: activeBefore }), vAt);
         }
       }
     }

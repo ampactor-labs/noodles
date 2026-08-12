@@ -116,28 +116,36 @@ after ears).
   of tiling bar 1 (downbeat anchor kept on bar 1; fill/lift logic
   unchanged). Probe asserts: vamp phrase bars differ in placement;
   legacy phrases still tile identically.
-- **V-C — the form.** Vamp dice deals a 3-scene arc wired by follow
-  actions: A (full band) → interlude (drums silent, bass+keys carry,
-  melody answers) → A' → outro (bIII pedal, drums out, fade-shaped
-  velocities). Accept: one 🎲, one ▶, and the phone plays a shape with
-  a beginning and an end, hands off. Fork for the builder: always-on
-  for vamp hires vs a long-press variant.
-- **V-D — the pocket nudge.** Per-lane playback offset (ms), one
-  number, default 0, surfaced only in the kick lane's sheet; vamp
-  hires may set 15-40 ms. This is the drag zone finding made playable.
-  Engine touch — needs `npm run audit` before/after and ears on the
-  A16. Builder's fork: whether it ships at all.
-- **V-E — the darkness.** Vamp `sounds` re-weighted toward the warm
-  end (bass: deep 3 / pluck 2 / sub 1 — landed, one line); kits drop
-  "808" for vamp (landed). The bigger question — a master "dust" color
-  (tilt + gentle saturation) — is deferred: A16 budget and the audit
+- **V-C — the form (landed).** Every vamp roll now deals a four-scene
+  arc wired by follow actions: A (8 bars) → interlude (drums silent,
+  bass+keys carry, fresh melody) → variation → outro (bIII pedal,
+  one-shot, played lanes fade) — one 🎲, one ▶, and the phone plays a
+  shape with a beginning and an end. The builder chose always-on over
+  a long-press variant by shipping it live to test with ears.
+- **V-D — the pocket nudge (engine landed, knob open).** `song.laneNudge`
+  (ms per drum lane) rides both clocks and save/load; vamp hires roll
+  the kick 15-40 ms behind. Audit ran before and after: meter self-test
+  exact, LUFS spread 3.09 dB, chain untouched. Still open: the one
+  number surfaced in the kick lane's sheet — until then the off is a
+  reroll, a non-vamp hire, or the revert.
+- **V-E — the darkness (sounds landed, dust deferred).** Vamp bass
+  re-weighted deep 3 / pluck 2 / sub 1, kits dusty/warm only, and the
+  hat lattice now breathes (off-spine slots sit out a third of the
+  time, differently every bar under improv). The master "dust" color
+  (tilt + gentle saturation) stays deferred: A16 budget and the audit
   gate make it a session of its own.
-- **V-0 — the acceptance target.** `villain-shaped.noodles` (woodshed)
-  was built G dorian i9|IV9 and now disagrees with the measured track.
-  Regenerate: F-family key, i9↔ii7 spine, bIIImaj7 visit, drum bars
-  that differ, interlude + outro scenes. It validates through this
-  repo's model like the other templates. Do this before the next ear
-  test, or the ears calibrate against the wrong target.
+- **V-0 — the acceptance target (done).** `villain-shaped.noodles`
+  regenerated in woodshed (research branch, 72c2b99): F dorian 116,
+  i9|ii7 spine, the V7 in the return scene, Ab pedal outro, four
+  scenes chained like the dice now deals them, kick nudged 28 ms.
+  Chords name clean through this repo's own `harmonyChord`.
+
+**Shipped to main 2026-08-12** on the builder's ship-and-test call
+("push it, I'll test it running live, we can revert"). Everything
+above landed except the dust color and the nudge's UI knob. If the
+ears say no: `git revert -m 1 <the 2026-08-12 merge commit>` on main
+undoes the whole program in one move; the knobs in `GROOVES.vamp`
+remain for anything smaller.
 
 The by-ear gate is unchanged and is the builder's: several 🎲 presses
 landing within earshot of the reference without reproducing it. The

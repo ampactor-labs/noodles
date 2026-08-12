@@ -829,6 +829,8 @@ const GROOVES = {
     vamps: [[[0, 1], 3], [[0, 2], 2], [[0, 3], 1], [[1, 4], 1]],
     visit: 0.35,
     improv: true,
+    arc: true,
+    dragKick: [15, 40],
     bass: [["bounce", 3], ["roots", 2], ["offbeat8", 1]],
     comp: [["sustain", 2], ["pulse", 2], ["tresillo", 1]],
     sounds: { harmony: [["keys", 3], ["pad", 2]], bass: [["deep", 3], ["pluck", 2], ["sub", 1]], melody: [["bell", 2], ["pluck", 2], ["lead", 1]] },
@@ -837,9 +839,12 @@ const GROOVES = {
     human: [0.15, 0.35],
     kits: ["dusty", "warm"],
     drums() {
-      // Contoured straight-16 lattice; the ghosts ARE the genre, rolled
-      // per-slot instead of per-pattern so no two bars whisper alike.
-      const hat = dlane((s) => [0.6, 0.28, 0.42, 0.28][s % 4] + rnd() * 0.1);
+      // Breathing straight-16 lattice; the ghosts ARE the genre, rolled
+      // per-slot instead of per-pattern so no two bars whisper alike. The
+      // reference's hats are sparse commentary (~3 events/bar), so off-spine
+      // slots sit out a third of the time — with improv, differently per bar.
+      const hat = dlane((s) => (s % 4 && rnd() < 0.35 ? 0
+        : [0.6, 0.28, 0.42, 0.28][s % 4] + rnd() * 0.1));
       const kick = dlane((s) => (s === 0 ? 1
         : s === 7 ? 0.65 + rnd() * 0.15
         : s === 10 ? 0.75 + rnd() * 0.1
@@ -1048,7 +1053,15 @@ export function magicHarmony(vibe) {
     // archetype's own weights — a vamp arrives already wearing its 9ths.
     line = line.map((d) => {
       if (typeof d !== "number") return d;
-      const rung = pickW(g.voicing);
+      let rung = pickW(g.voicing);
+      // Some degrees' diatonic 9th is the b9 rub — a semitone over the
+      // root (the ii in dorian, the ii and v in minor). The reference
+      // plays those chords plain, so the rung caps at 7 and the 9s live
+      // where the scale gives them clean.
+      if (rung === "9") {
+        const p = ladderPcs(d, "9");
+        if (p.length >= 5 && (p[4] - p[0] + 12) % 12 === 1) rung = "7";
+      }
       return rung === "triad" ? d : { pcs: ladderPcs(d, rung) };
     });
   } else {
@@ -1542,16 +1555,55 @@ export function makeSong() {
   }
   const s = makeMagicScene(vibe);
   const scenes = [s];
-  if (vibe.bScene) scenes.push(makeVariationScene(s, vibe));
+  const gs2 = GROOVES[vibe.groove];
+  if (gs2?.arc) {
+    // The record's form (DESIGN-VILLAIN §2): arrive, drop the drums for a
+    // breath, return changed, dissolve on the bIII pedal. Dealt with the
+    // same follow actions a long-press could set by hand — one 🎲, one ▶,
+    // and the phone plays a shape with a beginning and an end.
+    const interlude = cloneScene(s);
+    for (const v of DRUM_VOICES) interlude.drums[v].fill(0);
+    interlude.melody = normalizeNoteLane(vibe.polymeter === "melody"
+      ? magicMelody(vibe, s.harmony, 1, 12) : magicMelody(vibe, s.harmony));
+    const aPrime = makeVariationScene(s, vibe);
+    const outro = cloneScene(s);
+    const ped = { pcs: ladderPcs(2, rnd() < 0.5 ? "9" : "7") };
+    outro.harmony = [ped, ped, ped, ped];
+    for (const v of DRUM_VOICES) outro.drums[v].fill(0);
+    if (vibe.polymeter !== "bass") outro.bass = normalizeNoteLane(magicBassFollow(vibe, outro.harmony));
+    // The record ends by leaving: played lanes fade across the outro while
+    // the keys ring on (harmony carries no per-note velocity to fade).
+    const fadeLane = (lane) => (Array.isArray(lane)
+      ? lane.map((slot, i) => (Array.isArray(slot)
+        ? slot.map((n) => ({ ...n, vel: Math.max(0.05, (n.vel ?? 0.8) * (1 - 0.6 * (i / lane.length))) }))
+        : slot))
+      : lane);
+    outro.bass = fadeLane(outro.bass);
+    outro.melody = fadeLane(outro.melody);
+    for (const sc of [s, interlude, aPrime]) {
+      for (const t of ARRANGE_TRACKS) sc.launch[t] = { ...sc.launch[t], follow: "next", followBars: 8 };
+    }
+    for (const t of ARRANGE_TRACKS) outro.launch[t] = { ...outro.launch[t], mode: "oneshot", follow: "none" };
+    scenes.push(interlude, aPrime, outro);
+  } else if (vibe.bScene) {
+    scenes.push(makeVariationScene(s, vibe));
+  }
   // Place at least 4 bars on the timeline: content loops inside a placed
   // clip, but the timeline itself has a 4-bar floor — a 1-bar vamp placed
   // at its own length would export as one bar of music and three of silence.
   const len = Math.max(4, s.harmony.length);
+  // The drag kick (DESIGN-VILLAIN V-D): a third of the reference's kicks
+  // sit 65-130 ms behind the beat; the playable half of that pocket is a
+  // fixed per-lane lag, rolled per song, absent for everyone else.
+  const laneNudge = gs2?.dragKick
+    ? { kick: Math.round(gs2.dragKick[0] + rnd() * (gs2.dragKick[1] - gs2.dragKick[0])) }
+    : {};
   return {
     tempo: vibe.tempo,
     key,
     scale,
     trackSwing: {},
+    laneNudge,
     // The whole vibe rides the song: the app side finishes the roll from it
     // (kit, wet sends), and any later scene generated for this song — the
     // session Magic button included — reuses the same roll.
