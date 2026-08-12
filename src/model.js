@@ -807,6 +807,50 @@ const GROOVES = {
       return { kick, snare, hat, clap };
     },
   },
+  vamp: {
+    // The pocket band: a dorian i-IV holding still while the drums breathe.
+    // Measured off a reference (woodshed research/vamp-archetype.md): the
+    // offbeat sat at 52% of the beat — straight sixteenths, not shuffle —
+    // so swing stays capped low; the looseness lives in ghost velocity.
+    // Three fields are new and optional, consumed only when present:
+    // scales (the archetype re-rolls the song's scale toward its home),
+    // harmonyFam (the family weights magicHarmony rolls), voicing (the
+    // rung weights that dress rolled degrees), borrow (minor-side violet).
+    weight: 16,
+    tempo: [108, 122],
+    swing: [0, 0.08],
+    scales: { dorian: 3, minor: 1, mixolydian: 1 },
+    harmonyFam: [["vamp", 55], ["static", 20], ["cadence", 15], ["wander", 10]],
+    voicing: [["9", 2], ["7", 2], ["triad", 1]],
+    borrow: 0.15,
+    bass: [["bounce", 3], ["roots", 2], ["offbeat8", 1]],
+    comp: [["sustain", 2], ["pulse", 2], ["tresillo", 1]],
+    sounds: { harmony: [["keys", 3], ["pad", 2]], bass: [["sub", 2], ["deep", 2], ["pluck", 1]], melody: [["bell", 2], ["pluck", 2], ["lead", 1]] },
+    melodyGap: 0.6,
+    melodyChars: [["sparse", 2], ["hook", 2], ["runner", 1]],
+    human: [0.15, 0.35],
+    kits: ["dusty", "warm", "808"],
+    drums() {
+      // Contoured straight-16 lattice; the ghosts ARE the genre, rolled
+      // per-slot instead of per-pattern so no two bars whisper alike.
+      const hat = dlane((s) => [0.6, 0.28, 0.42, 0.28][s % 4] + rnd() * 0.1);
+      const kick = dlane((s) => (s === 0 ? 1
+        : s === 7 ? 0.65 + rnd() * 0.15
+        : s === 10 ? 0.75 + rnd() * 0.1
+        : s === 13 && rnd() < 0.25 ? 0.6 : 0));
+      const snare = dlane((s) => {
+        if (s === 4 || s === 12) return 0.88 + rnd() * 0.1;
+        return (s === 6 || s === 9 || s === 15) && rnd() < 0.5 ? 0.15 + rnd() * 0.1 : 0;
+      });
+      let open = null;
+      if (rnd() < 0.6) {
+        open = dlane((s) => (s === 14 ? 0.4 + rnd() * 0.1 : 0));
+        hat[14] = 0; // step aside so the open one actually rings
+      }
+      const perc = rnd() < 0.5 ? dlane((s) => (s % 2 ? 0.14 : 0.2) + rnd() * 0.06) : null;
+      return { kick, snare, hat, open, perc };
+    },
+  },
 };
 
 // Comp gestures: how the pad plays the chord it was dealt. For the whole
@@ -941,7 +985,10 @@ const n12h = (v) => ((v % 12) + 12) % 12;
 const dimDegree = () =>
   CHORDS.findIndex((c) => (c.pcs[1] - c.pcs[0] + 12) % 12 === 3 && (c.pcs[2] - c.pcs[0] + 12) % 12 === 6);
 function magicHarmony(vibe) {
-  const fam = pickW([["cadence", 45], ["vamp", 25], ["static", 10], ["wander", 20]]);
+  // An archetype may carry its own family weights (the vamp lives on
+  // vamps); everyone else keeps the house deck.
+  const g = GROOVES[vibe?.groove];
+  const fam = pickW(g?.harmonyFam || [["cadence", 45], ["vamp", 25], ["static", 10], ["wander", 20]]);
   let line;
   if (fam === "cadence") {
     let i = rint(0, CADENCES.length - 1);
@@ -973,15 +1020,38 @@ function magicHarmony(vibe) {
   // names take stacks for free), and major-side rolls occasionally borrow a
   // bVII or bVI the way the wheel's dim ring does — a violet visitor in the
   // cold open, so the borrowed sound isn't only something you dig for.
-  const sevens = vibe?.wildcard || rnd() < 0.3;
-  if (sevens && fam !== "wander") {
-    line = line.map((d, i) => (i === 0 && rnd() < 0.5 ? d : { pcs: ladderPcs(d, rnd() < 0.2 ? "9" : "7") }));
+  if (g?.voicing && fam !== "wander") {
+    // The archetype's voicing age: every slot rolls its rung from the
+    // archetype's own weights — a vamp arrives already wearing its 9ths.
+    line = line.map((d) => {
+      if (typeof d !== "number") return d;
+      const rung = pickW(g.voicing);
+      return rung === "triad" ? d : { pcs: ladderPcs(d, rung) };
+    });
+  } else {
+    const sevens = vibe?.wildcard || rnd() < 0.3;
+    if (sevens && fam !== "wander") {
+      line = line.map((d, i) => (i === 0 && rnd() < 0.5 ? d : { pcs: ladderPcs(d, rnd() < 0.2 ? "9" : "7") }));
+    }
   }
   const majorSide = ["major", "lydian", "mixolydian"].includes(curScale);
   if (majorSide && line.length >= 3 && rnd() < 0.12) {
     const slot = 1 + rint(0, line.length - 2); // never the tonic slot
     const root = n12h(curKey + (rnd() < 0.6 ? 10 : 8)); // bVII or bVI, major
     line[slot] = { pcs: [root, n12h(root + 4), n12h(root + 7)] };
+  } else if (!majorSide && g?.borrow && line.length >= 3 && rnd() < g.borrow) {
+    // The minor-side violet: dorian and minor already own bIII and bVII,
+    // so their true visitors are the bVI major (from aeolian) and the
+    // minor iv (dorian's IV, saddened) — the two colors the reference
+    // track kept reaching for.
+    const slot = 1 + rint(0, line.length - 2);
+    if (rnd() < 0.6) {
+      const root = n12h(curKey + 8); // bVI major triad
+      line[slot] = { pcs: [root, n12h(root + 4), n12h(root + 7)] };
+    } else {
+      const root = n12h(curKey + 5); // iv minor
+      line[slot] = { pcs: [root, n12h(root + 3), n12h(root + 7)] };
+    }
   }
   return line;
 }
@@ -1422,11 +1492,20 @@ const SCALE_WEIGHTS = { major: 24, minor: 24, dorian: 16, mixolydian: 16, lydian
 export function makeSong() {
   // Randomize key and scale on each fresh load — pairs well with Magic scenes
   const key = Math.floor(Math.random() * 12);
-  const scale = pickW(SCALE_NAMES.map((n) => [n, SCALE_WEIGHTS[n] ?? 12]));
+  let scale = pickW(SCALE_NAMES.map((n) => [n, SCALE_WEIGHTS[n] ?? 12]));
   setScaleContext(key, scale);
   // One vibe per song: tempo, pocket, and space come from the same roll the
   // patterns do, so the parts agree on what kind of thing they're playing.
   const vibe = rollVibe();
+  // A hired band brings its home turf: an archetype with scale weights
+  // re-rolls the mode toward them (the vamp leans dorian 3-to-1), before
+  // any scene is dealt — coherent hires, per the selection-beats-
+  // processing finding. Key stays put; only the mode moves.
+  const gs = GROOVES[vibe.groove]?.scales;
+  if (gs) {
+    scale = pickW(Object.entries(gs));
+    setScaleContext(key, scale);
+  }
   const s = makeMagicScene(vibe);
   const scenes = [s];
   if (vibe.bScene) scenes.push(makeVariationScene(s, vibe));
