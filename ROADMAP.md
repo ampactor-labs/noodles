@@ -245,6 +245,18 @@ no longer fires mid-jam (the dice path called it 1.5 s after every roll); a trim
 under a comp refills within a bar, so the playing-time trim was pure
 dispose-and-reconstruct churn.
 
+The 2026-08-12 pass (builder's first live session on the Villain program
+chopped): the room went lean instead of the rolls going dry. D17 keeps a
+send open on every roll, so the dry park — 27% of a master render —
+almost never fires while playing; the fix that respects both verdicts is
+D28's mono four-comb Schroeder replacing stereo Freeverb (half the
+feedback loops per channel, one channel instead of two, no IIRFilterNode
+construction tax at all, so lazyVerb is now belt-and-suspenders). The
+send knob floor already meant off (-30 maps to zero gain and parks the
+return when it's the last one open); now the always-resident room costs
+a fraction of what it did. Gate: audit's dice table before/after, ears
+on the A16.
+
 The 2026-08-08 audit went after the cold open, which nobody had measured end to end
 (full report + 20 harness scripts: .tmp/perf-audit-2026-08-08.md, .tmp/pa-*.mjs). Two
 Tone.js taxes carried most of it, and neither is DSP. Freeverb's eight comb filters each

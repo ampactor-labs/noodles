@@ -66,6 +66,24 @@ check("everyone else keeps flat time and 1-2 scenes",
   rolls.filter((s) => s.vibe.groove !== "vamp").every((s) =>
     !Object.keys(s.laneNudge || {}).length && s.scenes.length <= 2));
 
+// D27 receipts: the deal carries changes. Roots compare as key-relative
+// pcs so degree entries and dressed pcs entries count as the same chord.
+const rootsOf = (s, sc) => sc.harmony.map((e) => (typeof e === "number"
+  ? SCALES[s.scale][((e % 7) + 7) % 7]
+  : (((e.pcs[0] - s.key) % 12) + 12) % 12));
+const distinct = rolls.map((s) => new Set(rootsOf(s, s.scenes[0])).size);
+const three = distinct.filter((n) => n >= 3).length;
+check(`dice rolls mostly deal 3+ chords (${three}/${N} A scenes)`, three / N >= 0.7);
+const twoScene = rolls.filter((s) => s.scenes.length === 2);
+const moved = twoScene.filter((s) =>
+  rootsOf(s, s.scenes[1]).join() !== rootsOf(s, s.scenes[0]).join()).length;
+check(`B scenes move harmonically (${moved}/${twoScene.length})`,
+  twoScene.length === 0 || moved / twoScene.length >= 0.9);
+const vMoved = vamps.filter((s) =>
+  rootsOf(s, s.scenes[2]).join() !== rootsOf(s, s.scenes[0]).join()).length;
+check(`vamp returns come back changed (${vMoved}/${vamps.length})`,
+  vMoved / vamps.length >= 0.85);
+
 // no-regression: every roll of every archetype is normalizeScene-clean
 // and sits inside its own tempo band.
 import("../src/model.js").then(() => {});

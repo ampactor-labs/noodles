@@ -999,7 +999,11 @@ export function magicHarmony(vibe) {
   // An archetype may carry its own family weights (the vamp lives on
   // vamps); everyone else keeps the house deck.
   const g = GROOVES[vibe?.groove];
-  const fam = pickW(g?.harmonyFam || [["cadence", 45], ["vamp", 25], ["static", 10], ["wander", 20]]);
+  // House deck rebalanced (D27, builder's live verdict): a third of rolls
+  // landing on one or two chords read as the dice being lazy, not moody.
+  // Cadences and wanders carry the deal; vamps and statics are the rare
+  // color, and even a house vamp usually takes a visit now (below).
+  const fam = pickW(g?.harmonyFam || [["cadence", 62], ["wander", 22], ["vamp", 10], ["static", 6]]);
   let line;
   if (fam === "cadence") {
     let i = rint(0, CADENCES.length - 1);
@@ -1027,10 +1031,12 @@ export function magicHarmony(vibe) {
       const [a, b] = VAMPS[i];
       line = [a, b, a, b];
     }
-    if (g?.visit && rnd() < g.visit) {
+    if (rnd() < (g?.visit ?? 0.5)) {
       // One slot steps out to a diatonic visitor — the reference's
       // bIII/IV/v/bVII walk-ons (DESIGN-VILLAIN §2) — then the phrase
-      // comes home. Never the dim, never the pair itself.
+      // comes home. Never the dim, never the pair itself. House rolls
+      // visit half the time (D27: a bare two-chord seesaw is the rare
+      // deal, not the common one); archetypes set their own rate.
       const pool = [0, 1, 2, 3, 4, 5, 6].filter((d) => d !== dim && d !== line[0] && d !== line[1]);
       line[2 + (rnd() < 0.5 ? 0 : 1)] = pickFrom(pool);
     }
@@ -1424,7 +1430,20 @@ export function makeMagicScene(vibe) {
 function makeVariationScene(a, vibe) {
   const b = cloneScene(a);
   b.tag = "✨b";
-  b.melody = normalizeNoteLane(magicMelody(vibe, a.harmony));
+  // A dealt B scene MOVES (D27, builder's live verdict): fresh changes
+  // from the same band, never the same four chords wearing a new hat.
+  // One redraw if the deck hands back the identical line.
+  let line = magicHarmony(vibe);
+  if (JSON.stringify(line) === JSON.stringify(a.harmony)) line = magicHarmony(vibe);
+  b.harmony = line.map(normalizeHarmonyEntry);
+  // The bass walks the NEW changes — the old lane under a new progression
+  // played wrong roots. Polymeter basses keep their 12-step cycle.
+  if (vibe.polymeter !== "bass") {
+    b.bass = normalizeNoteLane(magicBassFollow(vibe, b.harmony));
+    b.steps.bass = b.harmony.length * 16;
+  }
+  b.melody = normalizeNoteLane(vibe.polymeter === "melody"
+    ? magicMelody(vibe, b.harmony, 1, 12) : magicMelody(vibe, b.harmony));
   if (rnd() < 0.5) {
     // thin: drop the clap, pull the hats back
     b.drums.clap.fill(0);
@@ -1438,7 +1457,6 @@ function makeVariationScene(a, vibe) {
       if (!b.drums.kick[bar * 16 + extra]) b.drums.kick[bar * 16 + extra] = 0.7;
     }
   }
-  if (a.harmony.length >= 2 && rnd() < 0.5) b.harmony = [...a.harmony.slice(1), a.harmony[0]];
   return b;
 }
 

@@ -1019,19 +1019,59 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   g.reverbHP = new Tone.Filter({ type: "highpass", frequency: 200, Q: 0.7 });
   g.reverbPre = new Tone.Delay({ delayTime: 0.02, maxDelay: 0.05 });
   g.reverbHP.connect(g.reverbPre);
-  // Freeverb is the single most expensive thing this file constructs, and none
-  // of it is DSP: its eight comb filters each build an IIRFilterNode, and Blink
-  // prices one by simulating the impulse response until it decays. Measured 112
-  // ms per filter on a 4x-throttled phone proxy — 869 ms for the bank, against
-  // 0.14 ms for a biquad. Eager, that lands in front of the first paint, so the
-  // live graph passes lazyVerb and calls ensureReverb from an idle window (see
-  // buildVerbNow in createAudio). Offline renders stay eager: a render that
-  // decided it needs the return needs it now, and there is no paint to protect.
+  // The lean room (D28). Freeverb was the most expensive resident of the
+  // render thread — a STEREO eight-comb bank whose IIRFilterNodes Blink
+  // prices at 112 ms each just to construct (869 ms for the bank, vs 0.14
+  // ms for a biquad) — and D17 keeps a room in use whenever anything
+  // plays, so the room itself is what had to get cheap. This is a mono
+  // Schroeder plate: one explicit downmix (the return spreads center —
+  // the app is mono-forward by design), four biquad-damped combs, two
+  // allpasses. Half the feedback loops of Freeverb per channel and one
+  // channel instead of two, ~zero construction tax. Voiced to the old
+  // room: fb 0.86 ≈ RT60 ~1.6 s, damping lowpass at the same 2600 Hz.
+  // lazyVerb stays: even cheap, there is no reason to build before paint.
   const makeReverb = () => {
-    g.reverb = new Tone.Freeverb({ roomSize: 0.72, dampening: 2600, wet: 1 });
-    g.reverbOut = g.reverb;
-    g.reverbPre.connect(g.reverb);
-    return g.reverb;
+    const mono = new Tone.Gain(1);
+    mono.input.channelCount = 1;
+    mono.input.channelCountMode = "explicit";
+    // Four combs at fb 0.86 resonate hard; the return level was set
+    // empirically against the audit's dice table (the resonant-gain
+    // arithmetic undershot twice): 0.006 puts the room's contribution to
+    // integrated LUFS at ~+0.5 dB, the same depth-behind-the-mix the old
+    // Freeverb return added. Muted-verb reference: -9.2..-10.9 LUFS; sustained pads are the hard case.
+    const out = new Tone.Gain(0.006);
+    for (const t of [0.0297, 0.0371, 0.0411, 0.0437]) {
+      const dl = new Tone.Delay({ delayTime: t, maxDelay: 0.06 });
+      const damp = new Tone.Filter({ type: "lowpass", frequency: 2600, Q: 0.5 });
+      const fb = new Tone.Gain(0.86);
+      mono.connect(dl);
+      dl.connect(damp);
+      damp.connect(fb);
+      fb.connect(dl);
+      damp.connect(out);
+    }
+    // Two Schroeder allpasses in series smear the comb ring into a tail:
+    // v = x + g*v[-D]; y = v[-D] - g*v.
+    let stage = out;
+    for (const t of [0.005, 0.0017]) {
+      const vSum = new Tone.Gain(1);
+      const dl = new Tone.Delay({ delayTime: t, maxDelay: 0.01 });
+      const fbk = new Tone.Gain(0.5);
+      const ff = new Tone.Gain(-0.5);
+      const ySum = new Tone.Gain(1);
+      stage.connect(vSum);
+      vSum.connect(dl);
+      dl.connect(fbk);
+      fbk.connect(vSum);
+      vSum.connect(ff);
+      ff.connect(ySum);
+      dl.connect(ySum);
+      stage = ySum;
+    }
+    g.reverb = mono;
+    g.reverbOut = stage;
+    g.reverbPre.connect(mono);
+    return stage;
   };
   if (withVerb && lazyVerb) g.ensureReverb = () => g.reverb || makeReverb();
   else if (withVerb) makeReverb().connect(g.musicDuck);

@@ -532,3 +532,41 @@ Pinch-into-a-chord is a novel gesture and the product's signature bet, but §7 c
 - **Platform priority for the eventual native build:** iOS-first vs Android-first (web-first is settled for v0 per D2).
 - **Synth vs sample balance** for the full sound palette beyond the v0 default voice (P2).
 - **How much of Sonido** to pull in for the native port (D2 keeps it out of v0; the port depth is undecided).
+
+### D27 — The deal carries changes: two-chord rolls become the rare color
+
+The builder's live verdict (2026-08-12, first session on the deployed
+Villain program): six straight rolls of two chords seesawing "is super
+lame — we need four chords mainly, and the B scene shouldn't be the
+same harmony." The house family deck went cadence 45 / vamp 25 /
+static 10 / wander 20 — a third of every archetype's rolls landed on
+one or two chords. Now: cadence 62 / wander 22 / vamp 10 / static 6,
+house vamp-family lines take a diatonic visit half the time (the
+archetype `visit` field, already in the schema, gains a house
+default), and `makeVariationScene` deals a fresh progression with the
+bass rebuilt to walk the new changes — the old rotate-or-copy B scene
+put the same four chords in a different order over a bass walking the
+old ones. The vamp archetype keeps its own family weights: its
+identity IS the vamp, and its four-scene arc carries the variety the
+house rolls get from the deck. Receipts in probe:vamp (3+ chords on
+>=70% of A scenes, B scenes move, vamp returns come back changed).
+
+### D28 — The lean room: mono Schroeder replaces Freeverb
+
+D17 decided every roll gets a room, which means the reverb runs
+whenever anything plays; the A16 chokes on wet rolls (aud x0.92, and
+the builder's live session chopped). The pro pattern (FL "Smart
+Disable", REAPER's silent-track skip, Ableton's shared returns) is
+already half-built here — shared post-fader sends, dry park, idle
+park, -30 = off — but D17's floor keeps the sends open, so the park
+can't fire while playing. The other half is making the room cheap
+enough to always afford: Freeverb (stereo, eight IIRFilterNode combs —
+869 ms construction on a phone proxy, two channels of twelve feedback
+loops) is replaced by a mono four-comb Schroeder plate with biquad
+damping and two allpasses, spread center — half the loops, one
+channel, ~zero construction cost, voiced to the old room (fb 0.86 ~
+RT60 1.6 s, damping 2600 Hz). Mobile-web practice agrees convolution
+is the wrong tool on this device class and delay-line rooms are the
+cheap ones. Sound is gated by the audit's dice-roll LUFS table and
+the builder's ears; if the tail reads thin, the comb count and fb are
+the knobs, in git history either way.
