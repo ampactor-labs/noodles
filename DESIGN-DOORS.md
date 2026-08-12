@@ -52,10 +52,17 @@ scenes normalize clean** (the no-regression gate).
 - ✅ `npm run probe:vamp`: ALL OK (68/600 vamp hires, dorian 34/68,
   ghosts 57/68).
 - ✅ `npm run build`: clean (dist + PWA emitted).
-- ❌ `npm run smoke`: **NOT run** — the working session was interrupted
-  before it executed. Run it first (`CHROME_BIN=<chromium path> npm run
-  smoke`); nothing in the diff touches the DOM, but the gate exists to be
-  run, not reasoned about.
+- ✅ `npm run smoke`: run 2026-08-12 by the follow-up session, green
+  (four screenshots in `.tmp/`, app renders, transport advances).
+
+### 2026-08-12 addendum — the reference audio arrived
+The builder handed the actual track. `DESIGN-VILLAIN.md` now carries the
+measured ground truth and the V-program; it corrects this file's §0 on
+two counts (the reference is the F-dorian family, not G dorian, and its
+spine is i9↔ii7 planing with i↔bIII — neither pair was in `VAMPS`).
+V-A (archetype vamp deck, diatonic visits, V7 borrow) and V-B (per-bar
+drum redeal) landed on this branch with probe receipts; the by-ear gate
+and every fork below remain the builder's.
 - ❌ Not heard on a phone. The acceptance test is by ear: several 🎲
   presses should land within earshot of `villain-shaped.noodles`
   (woodshed `research/noodles-project/`) without reproducing it.
