@@ -4800,6 +4800,7 @@ function applyProject(rawProject) {
   for (const t of TRACKS) if (!Array.isArray(nextSong.arrangement[t.key])) nextSong.arrangement[t.key] = [];
   if (!nextSong.loop) nextSong.loop = { on: false, start: 0, len: 4 };
   if (!nextSong.trackSwing || typeof nextSong.trackSwing !== "object") nextSong.trackSwing = {};
+  if (!nextSong.laneNudge || typeof nextSong.laneNudge !== "object") nextSong.laneNudge = {};
   if (!nextSong.mutes || typeof nextSong.mutes !== "object") nextSong.mutes = {};
   for (const t of TRACKS) if (nextSong.mutes[t.key] && !Array.isArray(nextSong.mutes[t.key])) nextSong.mutes[t.key] = [];
   if (!Number.isFinite(Number(nextSong.tempo))) nextSong.tempo = 92;

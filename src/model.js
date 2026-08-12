@@ -807,6 +807,61 @@ const GROOVES = {
       return { kick, snare, hat, clap };
     },
   },
+  vamp: {
+    // The pocket band. Re-measured from the reference audio itself
+    // (DESIGN-VILLAIN.md, correcting the woodshed pass): home is the
+    // i9↔ii7 planing orbit with i↔bIII second, visitors walk on for one
+    // slot, and the one borrowed cadence is a true V7. The offbeat sits
+    // at 52% of the beat — straight sixteenths; the looseness lives in
+    // ghost velocity and per-bar redeal, not shuffle. Optional fields,
+    // consumed only when present: scales (mode re-roll toward home),
+    // harmonyFam (family weights), voicing (rung weights), borrow
+    // (minor-side violet incl. V7), vamps (the archetype's own pair
+    // deck), visit (diatonic walk-on chance), improv (drums re-deal
+    // every bar of the phrase).
+    weight: 16,
+    tempo: [108, 122],
+    swing: [0, 0.08],
+    scales: { dorian: 3, minor: 1, mixolydian: 1 },
+    harmonyFam: [["vamp", 55], ["static", 20], ["cadence", 15], ["wander", 10]],
+    voicing: [["9", 2], ["7", 2], ["triad", 1]],
+    borrow: 0.15,
+    vamps: [[[0, 1], 3], [[0, 2], 2], [[0, 3], 1], [[1, 4], 1]],
+    visit: 0.35,
+    improv: true,
+    arc: true,
+    dragKick: [15, 40],
+    bass: [["bounce", 3], ["roots", 2], ["offbeat8", 1]],
+    comp: [["sustain", 2], ["pulse", 2], ["tresillo", 1]],
+    sounds: { harmony: [["keys", 3], ["pad", 2]], bass: [["deep", 3], ["pluck", 2], ["sub", 1]], melody: [["bell", 2], ["pluck", 2], ["lead", 1]] },
+    melodyGap: 0.6,
+    melodyChars: [["sparse", 2], ["hook", 2], ["runner", 1]],
+    human: [0.15, 0.35],
+    kits: ["dusty", "warm"],
+    drums() {
+      // Breathing straight-16 lattice; the ghosts ARE the genre, rolled
+      // per-slot instead of per-pattern so no two bars whisper alike. The
+      // reference's hats are sparse commentary (~3 events/bar), so off-spine
+      // slots sit out a third of the time — with improv, differently per bar.
+      const hat = dlane((s) => (s % 4 && rnd() < 0.35 ? 0
+        : [0.6, 0.28, 0.42, 0.28][s % 4] + rnd() * 0.1));
+      const kick = dlane((s) => (s === 0 ? 1
+        : s === 7 ? 0.65 + rnd() * 0.15
+        : s === 10 ? 0.75 + rnd() * 0.1
+        : s === 13 && rnd() < 0.25 ? 0.6 : 0));
+      const snare = dlane((s) => {
+        if (s === 4 || s === 12) return 0.88 + rnd() * 0.1;
+        return (s === 6 || s === 9 || s === 15) && rnd() < 0.5 ? 0.15 + rnd() * 0.1 : 0;
+      });
+      let open = null;
+      if (rnd() < 0.6) {
+        open = dlane((s) => (s === 14 ? 0.4 + rnd() * 0.1 : 0));
+        hat[14] = 0; // step aside so the open one actually rings
+      }
+      const perc = rnd() < 0.5 ? dlane((s) => (s % 2 ? 0.14 : 0.2) + rnd() * 0.06) : null;
+      return { kick, snare, hat, open, perc };
+    },
+  },
 };
 
 // Comp gestures: how the pad plays the chord it was dealt. For the whole
@@ -940,8 +995,11 @@ const n12h = (v) => ((v % 12) + 12) % 12;
 // with the mode: index 6 in major, 1 in minor, 4 in phrygian.
 const dimDegree = () =>
   CHORDS.findIndex((c) => (c.pcs[1] - c.pcs[0] + 12) % 12 === 3 && (c.pcs[2] - c.pcs[0] + 12) % 12 === 6);
-function magicHarmony(vibe) {
-  const fam = pickW([["cadence", 45], ["vamp", 25], ["static", 10], ["wander", 20]]);
+export function magicHarmony(vibe) {
+  // An archetype may carry its own family weights (the vamp lives on
+  // vamps); everyone else keeps the house deck.
+  const g = GROOVES[vibe?.groove];
+  const fam = pickW(g?.harmonyFam || [["cadence", 45], ["vamp", 25], ["static", 10], ["wander", 20]]);
   let line;
   if (fam === "cadence") {
     let i = rint(0, CADENCES.length - 1);
@@ -952,13 +1010,30 @@ function magicHarmony(vibe) {
     // Every roll is a four-bar phrase (D21): a vamp is its pair twice over.
     // Pairs holding the diminished degree sit out — [0, 6] is I–vii° in
     // major, [1, 4] is ii°–v in minor — half a phrase on a dim chord.
+    // An archetype may bring its own pair deck (the vamp's i↔ii planing
+    // lives nowhere in the house deck); the dim filter applies either way.
     const dim = dimDegree();
-    const ok = VAMPS.flatMap((v, i) => (v.includes(dim) ? [] : [i]));
-    let i = ok[rint(0, ok.length - 1)];
-    if (i === lastRoll.vamp) i = ok[rint(0, ok.length - 1)];
-    lastRoll.vamp = i;
-    const [a, b] = VAMPS[i];
-    line = [a, b, a, b];
+    const deck = g?.vamps?.filter(([p]) => !p.includes(dim));
+    if (deck?.length) {
+      let p = pickW(deck);
+      if (String(p) === lastRoll.vampPair) p = pickW(deck);
+      lastRoll.vampPair = String(p);
+      line = [p[0], p[1], p[0], p[1]];
+    } else {
+      const ok = VAMPS.flatMap((v, i) => (v.includes(dim) ? [] : [i]));
+      let i = ok[rint(0, ok.length - 1)];
+      if (i === lastRoll.vamp) i = ok[rint(0, ok.length - 1)];
+      lastRoll.vamp = i;
+      const [a, b] = VAMPS[i];
+      line = [a, b, a, b];
+    }
+    if (g?.visit && rnd() < g.visit) {
+      // One slot steps out to a diatonic visitor — the reference's
+      // bIII/IV/v/bVII walk-ons (DESIGN-VILLAIN §2) — then the phrase
+      // comes home. Never the dim, never the pair itself.
+      const pool = [0, 1, 2, 3, 4, 5, 6].filter((d) => d !== dim && d !== line[0] && d !== line[1]);
+      line[2 + (rnd() < 0.5 ? 0 : 1)] = pickFrom(pool);
+    }
   } else if (fam === "static") {
     // One chord held four bars — any but the diminished one (a four-bar dim
     // drone breaks the floor); the seventh pass below can still shade it.
@@ -973,15 +1048,52 @@ function magicHarmony(vibe) {
   // names take stacks for free), and major-side rolls occasionally borrow a
   // bVII or bVI the way the wheel's dim ring does — a violet visitor in the
   // cold open, so the borrowed sound isn't only something you dig for.
-  const sevens = vibe?.wildcard || rnd() < 0.3;
-  if (sevens && fam !== "wander") {
-    line = line.map((d, i) => (i === 0 && rnd() < 0.5 ? d : { pcs: ladderPcs(d, rnd() < 0.2 ? "9" : "7") }));
+  if (g?.voicing && fam !== "wander") {
+    // The archetype's voicing age: every slot rolls its rung from the
+    // archetype's own weights — a vamp arrives already wearing its 9ths.
+    line = line.map((d) => {
+      if (typeof d !== "number") return d;
+      let rung = pickW(g.voicing);
+      // Some degrees' diatonic 9th is the b9 rub — a semitone over the
+      // root (the ii in dorian, the ii and v in minor). The reference
+      // plays those chords plain, so the rung caps at 7 and the 9s live
+      // where the scale gives them clean.
+      if (rung === "9") {
+        const p = ladderPcs(d, "9");
+        if (p.length >= 5 && (p[4] - p[0] + 12) % 12 === 1) rung = "7";
+      }
+      return rung === "triad" ? d : { pcs: ladderPcs(d, rung) };
+    });
+  } else {
+    const sevens = vibe?.wildcard || rnd() < 0.3;
+    if (sevens && fam !== "wander") {
+      line = line.map((d, i) => (i === 0 && rnd() < 0.5 ? d : { pcs: ladderPcs(d, rnd() < 0.2 ? "9" : "7") }));
+    }
   }
   const majorSide = ["major", "lydian", "mixolydian"].includes(curScale);
   if (majorSide && line.length >= 3 && rnd() < 0.12) {
     const slot = 1 + rint(0, line.length - 2); // never the tonic slot
     const root = n12h(curKey + (rnd() < 0.6 ? 10 : 8)); // bVII or bVI, major
     line[slot] = { pcs: [root, n12h(root + 4), n12h(root + 7)] };
+  } else if (!majorSide && g?.borrow && line.length >= 3 && rnd() < g.borrow) {
+    // The minor-side violet: dorian and minor already own bIII and bVII,
+    // so their true visitors are the bVI major (from aeolian), the minor
+    // iv (dorian's IV, saddened), and — rarest, strongest — the V7, the
+    // reference track's single classical cadence (DESIGN-VILLAIN §2):
+    // a major dominant whose raised third is the one note outside the
+    // mode, resolving home.
+    const slot = 1 + rint(0, line.length - 2);
+    const card = rnd();
+    if (card < 0.4) {
+      const root = n12h(curKey + 8); // bVI major triad
+      line[slot] = { pcs: [root, n12h(root + 4), n12h(root + 7)] };
+    } else if (card < 0.7) {
+      const root = n12h(curKey + 5); // iv minor
+      line[slot] = { pcs: [root, n12h(root + 3), n12h(root + 7)] };
+    } else {
+      const root = n12h(curKey + 7); // V7, leading tone and all
+      line[slot] = { pcs: [root, n12h(root + 4), n12h(root + 7), n12h(root + 10)] };
+    }
   }
   return line;
 }
@@ -1217,16 +1329,21 @@ export function rollDrumPhrase(bars = 4, groove = null) {
   const g = GROOVES[groove] ? groove : pickW(Object.entries(GROOVES).map(([name, gr]) => [name, gr.weight]));
   const oneBar = GROOVES[g].drums();
   oneBar.kick[0] = Math.max(oneBar.kick[0], 0.95); // the downbeat anchor, always
+  // An improv archetype re-deals the whole kit each bar — the reference
+  // drummer played 53 distinct bars out of 56 (DESIGN-VILLAIN §2); a tiled
+  // bar cannot say that. Everyone else keeps the tile + velocity breath.
+  const barKits = Array.from({ length: bars }, (_, b) =>
+    (b && GROOVES[g].improv ? GROOVES[g].drums() : oneBar));
   const total = bars * 16;
   const drums = {};
   for (const v of DRUM_VOICES) {
     drums[v] = new Array(total).fill(0);
-    const src = oneBar[v];
-    if (!src) continue;
     for (let b = 0; b < bars; b++) {
+      const src = barKits[b][v];
+      if (!src) continue;
       for (let st = 0; st < 16; st++) {
         const vel = src[st];
-        drums[v][b * 16 + st] = vel > 0 ? Math.max(0.05, Math.min(1, vel + (b ? rnd() * 0.08 - 0.04 : 0))) : 0;
+        drums[v][b * 16 + st] = vel > 0 ? Math.max(0.05, Math.min(1, vel + (b && src === oneBar[v] ? rnd() * 0.08 - 0.04 : 0))) : 0;
       }
     }
   }
@@ -1422,23 +1539,71 @@ const SCALE_WEIGHTS = { major: 24, minor: 24, dorian: 16, mixolydian: 16, lydian
 export function makeSong() {
   // Randomize key and scale on each fresh load — pairs well with Magic scenes
   const key = Math.floor(Math.random() * 12);
-  const scale = pickW(SCALE_NAMES.map((n) => [n, SCALE_WEIGHTS[n] ?? 12]));
+  let scale = pickW(SCALE_NAMES.map((n) => [n, SCALE_WEIGHTS[n] ?? 12]));
   setScaleContext(key, scale);
   // One vibe per song: tempo, pocket, and space come from the same roll the
   // patterns do, so the parts agree on what kind of thing they're playing.
   const vibe = rollVibe();
+  // A hired band brings its home turf: an archetype with scale weights
+  // re-rolls the mode toward them (the vamp leans dorian 3-to-1), before
+  // any scene is dealt — coherent hires, per the selection-beats-
+  // processing finding. Key stays put; only the mode moves.
+  const gs = GROOVES[vibe.groove]?.scales;
+  if (gs) {
+    scale = pickW(Object.entries(gs));
+    setScaleContext(key, scale);
+  }
   const s = makeMagicScene(vibe);
   const scenes = [s];
-  if (vibe.bScene) scenes.push(makeVariationScene(s, vibe));
+  const gs2 = GROOVES[vibe.groove];
+  if (gs2?.arc) {
+    // The record's form (DESIGN-VILLAIN §2): arrive, drop the drums for a
+    // breath, return changed, dissolve on the bIII pedal. Dealt with the
+    // same follow actions a long-press could set by hand — one 🎲, one ▶,
+    // and the phone plays a shape with a beginning and an end.
+    const interlude = cloneScene(s);
+    for (const v of DRUM_VOICES) interlude.drums[v].fill(0);
+    interlude.melody = normalizeNoteLane(vibe.polymeter === "melody"
+      ? magicMelody(vibe, s.harmony, 1, 12) : magicMelody(vibe, s.harmony));
+    const aPrime = makeVariationScene(s, vibe);
+    const outro = cloneScene(s);
+    const ped = { pcs: ladderPcs(2, rnd() < 0.5 ? "9" : "7") };
+    outro.harmony = [ped, ped, ped, ped];
+    for (const v of DRUM_VOICES) outro.drums[v].fill(0);
+    if (vibe.polymeter !== "bass") outro.bass = normalizeNoteLane(magicBassFollow(vibe, outro.harmony));
+    // The record ends by leaving: played lanes fade across the outro while
+    // the keys ring on (harmony carries no per-note velocity to fade).
+    const fadeLane = (lane) => (Array.isArray(lane)
+      ? lane.map((slot, i) => (Array.isArray(slot)
+        ? slot.map((n) => ({ ...n, vel: Math.max(0.05, (n.vel ?? 0.8) * (1 - 0.6 * (i / lane.length))) }))
+        : slot))
+      : lane);
+    outro.bass = fadeLane(outro.bass);
+    outro.melody = fadeLane(outro.melody);
+    for (const sc of [s, interlude, aPrime]) {
+      for (const t of ARRANGE_TRACKS) sc.launch[t] = { ...sc.launch[t], follow: "next", followBars: 8 };
+    }
+    for (const t of ARRANGE_TRACKS) outro.launch[t] = { ...outro.launch[t], mode: "oneshot", follow: "none" };
+    scenes.push(interlude, aPrime, outro);
+  } else if (vibe.bScene) {
+    scenes.push(makeVariationScene(s, vibe));
+  }
   // Place at least 4 bars on the timeline: content loops inside a placed
   // clip, but the timeline itself has a 4-bar floor — a 1-bar vamp placed
   // at its own length would export as one bar of music and three of silence.
   const len = Math.max(4, s.harmony.length);
+  // The drag kick (DESIGN-VILLAIN V-D): a third of the reference's kicks
+  // sit 65-130 ms behind the beat; the playable half of that pocket is a
+  // fixed per-lane lag, rolled per song, absent for everyone else.
+  const laneNudge = gs2?.dragKick
+    ? { kick: Math.round(gs2.dragKick[0] + rnd() * (gs2.dragKick[1] - gs2.dragKick[0])) }
+    : {};
   return {
     tempo: vibe.tempo,
     key,
     scale,
     trackSwing: {},
+    laneNudge,
     // The whole vibe rides the song: the app side finishes the roll from it
     // (kit, wet sends), and any later scene generated for this song — the
     // session Magic button included — reuses the same roll.
