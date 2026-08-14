@@ -27,6 +27,11 @@
 //   morph    The crossfade law in isolation, on bare layers with no lane
 //            filters in the way: same pitch, phase-locked, so they sum
 //            coherently and equal-power weights overshoot.
+//   room     The reverb return's impulse response. A comb bank is a ring of
+//            feedback loops: it has to decay, and it has to decay the same
+//            way twice. Neither is free — a damper that boosts anywhere
+//            makes an oscillator, and a cycle whose tap sits outside the
+//            loop leaves the timing to the browser.
 //   program  LUFS-I / true peak / crest / PLR on real renders. The verdict.
 //
 // Usage: npm run audit            (full sweep)
@@ -601,6 +606,77 @@ try {
         out.kick[`${f}Hz`] = r2(db(toneMag(d, f, sr, 0, len)));
       }
     }
+
+    // --- The room. A reverb is a ring of feedback loops, and two things go
+    // wrong there in ways nothing else in this file would notice.
+    //
+    // A tail that GROWS. The damper inside each comb has to stay under unity
+    // at every frequency or the loop gain crosses 1 and the room is an
+    // oscillator. It sounded fine for ten seconds and then pinned the master
+    // flat against the ceiling, which is how it shipped: the dice table read
+    // it as loudness spread (3.47 dB, one roll at PSR -0.31) instead of as a
+    // room that never stopped.
+    //
+    // A tail that RENDERS DIFFERENTLY TWICE. Web Audio does not say when it
+    // adds latency to break a cycle, so a loop with a tap outside it is the
+    // browser's decision, not this file's — the two Schroeder allpasses that
+    // used to sit after these combs came back 2 dB apart on identical input,
+    // render to render, and would differ again on another browser.
+    //
+    // So: impulse in, decay out, twice, and the two must agree exactly.
+    {
+      const impulseRoom = () =>
+        Tone.Offline(() => {
+          const g = buildGraph({ meters: false, withVerb: true, withEcho: false });
+          g.masterOut.disconnect(); // the return, not the master chain behind it
+          g.reverbOut.connect(Tone.getDestination());
+          const raw = Tone.getContext().rawContext;
+          const ab = raw.createBuffer(1, 4096, raw.sampleRate);
+          ab.getChannelData(0)[0] = 1;
+          new Tone.ToneBufferSource({ url: new Tone.ToneAudioBuffer(ab) }).connect(g.reverbHP).start(0);
+        }, 12);
+      const a = await impulseRoom();
+      const b = await impulseRoom();
+      const sr = a.sampleRate;
+      const x = a.getChannelData(0);
+      const rms = (t) => {
+        const s = Math.floor(t * sr);
+        let sum = 0;
+        for (let i = s; i < s + Math.floor(0.1 * sr); i++) sum += x[i] * x[i];
+        return db(Math.sqrt(sum / Math.floor(0.1 * sr)));
+      };
+      // Least squares on the decay, from just after the impulse to wherever
+      // the tail reaches the noise floor. A room falls; an oscillator climbs.
+      const pts = [];
+      for (let t = 0.2; t < 11.8; t += 0.1) {
+        const v = rms(t);
+        if (v > -200) pts.push([t, v]);
+      }
+      const n = pts.length;
+      const mx = pts.reduce((s, p) => s + p[0], 0) / n;
+      const my = pts.reduce((s, p) => s + p[1], 0) / n;
+      const slope = pts.reduce((s, p) => s + (p[0] - mx) * (p[1] - my), 0) / pts.reduce((s, p) => s + (p[0] - mx) ** 2, 0);
+      // Two renders, compared against the impulse response's own peak. Bit
+      // equality is the wrong test — the tail runs past -200 dB, where a
+      // single denormal decides it — so this asks how far apart the two
+      // renders are relative to the sound, and -120 dB apart is the same
+      // render.
+      const yb = b.getChannelData(0);
+      let peak = 0;
+      let worst = 0;
+      for (let i = 0; i < a.length; i++) {
+        if (Math.abs(x[i]) > peak) peak = Math.abs(x[i]);
+        const d = Math.abs(x[i] - yb[i]);
+        if (d > worst) worst = d;
+      }
+      out.room = {
+        slopeDbPerSec: r2(slope),
+        rt60Sec: slope < 0 ? r2(-60 / slope) : null,
+        tailAt1s: r2(rms(1)),
+        tailAt6s: r2(rms(6)),
+        repeatDb: r2(db(worst / peak)),
+      };
+    }
     }
 
     // --- The real thing: press the dice and measure the roll, end to end.
@@ -678,6 +754,13 @@ try {
 
   console.log("\n== kick through the drum bus (dB, dry+parallel summed) ==");
   for (const [f, v] of Object.entries(report.kick)) console.log(`  ${pad(f, 8)} ${num(v, 7)}`);
+
+  console.log("\n== the room decays (impulse into the return) ==");
+  const rm = report.room;
+  console.log(`  tail        ${num(rm.tailAt1s, 7)} dB at 1 s  ->  ${num(rm.tailAt6s, 7)} dB at 6 s`);
+  console.log(`  decay       ${num(rm.slopeDbPerSec, 7)} dB/s${rm.rt60Sec ? `   RT60 ${rm.rt60Sec} s` : "   <- GROWING: loop gain is over 1, the room is an oscillator"}`);
+  console.log(`  same twice  two renders agree to ${num(rm.repeatDb, 7)} dB${rm.repeatDb > -120 ? "  <- a cycle's timing is the browser's decision here, not ours" : ""}`);
+  if (!rm.rt60Sec || rm.repeatDb > -120) bad++;
   }
 
   const row = (label, p) =>

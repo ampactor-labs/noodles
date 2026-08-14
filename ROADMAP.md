@@ -257,6 +257,19 @@ return when it's the last one open); now the always-resident room costs
 a fraction of what it did. Gate: audit's dice table before/after, ears
 on the A16.
 
+That room shipped as an oscillator and ran the mix away about ten
+seconds into every roll (D29). Two fixes, both about what a browser
+promises: the comb damper's Q is in decibels of resonance, not linear,
+so `Q: 0.5` was +1.59 dB of boost and a loop gain of 1.033, and the two
+Schroeder allpasses tapped a delay from inside a feedback cycle and
+outside it, which Chrome resolves differently from one render to the
+next. The damper is Butterworth now and the allpasses are gone; the
+room is four damped combs, RT60 2.02 s, return re-matched by
+measurement to the Freeverb it replaced. `npm run audit` grew a `room`
+section that fails on a tail that grows or two renders that disagree.
+Diffusion comes back when the room moves into one AudioWorklet, which
+is also where the construction tax stops mattering.
+
 The 2026-08-08 audit went after the cold open, which nobody had measured end to end
 (full report + 20 harness scripts: .tmp/perf-audit-2026-08-08.md, .tmp/pa-*.mjs). Two
 Tone.js taxes carried most of it, and neither is DSP. Freeverb's eight comb filters each

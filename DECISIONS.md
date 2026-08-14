@@ -570,3 +570,52 @@ is the wrong tool on this device class and delay-line rooms are the
 cheap ones. Sound is gated by the audit's dice-roll LUFS table and
 the builder's ears; if the tail reads thin, the comb count and fb are
 the knobs, in git history either way.
+
+### D29 — The room only gets the loops a browser will honor
+
+D28's room shipped as an oscillator. A friend's iPhone found it: press
+play, and about ten seconds later the whole mix runs away. It was never
+an iPhone bug. It reproduces in desktop Chrome on the first try, and it
+had been in every roll since D28, misread in the audit's own dice table
+as loudness spread (3.47 dB, one roll pinned at PSR -0.31).
+
+Two causes, both of the same kind: the code asked for something the Web
+Audio API does not mean by it.
+
+The damper. For a lowpass or highpass, Web Audio prices Q in DECIBELS of
+resonance, not as a linear Q; the spec's alpha is sin(w0)/(2*10^(Q/20)).
+The comb damper's `Q: 0.5` asked for half a dB of boost and got a peak
+of +1.59 dB at 1.9 kHz, which inside a comb at fb 0.86 is a loop gain of
+1.033. The room grew 6.4 dB/s and pinned the master flat against the
+ceiling. The damper is now Butterworth, -3.01 dB in those units, so it
+can never boost and the loop gain is the 0.86 the RT60 arithmetic
+already assumed. Tone.Filter clamps Q to positive, so the node is a
+Tone.BiquadFilter, which takes it as the plain number it is.
+
+The allpasses. A Schroeder allpass taps one delay from inside its
+feedback loop and from outside it, and Web Audio does not promise those
+two taps are the same sample: a browser may add latency to break a
+cycle, and Chrome decides that per graph rather than per structure. Five
+identical renders of the room came back -6.60, -4.58, -4.58, -4.53,
+-4.58 dB of impulse energy. Only -6.60 is an allpass; an allpass
+preserves energy, and that is the combs' own figure. The four combs
+alone render bit-identically every time, so the allpasses are gone. Tone
+ran Freeverb's combs and allpasses inside AudioWorklets for exactly this
+reason; D28 traded the worklets for construction cost and inherited the
+native graph's soft cycle semantics with them.
+
+The room is therefore four damped combs, mono, RT60 2.02 s: less lush
+than D28 promised, and the same on every device, which is the trade this
+product wants. Its return is 0.52, matched by measurement to the room it
+replaced (+1.12 dB against a dry strip at a wide-open send, where
+Freeverb read +1.08), so the send fader keeps the wet/dry ratio it had.
+D28's other claim is withdrawn while we're here: the old Freeverb decayed
+in RT60 ~0.64 s, so "voiced to the old room" was only ever true of level.
+
+`npm run audit` grew a `room` section that would have caught this on the
+day: impulse into the return, decay slope and RT60, and two renders that
+must agree to -120 dB. It fails loudly on the old constants (+5.8 dB/s,
+"GROWING"). The open fork is diffusion: getting it back means moving the
+room into one AudioWorklet, where the DSP is ours and sample-exact
+rather than the browser's to schedule. That also retires the last reason
+D28 feared construction cost.

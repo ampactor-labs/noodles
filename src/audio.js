@@ -1024,25 +1024,55 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   // prices at 112 ms each just to construct (869 ms for the bank, vs 0.14
   // ms for a biquad) — and D17 keeps a room in use whenever anything
   // plays, so the room itself is what had to get cheap. This is a mono
-  // Schroeder plate: one explicit downmix (the return spreads center —
-  // the app is mono-forward by design), four biquad-damped combs, two
-  // allpasses. Half the feedback loops of Freeverb per channel and one
-  // channel instead of two, ~zero construction tax. Voiced to the old
-  // room: fb 0.86 ≈ RT60 ~1.6 s, damping lowpass at the same 2600 Hz.
+  // comb bank: one explicit downmix (the return spreads center — the app is
+  // mono-forward by design) and four biquad-damped combs. Half the feedback
+  // loops of Freeverb per channel and one channel instead of two, ~zero
+  // construction tax. Damping lowpass at the old room's 2600 Hz, and fb 0.86
+  // for RT60 1.4-2.0 s across the four delays — measured, and a LONGER room
+  // than the Freeverb it replaced, whose tail fell 46 dB in half a second
+  // (RT60 ~0.64 s). "Voiced to the old room" was only ever true of level,
+  // which is measured and matched below; the decay is D28's own choice.
   // lazyVerb stays: even cheap, there is no reason to build before paint.
+  //
+  // A damper may only damp. Web Audio prices a lowpass/highpass Q in
+  // DECIBELS of resonance rather than as a linear Q — the spec's own
+  // alpha = sin(w0)/(2 * 10^(Q/20)) — so the Q 0.5 this filter shipped with
+  // asked for half a dB of boost and got a peak of +1.59 dB at 1.9 kHz.
+  // Inside a comb at fb 0.86 that is a loop gain of 1.033: an oscillator,
+  // not a room. It climbed 6.4 dB/s from whatever was playing and the
+  // master pinned flat against the ceiling ten seconds into any dice roll —
+  // the "runaway feedback on play" an iPhone found first only because
+  // nobody here had let a jam run half a minute. -3.01 dB is Butterworth,
+  // 20*log10(1/sqrt(2)): maximally flat, |H| <= 1 at every frequency, so
+  // the loop gain is the 0.86 the RT60 arithmetic already assumed.
+  // Receipts: .tmp/verb-stability.mjs (impulse into the return, 30 s) and
+  // .tmp/room-runaway.mjs (the master, sends at D17's depth floor).
+  const DAMP_Q_DB = -3.01;
   const makeReverb = () => {
     const mono = new Tone.Gain(1);
     mono.input.channelCount = 1;
     mono.input.channelCountMode = "explicit";
-    // Four combs at fb 0.86 resonate hard; the return level was set
-    // empirically against the audit's dice table (the resonant-gain
-    // arithmetic undershot twice): 0.006 puts the room's contribution to
-    // integrated LUFS at ~+0.5 dB, the same depth-behind-the-mix the old
-    // Freeverb return added. Muted-verb reference: -9.2..-10.9 LUFS; sustained pads are the hard case.
-    const out = new Tone.Gain(0.006);
+    // Return level, matched to the room this one replaced: with a strip's
+    // send wide open the return reads +1.12 dB against that strip's dry
+    // output, where Freeverb read +1.08 (.tmp/room-cal.mjs, pink noise
+    // through the real send path, mono-summed because a phone speaker sums
+    // it). That is the whole meaning of the number — the send fader keeps
+    // the wet/dry ratio it had.
+    //
+    // Not measured against the program's LUFS, which is what the old 0.006
+    // claimed: the master glue and ceiling redistribute a room's energy
+    // rather than add it, so that reading is not even monotone in this gain
+    // (0.1 -> +0.04 dB, 0.36 -> -0.10 dB, 0.58 -> +0.93 dB). It also could
+    // not have been right at any value, since the bank it was fitted against
+    // never settled — "the resonant-gain arithmetic undershot twice" was an
+    // oscillator reading loud at every return level anyone tried.
+    const out = new Tone.Gain(0.52);
     for (const t of [0.0297, 0.0371, 0.0411, 0.0437]) {
       const dl = new Tone.Delay({ delayTime: t, maxDelay: 0.06 });
-      const damp = new Tone.Filter({ type: "lowpass", frequency: 2600, Q: 0.5 });
+      // Tone.Filter clamps Q to units "positive" and would throw on a
+      // Butterworth one; Tone.BiquadFilter takes it as a plain number and
+      // wraps a single native biquad, skipping Filter's Signal cascade.
+      const damp = new Tone.BiquadFilter({ type: "lowpass", frequency: 2600, Q: DAMP_Q_DB });
       const fb = new Tone.Gain(0.86);
       mono.connect(dl);
       dl.connect(damp);
@@ -1050,28 +1080,30 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
       fb.connect(dl);
       damp.connect(out);
     }
-    // Two Schroeder allpasses in series smear the comb ring into a tail:
-    // v = x + g*v[-D]; y = v[-D] - g*v.
-    let stage = out;
-    for (const t of [0.005, 0.0017]) {
-      const vSum = new Tone.Gain(1);
-      const dl = new Tone.Delay({ delayTime: t, maxDelay: 0.01 });
-      const fbk = new Tone.Gain(0.5);
-      const ff = new Tone.Gain(-0.5);
-      const ySum = new Tone.Gain(1);
-      stage.connect(vSum);
-      vSum.connect(dl);
-      dl.connect(fbk);
-      fbk.connect(vSum);
-      vSum.connect(ff);
-      ff.connect(ySum);
-      dl.connect(ySum);
-      stage = ySum;
-    }
+    // The two Schroeder allpasses that used to sit here are gone, and they
+    // had to go: a Schroeder allpass (v = x + g*v[-D]; y = v[-D] - g*v) taps
+    // one delay from INSIDE its feedback loop and from outside it, and Web
+    // Audio does not promise those two taps are the same sample. Chrome
+    // breaks a cycle by giving the loop edge its own latency, decides that
+    // per graph rather than per structure, and the result was a stage that
+    // rendered as a real allpass in some renders and as something else in
+    // others: five identical renders of this room came back -6.60, -4.58,
+    // -4.58, -4.53, -4.58 dB of impulse energy (.tmp/room-alone.mjs). An
+    // allpass preserves energy, so -6.60 — the combs' own energy, unchanged
+    // — is the only one of those that was an allpass at all. The four combs
+    // on their own render bit-identically every time.
+    //
+    // What a browser will not promise, this file cannot claim. Tone's
+    // Freeverb ran its combs and allpasses inside AudioWorklets for exactly
+    // this reason; D28 traded the worklets away for construction cost and
+    // inherited the native graph's soft cycle semantics with them. Diffusion
+    // comes back the day the room moves into one worklet — where the DSP is
+    // ours, sample-exact, and identical on every browser. Until then the
+    // room is four damped combs: less lush, and the same on every device.
     g.reverb = mono;
-    g.reverbOut = stage;
+    g.reverbOut = out;
     g.reverbPre.connect(mono);
-    return stage;
+    return out;
   };
   if (withVerb && lazyVerb) g.ensureReverb = () => g.reverb || makeReverb();
   else if (withVerb) makeReverb().connect(g.musicDuck);
