@@ -1957,18 +1957,19 @@ export function createAudio(song) {
     // Half a frame of anticipation so a callback lands on the paint closest
     // to its moment instead of always one frame after it.
     const heard = Tone.getContext().rawContext.currentTime - visualLatency() + 0.008;
-    for (let i = 0; i < visualQueue.length; ) {
+    let writeIdx = 0;
+    for (let i = 0; i < visualQueue.length; i++) {
       const ev = visualQueue[i];
       if (ev.time <= heard) {
-        visualQueue.splice(i, 1);
         // Stale events (tab was hidden, rAF paused) get dropped, not replayed.
         // Time 0 is exempt: it means "immediate UI feedback, next frame" —
-        // the launch/queue/stop paints — and the stale test read every one of
-        // them as a second-old event once the clock passed 1 s, which is why
-        // a queued tap only showed up when the next step event repeated it.
+        // the launch/queue/stop paints.
         if (ev.time === 0 || heard - ev.time < 1) ev.cb();
-      } else i++;
+      } else {
+        visualQueue[writeIdx++] = ev;
+      }
     }
+    visualQueue.length = writeIdx;
     if (visualQueue.length) visualRAF = requestAnimationFrame(pumpVisuals);
   }
   // Beat-synced events pass their transport time; immediate UI feedback
@@ -2210,7 +2211,14 @@ export function createAudio(song) {
   // buildGraph ran before the tempo reached this transport, so the live echo's
   // "8n" froze at Tone's 120 default (offline renders set bpm before building
   // and never had the bug). Pin it to the real grid here and on tempo changes.
-  const syncEcho = (bpm) => live.echo.delayTime.rampTo(30 / bpm, 0.1);
+  const syncEcho = (bpm) => {
+    try {
+      live.echo.delayTime.cancelScheduledValues(Tone.immediate());
+      live.echo.delayTime.value = 30 / bpm;
+    } catch {
+      live.echo.delayTime.value = 30 / bpm;
+    }
+  };
   syncEcho(song.tempo);
 
   function tickArrangement(time) {
@@ -2523,6 +2531,7 @@ export function createAudio(song) {
       try { live.sub.triggerRelease(at); } catch {}
       liveVoice.prev = null;
       parkContextSoon();
+      visualQueue.length = 0;
       for (const track of TRACK_KEYS) queuedTracks[track] = -1; // clear queues on stop
       queueEpoch += 1;
       scheduleVisual(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks(), queueEpoch }));

@@ -323,7 +323,7 @@ let redoBtn = null;
 const snapshot = () => structuredClone(song);
 function commitUndo(pre) {
   undoStack.push(pre);
-  if (undoStack.length > 60) undoStack.shift();
+  if (undoStack.length > 40) undoStack.shift();
   redoStack.length = 0;
   updateUndoButtons();
 }
@@ -350,11 +350,13 @@ function restoreSnap(s) {
 function undo() {
   if (!undoStack.length) return;
   redoStack.push(snapshot());
+  if (redoStack.length > 40) redoStack.shift();
   restoreSnap(undoStack.pop());
 }
 function redo() {
   if (!redoStack.length) return;
   undoStack.push(snapshot());
+  if (undoStack.length > 40) undoStack.shift();
   restoreSnap(redoStack.pop());
 }
 function updateUndoButtons() {
@@ -368,7 +370,17 @@ function updateUndoButtons() {
 const transport = document.getElementById("transport");
 const footer = document.getElementById("footer");
 let playBtn;
+let recBtn;
 let bpmEl;
+let viewBtn;
+let fileBtn;
+let grooveSlider;
+let grooveVal;
+let humanSlider;
+let humanVal;
+let keyBtnEl;
+let keyBtnName;
+let keyGlyphEl;
 const TEMPO_MIN = 40;
 const TEMPO_MAX = 220;
 
@@ -389,140 +401,146 @@ async function togglePlayback() {
 }
 
 function renderTransport() {
-  transport.innerHTML = "";
-  playBtn = el("div", {
-    class: "tbtn play" + (audio.playing ? " on" : ""),
-    text: audio.playing ? "⏹" : "▶",
-    onclick: togglePlayback,
-  });
-  const recBtn = el("div", {
-    class: "tbtn record" + (sessionRecord ? " on" : ""),
-    text: "●",
-    id: "rec-btn",
-    onclick: () => {
-      sessionRecord = !sessionRecord;
-      if (sessionRecord) pushUndo();
-      renderTransport();
-    },
-  });
-  bpmEl = el("div", { id: "bpm", role: "button", tabindex: "0", html: `${song.tempo}<small>BPM</small>` });
-  bindTempoControl(bpmEl);
-  undoBtn = el("div", { class: "tbtn undo", text: "↶", onclick: undo });
-  redoBtn = el("div", { class: "tbtn redo", text: "↷", onclick: redo });
-  const left = el("div", { class: "tleft" }, [recBtn, playBtn, undoBtn, redoBtn]);
-  const tempo = el("div", { class: "ttempo" }, [bpmEl]);
-  // View toggle + File button live in the header (always visible)
-  const viewBtn = el("div", {
-    class: "tbtn" + (view === "arrangement" ? " accent" : ""),
-    text: "View",
-    id: "view-toggle-btn",
-    onclick: () => setView(view === "session" ? "arrangement" : "session"),
-  });
-  const fileBtn = el("div", { class: "tbtn", text: "File", id: "file-btn", onclick: openExport });
-  const tright = el("div", { class: "tright" }, [viewBtn, fileBtn]);
-  transport.append(left, tempo, tright);
+  if (!transport.childElementCount) {
+    playBtn = el("div", {
+      class: "tbtn play" + (audio.playing ? " on" : ""),
+      text: audio.playing ? "⏹" : "▶",
+      onclick: togglePlayback,
+    });
+    recBtn = el("div", {
+      class: "tbtn record" + (sessionRecord ? " on" : ""),
+      text: "●",
+      id: "rec-btn",
+      onclick: () => {
+        sessionRecord = !sessionRecord;
+        if (sessionRecord) pushUndo();
+        renderTransport();
+      },
+    });
+    bpmEl = el("div", { id: "bpm", role: "button", tabindex: "0", html: `${song.tempo}<small>BPM</small>` });
+    bindTempoControl(bpmEl);
+    undoBtn = el("div", { class: "tbtn undo", text: "↶", onclick: undo });
+    redoBtn = el("div", { class: "tbtn redo", text: "↷", onclick: redo });
+    const left = el("div", { class: "tleft" }, [recBtn, playBtn, undoBtn, redoBtn]);
+    const tempo = el("div", { class: "ttempo" }, [bpmEl]);
+    // View toggle + File button live in the header (always visible)
+    viewBtn = el("div", {
+      class: "tbtn" + (view === "arrangement" ? " accent" : ""),
+      text: "View",
+      id: "view-toggle-btn",
+      onclick: () => setView(view === "session" ? "arrangement" : "session"),
+    });
+    fileBtn = el("div", { class: "tbtn", text: "File", id: "file-btn", onclick: openExport });
+    const tright = el("div", { class: "tright" }, [viewBtn, fileBtn]);
+    transport.append(left, tempo, tright);
+  } else {
+    if (playBtn) {
+      playBtn.className = "tbtn play" + (audio.playing ? " on" : "");
+      playBtn.textContent = audio.playing ? "⏹" : "▶";
+    }
+    if (recBtn) recBtn.className = "tbtn record" + (sessionRecord ? " on" : "");
+    if (bpmEl) bpmEl.innerHTML = `${song.tempo}<small>BPM</small>`;
+    if (viewBtn) viewBtn.className = "tbtn" + (view === "arrangement" ? " accent" : "");
+  }
   updateUndoButtons();
   renderFooter();
 }
 
 function renderFooter() {
   if (!footer) return;
-  footer.innerHTML = "";
-  const grooveVal = el("span", { class: "swval", text: Math.round(song.swing * 100) + "%" });
-  const grooveSlider = el("input", {
-    type: "range",
-    min: "0",
-    // 1.0 = offbeats a full third of a 16th late, the engine's designed
-    // ceiling (see audio's swingOffsetFor) and a true triplet feel. The old
-    // 0.6 cap made hard-swung references import straighter than they play.
-    max: "1",
-    step: "0.01",
-    value: String(song.swing),
-    class: "swingslider",
-  });
-  // Snapshot on the first real change, not on pointerdown: a tap that never
-  // moves the slider used to structuredClone the whole song into the undo
-  // stack for nothing (the bindTempoControl pattern).
-  let groovePre = null;
-  grooveSlider.addEventListener("pointerdown", () => {
-    groovePre = null;
-  });
-  // A gesture ends with change; the next one (keyboard steps included, which
-  // never fire pointerdown) snapshots fresh.
-  grooveSlider.addEventListener("change", () => {
-    groovePre = null;
-  });
-  grooveSlider.addEventListener("input", () => {
-    if (!groovePre) {
-      groovePre = snapshot();
-      markTouched();
-      commitUndo(groovePre);
-    }
-    song.swing = parseFloat(grooveSlider.value);
-    audio.setSwing(song.swing);
-    grooveVal.textContent = Math.round(song.swing * 100) + "%";
-  });
-  const groove = el("div", { class: "swingctl" }, [
-    el("span", { class: "swlabel", text: "GROOVE" }),
-    grooveSlider,
-    grooveVal,
-  ]);
-  // The humanizer: per-hit timing drift, a hand instead of a grid. Same
-  // snapshot-on-first-change undo discipline as the groove slider.
-  const humanVal = el("span", { class: "swval", text: Math.round((song.humanize || 0) * 100) + "%" });
-  const humanSlider = el("input", {
-    type: "range",
-    min: "0",
-    max: "1",
-    step: "0.01",
-    value: String(song.humanize || 0),
-    class: "swingslider humanslider",
-  });
-  let humanPre = null;
-  humanSlider.addEventListener("pointerdown", () => {
-    humanPre = null;
-  });
-  humanSlider.addEventListener("change", () => {
-    humanPre = null;
-  });
-  humanSlider.addEventListener("input", () => {
-    if (!humanPre) {
-      humanPre = snapshot();
-      markTouched();
-      commitUndo(humanPre);
-    }
-    song.humanize = parseFloat(humanSlider.value);
-    humanVal.textContent = Math.round(song.humanize * 100) + "%";
-  });
-  const human = el("div", { class: "swingctl" }, [
-    el("span", { class: "swlabel", text: "HUMAN" }),
-    humanSlider,
-    humanVal,
-  ]);
-  // The key control IS the circle: a live mini-wheel — the app's compass,
-  // sector and front door at a glance — beside the key's honest name.
-  const glyph = el("canvas", { class: "keyglyph" });
-  const keyBtn = el(
-    "div",
-    {
-      class: "tbtn keybtn",
-      id: "key-btn",
-      "data-sheet": "circle",
-      role: "button",
-      tabindex: "0",
-      onclick: openCircleSheet,
-    },
-    [glyph, el("span", { class: "keybtn-name", html: `${keyDisplayName(song.key, song.scale)}<small>${song.scale}</small>` })]
-  );
-  drawKeyGlyph(glyph);
-  const keyctl = el("div", { class: "keyctl" }, [keyBtn]);
-  // The dice sits with the song's musical identity: one tap rolls a whole new
-  // key + tempo + sounds + magic scene, same as a fresh load. Undo-safe.
-  const diceBtn = el("div", { class: "tbtn accent", text: "🎲", id: "dice-btn", title: "New song: random key, tempo, sounds", onclick: rerollSong });
-  const aboutBtn = el("div", { class: "tbtn", text: "?", id: "about-btn", title: "What is this?", "data-sheet": "about", onclick: openAboutSheet });
-  footer.append(
-    el("div", { class: "frow" }, [keyctl, diceBtn, aboutBtn, groove, human])
-  );
+  if (!footer.childElementCount) {
+    grooveVal = el("span", { class: "swval", text: Math.round(song.swing * 100) + "%" });
+    grooveSlider = el("input", {
+      type: "range",
+      min: "0",
+      max: "1",
+      step: "0.01",
+      value: String(song.swing),
+      class: "swingslider",
+    });
+    let groovePre = null;
+    grooveSlider.addEventListener("pointerdown", () => {
+      groovePre = null;
+    });
+    grooveSlider.addEventListener("change", () => {
+      groovePre = null;
+    });
+    grooveSlider.addEventListener("input", () => {
+      if (!groovePre) {
+        groovePre = snapshot();
+        markTouched();
+        commitUndo(groovePre);
+      }
+      song.swing = parseFloat(grooveSlider.value);
+      audio.setSwing(song.swing);
+      grooveVal.textContent = Math.round(song.swing * 100) + "%";
+    });
+    const groove = el("div", { class: "swingctl" }, [
+      el("span", { class: "swlabel", text: "GROOVE" }),
+      grooveSlider,
+      grooveVal,
+    ]);
+
+    humanVal = el("span", { class: "swval", text: Math.round((song.humanize || 0) * 100) + "%" });
+    humanSlider = el("input", {
+      type: "range",
+      min: "0",
+      max: "1",
+      step: "0.01",
+      value: String(song.humanize || 0),
+      class: "swingslider humanslider",
+    });
+    let humanPre = null;
+    humanSlider.addEventListener("pointerdown", () => {
+      humanPre = null;
+    });
+    humanSlider.addEventListener("change", () => {
+      humanPre = null;
+    });
+    humanSlider.addEventListener("input", () => {
+      if (!humanPre) {
+        humanPre = snapshot();
+        markTouched();
+        commitUndo(humanPre);
+      }
+      song.humanize = parseFloat(humanSlider.value);
+      humanVal.textContent = Math.round(song.humanize * 100) + "%";
+    });
+    const human = el("div", { class: "swingctl" }, [
+      el("span", { class: "swlabel", text: "HUMAN" }),
+      humanSlider,
+      humanVal,
+    ]);
+
+    keyGlyphEl = el("canvas", { class: "keyglyph" });
+    keyBtnName = el("span", { class: "keybtn-name", html: `${keyDisplayName(song.key, song.scale)}<small>${song.scale}</small>` });
+    keyBtnEl = el(
+      "div",
+      {
+        class: "tbtn keybtn",
+        id: "key-btn",
+        "data-sheet": "circle",
+        role: "button",
+        tabindex: "0",
+        onclick: openCircleSheet,
+      },
+      [keyGlyphEl, keyBtnName]
+    );
+    drawKeyGlyph(keyGlyphEl);
+    const keyctl = el("div", { class: "keyctl" }, [keyBtnEl]);
+    const diceBtn = el("div", { class: "tbtn accent", text: "🎲", id: "dice-btn", title: "New song: random key, tempo, sounds", onclick: rerollSong });
+    const aboutBtn = el("div", { class: "tbtn", text: "?", id: "about-btn", title: "What is this?", "data-sheet": "about", onclick: openAboutSheet });
+    footer.append(
+      el("div", { class: "frow" }, [keyctl, diceBtn, aboutBtn, groove, human])
+    );
+  } else {
+    if (grooveSlider) grooveSlider.value = String(song.swing);
+    if (grooveVal) grooveVal.textContent = Math.round(song.swing * 100) + "%";
+    if (humanSlider) humanSlider.value = String(song.humanize || 0);
+    if (humanVal) humanVal.textContent = Math.round((song.humanize || 0) * 100) + "%";
+    if (keyBtnName) keyBtnName.innerHTML = `${keyDisplayName(song.key, song.scale)}<small>${song.scale}</small>`;
+    if (keyGlyphEl) drawKeyGlyph(keyGlyphEl);
+  }
 }
 
 // ---------------------------------------------------------------------------
