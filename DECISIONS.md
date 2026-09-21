@@ -636,11 +636,37 @@ playing through the new instruments in the new space. That is the
 headline gesture with a half-working undo, and it fails
 can't-make-it-wrong on the exact stroke the whole cold open is built
 around: the reason it's safe to hit 🎲 is that ↶ is right there. A
-snapshot is now `{ song, mix, devices }`. The master bus stays out, per
-D22 — it's app character, not song state, and it doesn't ride project
-files either. Ordinary edits pay nothing extra: `restoreSnap` diffs each
-engine tree and only re-pushes a track that actually moved, so undoing a
-note is the same work it always was.
+snapshot is now `{ song, mix, devices, master }`. Ordinary edits pay
+nothing extra: `restoreSnap` diffs each engine tree and only re-pushes a
+track that actually moved, so undoing a note is the same work it always
+was.
+
+The master bus is in it, which narrows D22 rather than contradicting it.
+D22 keeps the master out of project FILES — it is app character, so every
+song, fresh or loaded, plays through the same compiled chain — and that is
+a statement about persistence, not about taking back a move you just made.
+Its four knobs sit in the same mixer sheet as strips that are undoable, so
+leaving it out would be the one exception nobody could predict.
+
+Undo has to be able to RECORD what it can revert, or widening it is a
+regression. Before this, no mixer or device edit pushed an undo point at
+all, which was consistent while snapshots were song-only and became a trap
+the moment they weren't: move a fader, undo an older note edit, and the
+fader goes back with it. So every knob in the app is now an undo point,
+coalesced to one per drag — snapshot on pointerdown, commit on pointerup
+only if the value moved, the shape the groove/human sliders and the drum
+drag already used. Mute, solo, the resets, the morph pad, the colour chips,
+the bank and source switches, the per-track sound dice and the one-shot
+pins push one each; the two resets that touch four strips push one for the
+sweep, because four strips reset by one tap is one thing that happened.
+
+The same pass moved `markTouched` from `pushUndo` down into `commitUndo`.
+Nine gesture-coalesced commits — the drum drag, the piano-roll drags, and
+the new knob/fader/pad ones — were recording real edits that the
+service-worker swap still read as an untouched session, safe to reload out
+from under the player. The groove and human sliders had each patched around
+it by calling `markTouched` by hand; now every undo point marks the session,
+which is what an undo point means.
 
 Why it was easy to get wrong is the second half. The mixer's state
 existed twice — `mixState` in main.js, `channelState` in audio.js — with

@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
+import { startPreview } from "./preview.mjs";
 
 const cwd = process.cwd();
 const chrome = process.env.CHROME_BIN || "/usr/bin/google-chrome";
@@ -18,37 +19,6 @@ const circleShotPath = path.join(outDir, "smoke-circle.png");
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function startPreview() {
-  const child = spawn("npm", ["run", "preview", "--", "--host", host, "--port", String(port), "--strictPort"], {
-    cwd,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let output = "";
-  const append = (chunk) => {
-    output += chunk.toString();
-  };
-  child.stdout.on("data", append);
-  child.stderr.on("data", append);
-  return {
-    child,
-    async ready() {
-      const started = Date.now();
-      while (Date.now() - started < 8000) {
-        if (child.exitCode !== null) throw new Error(`preview exited early\n${output}`);
-        if (output.includes("Local:") || output.includes(url)) return;
-        await wait(100);
-      }
-      throw new Error(`preview did not become ready\n${output}`);
-    },
-    async stop() {
-      if (child.exitCode !== null) return;
-      child.kill("SIGTERM");
-      await wait(200);
-      if (child.exitCode === null) child.kill("SIGKILL");
-    },
-  };
 }
 
 async function longPress(page, selector, ms = 650) {
@@ -113,7 +83,7 @@ function assertState(ok, msg) {
 }
 
 await mkdir(outDir, { recursive: true });
-const preview = process.env.SMOKE_URL ? null : startPreview();
+const preview = process.env.SMOKE_URL ? null : startPreview({ host, port, cwd });
 let browser;
 
 try {
@@ -914,6 +884,41 @@ try {
   const scenesAfterUndo = await page.evaluate(() => window.__noodles.song.scenes.length);
   assertState(scenesAfterUndo === scenesBeforeDice, `undo did not restore the pre-dice song (${scenesAfterUndo} vs ${scenesBeforeDice})`);
 
+  // The roll is undoable WHOLE (D30): it writes the song, four device patches
+  // and the sends, so one tap of ↶ has to put all three back. A song-only undo
+  // handed back the old song playing through the new instruments, which is the
+  // regression this guards.
+  const engineState = () => {
+    const { audio } = window.__noodles;
+    const keys = ["harmony", "drums", "bass", "melody"];
+    return JSON.stringify({
+      mix: keys.map((t) => audio.mix(t)),
+      devices: keys.map((t) => audio.patch(t)),
+      master: audio.master(),
+    });
+  };
+  const beforeRoll = await page.evaluate(engineState);
+  await page.evaluate(() => document.querySelector("#dice-btn").click());
+  const afterRoll = await page.evaluate(engineState);
+  assertState(afterRoll !== beforeRoll, "dice did not move the engine state (devices/sends) at all");
+  await page.evaluate(() => document.querySelector(".tbtn.undo").click());
+  const afterRollUndo = await page.evaluate(engineState);
+  assertState(afterRollUndo === beforeRoll, "undo left the rolled sounds/sends in place — the roll is only half-undoable again");
+
+  // A mixer move is its own undo point, and it survives an unrelated undo.
+  // Before the mixer joined the snapshot it could be reverted but never
+  // recorded, so an older undo silently took your fader with it.
+  const mutePath = await page.evaluate(() => {
+    const btn = document.querySelector('[data-track-toggle="mute"][data-track="bass"]');
+    const was = window.__noodles.audio.mix("bass").mute;
+    btn?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+    return { was, now: window.__noodles.audio.mix("bass").mute };
+  });
+  assertState(mutePath.now === !mutePath.was, "the mute toggle did not reach the engine's single mixer copy");
+  await page.evaluate(() => document.querySelector(".tbtn.undo").click());
+  const muteAfterUndo = await page.evaluate(() => window.__noodles.audio.mix("bass").mute);
+  assertState(muteAfterUndo === mutePath.was, "a mute is not its own undo point — undo did not take it back");
+
   // Roll a handful more and hold the register invariant: the dice never deals
   // a driveless sine bass in octave 1 (inaudible on real speakers).
   for (let i = 0; i < 6; i++) {
@@ -926,6 +931,22 @@ try {
     assertState(roll.count > 0, `dice roll ${i} produced an empty bassline`);
     assertState(roll.preset !== "deep" || roll.minMidi >= 36, `dice dealt deep bass below octave 2 (min midi ${roll.minMidi})`);
   }
+
+  // Voice pools must not grow without bound across a session's rolls. The
+  // pools are capped, so the guard is on IDLE surplus, which is what a trim
+  // can reclaim and what the high-water sweep exists to hold down: after a
+  // burst of rolls the pool may not be carrying a whole extra working set of
+  // voices nobody is playing. (Pre-fix this ran away — 23 voices at boot to
+  // 47 after eight rolls, ~16 of them idle.)
+  const poolAfterRolls = await page.evaluate(() => window.__noodles.audio.voiceStats());
+  assertState(
+    poolAfterRolls.voices > 0 && poolAfterRolls.voices <= poolAfterRolls.caps,
+    `voice pools past their caps: ${JSON.stringify(poolAfterRolls)}`
+  );
+  assertState(
+    poolAfterRolls.idle <= Math.max(24, poolAfterRolls.active),
+    `voice pools carrying more idle voices than the song plays — the trim is not reclaiming: ${JSON.stringify(poolAfterRolls)}`
+  );
 
   assertState(errors.length === 0, `runtime errors:\n${errors.join("\n")}`);
   console.log(`smoke ok: ${propsShotPath}`);

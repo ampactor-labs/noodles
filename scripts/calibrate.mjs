@@ -29,6 +29,7 @@
 
 import { spawn } from "node:child_process";
 import puppeteer from "puppeteer-core";
+import { startPreview } from "./preview.mjs";
 
 const chrome = process.env.CHROME_BIN || "/usr/bin/google-chrome";
 const host = process.env.SMOKE_HOST || "127.0.0.1";
@@ -39,34 +40,7 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function startPreview() {
-  const child = spawn("npm", ["run", "preview", "--", "--host", host, "--port", String(port), "--strictPort"], {
-    cwd: process.cwd(),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let output = "";
-  child.stdout.on("data", (c) => (output += c));
-  child.stderr.on("data", (c) => (output += c));
-  return {
-    async ready() {
-      const started = Date.now();
-      while (Date.now() - started < 8000) {
-        if (child.exitCode !== null) throw new Error(`preview exited early\n${output}`);
-        if (output.includes("Local:")) return;
-        await wait(100);
-      }
-      throw new Error(`preview did not become ready\n${output}`);
-    },
-    async stop() {
-      if (child.exitCode !== null) return;
-      child.kill("SIGTERM");
-      await wait(200);
-      if (child.exitCode === null) child.kill("SIGKILL");
-    },
-  };
-}
-
-const preview = startPreview();
+const preview = startPreview({ host, port });
 let browser;
 try {
   await preview.ready();

@@ -2147,15 +2147,21 @@ export function createAudio(song) {
   // The six writes the mixer owns. Split out of the public setters so setMix()
   // — the merge that vibe rolls, project loads and undo all go through — can
   // reach them without going back through the API object.
-  const applyVol = (track, db) => {
+  // Clamping lives here, not in the callers: setMix validated its input while
+  // the direct setters trusted theirs, so the fader was the only thing keeping
+  // an out-of-range volume out of the state a project file gets written from.
+  const applyVol = (track, raw) => {
+    const db = clampTrackDb(raw);
     channelState[track].vol = db;
     live.channels[track].volume.value = db;
   };
-  const applyPan = (track, p) => {
+  const applyPan = (track, raw) => {
+    const p = Math.max(-1, Math.min(1, Number(raw) || 0));
     channelState[track].pan = p;
     live.channels[track].pan.value = p;
   };
-  const applySendOf = (track, kind, db) => {
+  const applySendOf = (track, kind, raw) => {
+    const db = clampSendDb(raw);
     channelState[track][kind] = db;
     if (motionArmed[track]) motionDirty[track].add(kind);
     if (sendGain(db) > 0) wakeReturn(kind); // reconnect BEFORE the gain opens
@@ -2167,10 +2173,10 @@ export function createAudio(song) {
   function mergeMix(track, partial = {}) {
     const st = channelState[track];
     if (!st) return null;
-    if ("vol" in partial) applyVol(track, clampTrackDb(partial.vol));
-    if ("pan" in partial) applyPan(track, Math.max(-1, Math.min(1, Number(partial.pan) || 0)));
-    if ("verb" in partial) applySendOf(track, "verb", clampSendDb(partial.verb));
-    if ("echo" in partial) applySendOf(track, "echo", clampSendDb(partial.echo));
+    if ("vol" in partial) applyVol(track, partial.vol);
+    if ("pan" in partial) applyPan(track, partial.pan);
+    if ("verb" in partial) applySendOf(track, "verb", partial.verb);
+    if ("echo" in partial) applySendOf(track, "echo", partial.echo);
     if ("mute" in partial) st.mute = !!partial.mute;
     if ("solo" in partial) st.solo = !!partial.solo;
     if ("mute" in partial || "solo" in partial) applyTrackGates();
@@ -2604,19 +2610,31 @@ export function createAudio(song) {
     //
     // `atBoundary` is the exception the dice roll needs. The pools' high-water
     // mark is per SESSION while any one song's working set is per SONG, so
-    // without a trim each roll inherits every previous song's peak — and a
-    // burst of rolls looking for a song is the common gesture, not a rare one.
-    // Measured on the built app, playing, rolling every 2.5 s and settling
-    // (.tmp/dbg-roll-pool-ab.mjs): from a 346-source baseline, eight rolls
-    // reached 641 and sixteen reached 670 and stayed, every one of those
-    // oscillators and forever-running param ConstantSources billed per sample
-    // on the phone's audio thread. With the boundary trim the same burst grows
-    // +149 instead of +324, and further boundary passes reclaim nothing — what
-    // is left is the current song's working set, not the session's residue.
-    // The refill objection doesn't apply here because the pool being trimmed
-    // belongs to a song that no longer exists — the new one builds its own
-    // working set either way. Keep 2 rather than 1 while playing so the bar
-    // in progress doesn't rebuild from empty.
+    // without a trim each roll inherits the peak of every song before it — and
+    // a burst of rolls looking for a song is the common gesture, not a rare
+    // one. The refill objection doesn't apply at a roll: the pool being
+    // trimmed belongs to a song that no longer exists, and the new one builds
+    // its own working set either way.
+    //
+    // Measured on the built app, playing, rolling every 2.5 s and settling,
+    // three runs each (.tmp/dbg-roll-pool-ab.mjs). After sixteen rolls the
+    // live source count settles at 665-680 without this and 559-587 with it:
+    // about a hundred fewer running oscillators and forever-running param
+    // ConstantSources, every one of them billed per sample on the phone's
+    // audio thread. Growth over the session's own baseline falls from ~+280
+    // to ~+195. (Single runs of this vary by ±50 because the dice deals
+    // songs of different density — the settled ABSOLUTE count is the stable
+    // figure, and an earlier one-run-each comparison here read +324 -> +149,
+    // which was luck dressed as precision.)
+    //
+    // The floor is the same 1 per pool it is at rest. This started at 2 for
+    // the bar in progress, which was wrong by inspection once the pools were
+    // counted (.tmp/dbg-pool-occupancy.mjs): a settled song plays at ~23
+    // voices with ~21 of them claimed, so 2 per pool allows 24 idle pool-wide
+    // — more than an entire working set, and the trim it was supposed to
+    // arm became a no-op. Dropping it to 1 is not separable from run noise in
+    // the source count, but a warm floor larger than everything the song plays
+    // is not a floor.
     //
     // Safe mid-playback by the same invariant stealDontDrop rests on: only
     // _availableVoices is touched, and the _makeVoiceAvailable guard there
@@ -2627,6 +2645,25 @@ export function createAudio(song) {
       if (playing && !atBoundary) return;
       const keep = playing ? 2 : 1;
       for (const t of MELODIC_TRACKS) for (const layer of live.layers[t]) trimVoicePool(layer, keep);
+    },
+    // The trim's scoreboard, across all twelve layer pools: how many voices
+    // exist, how many are claimed this instant, how many sit idle. `idle` is
+    // what a trim can reclaim, so idle staying near zero after a burst of
+    // rolls is the proof that what's left is the song's working set and not
+    // the session's residue — a claim worth being able to check rather than
+    // infer. Guarded like the rest of the pool code: if Tone's internals move,
+    // this reports zeros instead of throwing.
+    voiceStats() {
+      const stats = { voices: 0, active: 0, idle: 0, caps: 0 };
+      for (const t of MELODIC_TRACKS) {
+        for (const layer of live.layers[t]) {
+          stats.voices += layer._voices?.length || 0;
+          stats.active += layer._activeVoices?.length || 0;
+          stats.idle += layer._availableVoices?.length || 0;
+          stats.caps += layer.maxPolyphony || 0;
+        }
+      }
+      return stats;
     },
     get playing() {
       return playing;

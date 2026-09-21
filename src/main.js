@@ -322,8 +322,13 @@ let selClip = null; // { track, idx }
 // 5-10 KB, the mixer four strips of six numbers, the devices four patches, so
 // forty of them is well under a megabyte.
 //
-// The master bus stays out, deliberately — D22 says it is app character rather
-// than song state, and it doesn't ride project files either.
+// The master bus is in too. D22 keeps it out of project FILES — it is app
+// character, not song state, so every song plays through the same compiled
+// chain — but that is a statement about persistence, not about taking back a
+// move you just made. Its four knobs sit in the same mixer sheet as strips
+// that are undoable, so leaving it out would make the one exception nobody
+// can predict; and once every knob in the app is an undo point, a master
+// tweak that snapshots nothing would be an undo press that does nothing.
 const undoStack = [];
 const redoStack = [];
 let undoBtn = null;
@@ -334,15 +339,23 @@ const snapshot = () => ({
   // structuredClone, not the shallow copy `patch` hands back: the drums patch
   // carries a `pins` object, and a snapshot must not share it with the live one.
   devices: Object.fromEntries(TRACKS.map((t) => [t.key, structuredClone(audio.patch(t.key))])),
+  master: audio.master(),
 });
 function commitUndo(pre) {
+  // Every undo point is, by definition, work worth not losing — so the touch
+  // flag belongs here rather than in pushUndo. It used to sit one level up,
+  // which meant the nine gesture-coalesced commits (a drum drag, a piano-roll
+  // drag, any knob, the fader, the morph pad) recorded an edit the
+  // service-worker swap still read as an untouched session safe to reload out
+  // from under. The groove and human sliders had each patched around it by
+  // calling markTouched themselves; now nobody has to remember.
+  markTouched();
   undoStack.push(pre);
   if (undoStack.length > 40) undoStack.shift();
   redoStack.length = 0;
   updateUndoButtons();
 }
 function pushUndo() {
-  markTouched(); // an edit (a dice roll included) is work worth not losing
   commitUndo(snapshot());
 }
 function refreshAll() {
@@ -383,6 +396,7 @@ function restoreSnap(s) {
     if (mix && !sameEngineState(mix, audio.mix(t.key))) audio.setMix(t.key, mix);
     if (dev && !sameEngineState(dev, audio.patch(t.key))) audio.setPatch(t.key, structuredClone(dev));
   }
+  if (s.master && !sameEngineState(s.master, audio.master())) audio.setMaster(s.master);
   selClip = null;
   refreshAll();
 }
@@ -507,7 +521,6 @@ function renderFooter() {
     grooveSlider.addEventListener("input", () => {
       if (!groovePre) {
         groovePre = snapshot();
-        markTouched();
         commitUndo(groovePre);
       }
       song.swing = parseFloat(grooveSlider.value);
@@ -539,7 +552,6 @@ function renderFooter() {
     humanSlider.addEventListener("input", () => {
       if (!humanPre) {
         humanPre = snapshot();
-        markTouched();
         commitUndo(humanPre);
       }
       song.humanize = parseFloat(humanSlider.value);
@@ -1523,6 +1535,7 @@ function openTempoEditor() {
 // it back, sounds and sends included: the snapshot pushed here carries the
 // mixer and the device patches alongside the song (D30), so undoing a roll no
 // longer hands back the old song playing through the new instruments.
+const trimTimers = [];
 function rerollSong() {
   pushUndo();
   const fresh = makeSong();
@@ -1548,7 +1561,8 @@ function rerollSong() {
   // at 60. Two passes, because the pass that takes the voices the new song
   // hasn't claimed yet can't also take the pad tails that are still ringing.
   const barMs = 240000 / song.tempo;
-  for (const bars of [1, 2.5]) setTimeout(() => audio.trimVoices?.({ atBoundary: true }), bars * barMs);
+  for (const t of trimTimers.splice(0)) clearTimeout(t); // a burst of rolls owns one pair, not one per roll
+  for (const bars of [1, 2.5]) trimTimers.push(setTimeout(() => audio.trimVoices?.({ atBoundary: true }), bars * barMs));
 }
 
 // Change the global key/scale; harmony follows automatically (it's degree-based),
@@ -2258,6 +2272,13 @@ let mixerRAF = 0;
 // `audio.patch(track)` — no second tree to keep in step.
 const trackMix = (track) => audio.mix(track) || { ...MIX_DEFAULTS };
 
+// Every knob in the app is an undo point, coalesced to one per drag: the
+// snapshot is taken on pointerdown and committed on pointerup only if the
+// value actually moved, the same shape the groove/human sliders and the drum
+// drag already use. Without it the mixer and the device pads were writes that
+// undo could REVERT (they ride the snapshot since D30) but could never
+// CREATE — so moving a fader and then undoing an older note edit quietly took
+// the fader with it.
 function knob(label, min, max, step, val, onChange, format = (v) => v) {
   const container = el("div", { class: "knob-container" });
   const lbl = el("div", { class: "knob-label", text: label });
@@ -2284,7 +2305,8 @@ function knob(label, min, max, step, val, onChange, format = (v) => v) {
     e.preventDefault();
     startY = e.clientY;
     startVal = currentVal;
-    
+    const pre = snapshot();
+
     const move = (ev) => {
       const deltaY = startY - ev.clientY;
       const range = max - min;
@@ -2301,12 +2323,13 @@ function knob(label, min, max, step, val, onChange, format = (v) => v) {
       document.removeEventListener("pointermove", move);
       document.removeEventListener("pointerup", up);
       document.removeEventListener("pointercancel", up);
+      if (Math.abs(currentVal - startVal) > 1e-5) commitUndo(pre);
     };
     document.addEventListener("pointermove", move);
     document.addEventListener("pointerup", up);
     document.addEventListener("pointercancel", up);
   });
-  
+
   return container;
 }
 
@@ -2325,13 +2348,17 @@ function applyVibeMix(vibe) {
   }
 }
 
-function resetTrackMix(track, { sendsOnly = false } = {}) {
+function resetTrackMix(track, { sendsOnly = false, undo = true } = {}) {
+  if (undo) pushUndo();
   audio.resetMix(track, { sendsOnly });
   updateTrackMixUI();
 }
 
+// One undo point for the whole sweep — four strips reset by one tap is one
+// thing that happened, not four.
 function resetAllMix({ sendsOnly = false } = {}) {
-  for (const t of TRACKS) resetTrackMix(t.key, { sendsOnly });
+  pushUndo();
+  for (const t of TRACKS) resetTrackMix(t.key, { sendsOnly, undo: false });
 }
 
 // Effective audibility (own mute, or un-soloed while something else is soloed)
@@ -2358,12 +2385,14 @@ function updateTrackMixUI() {
 function setTrackMute(track, on) {
   const ms = audio.mix(track);
   if (!ms || ms.mute === on) return;
+  pushUndo();
   audio.setMute(track, on);
   updateTrackMixUI();
 }
 function setTrackSolo(track, on) {
   const ms = audio.mix(track);
   if (!ms || ms.solo === on) return;
+  pushUndo();
   audio.setSolo(track, on);
   updateTrackMixUI();
 }
@@ -2557,6 +2586,7 @@ function openMixer(focusTrack = null) {
       e.preventDefault();
       const startY = e.clientY;
       const startVol = trackMix(k).vol;
+      const pre = snapshot(); // one undo per fader move, committed on release
       const range = TRACK_VOLUME_MAX_DB - TRACK_VOLUME_MIN_DB;
       const height = volMeter.getBoundingClientRect().height || 1;
       capturePointer(volMeter, e.pointerId);
@@ -2571,6 +2601,7 @@ function openMixer(focusTrack = null) {
         volMeter.removeEventListener("pointermove", move);
         volMeter.removeEventListener("pointerup", up);
         volMeter.removeEventListener("pointercancel", up);
+        if (trackMix(k).vol !== startVol) commitUndo(pre);
       };
       volMeter.addEventListener("pointermove", move);
       volMeter.addEventListener("pointerup", up);
@@ -2673,6 +2704,7 @@ function openMasterSheet() {
         text: "Reset",
         "data-action": "master-reset",
         onclick: () => {
+          pushUndo();
           audio.setMaster({ ...MASTER_DEFAULTS });
           openMasterSheet();
         },
@@ -2710,6 +2742,7 @@ function openSoundSheet(track) {
     text: "🎲",
     "data-action": `sound-dice-${track}`,
     onclick: () => {
+      pushUndo();
       audio.setPatch(track, track === "bass" ? rolledBassPatch() : rolledPatch(track));
       openSoundSheet(track);
     },
@@ -2730,6 +2763,7 @@ function openSoundSheet(track) {
     for (const bank of DRUM_BANKS) {
       bankChips.appendChild(
         choice(bank === "sample" ? "samples" : "synth", patch.bank === bank, () => {
+          if (audio.patch(track).bank !== bank) pushUndo();
           audio.setPatch(track, { bank });
           openSoundSheet(track);
         }, { "data-action": `bank-${bank}` })
@@ -2744,10 +2778,12 @@ function openSoundSheet(track) {
     const info = audio.chopInfo();
     const srcChips = el("div", { class: "choicegrid two" }, [
       choice("synth", patch.source !== "chops", () => {
+        if (audio.patch(track).source !== "synth") pushUndo();
         audio.setPatch(track, { source: "synth" });
         openSoundSheet(track);
       }, { "data-action": "melody-src-synth" }),
       choice("chops", patch.source === "chops", () => {
+        if (audio.patch(track).source !== "chops") pushUndo();
         audio.setPatch(track, { source: "chops" });
         openSoundSheet(track);
       }, { "data-action": "melody-src-chops" }),
@@ -2809,6 +2845,8 @@ function openSoundSheet(track) {
     xy.addEventListener("pointerdown", async (e) => {
       e.preventDefault();
       await ensureStarted();
+      const pre = snapshot(); // the whole ride across the pad is one undo
+      const before = audio.patch(track);
       const rect = xy.getBoundingClientRect();
       const set = (ev) => {
         const x = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
@@ -2822,6 +2860,8 @@ function openSoundSheet(track) {
         xy.removeEventListener("pointermove", move);
         xy.removeEventListener("pointerup", up);
         xy.removeEventListener("pointercancel", up);
+        const now = audio.patch(track);
+        if (now.x !== before.x || now.y !== before.y) commitUndo(pre);
       };
       xy.addEventListener("pointermove", move);
       xy.addEventListener("pointerup", up);
@@ -2835,6 +2875,7 @@ function openSoundSheet(track) {
   const chipEls = {};
   for (const c of colorNamesFor(track)) {
     chipEls[c] = choice(c, patch.color === c, () => {
+      if (audio.patch(track).color !== c) pushUndo();
       const next = audio.setPatch(track, { color: c });
       for (const [name, elc] of Object.entries(chipEls)) elc.classList.toggle("on", name === next.color);
     }, { "data-action": `color-${c}` });
@@ -2932,6 +2973,7 @@ function openDrumSamplePicker(voice) {
   const current = patch.pins?.[voice] || null;
 
   const setPin = async (pin) => {
+    if ((audio.patch("drums").pins?.[voice] || null) !== pin) pushUndo();
     const pins = { ...audio.patch("drums").pins };
     if (pin) pins[voice] = pin;
     else delete pins[voice];

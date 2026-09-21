@@ -199,12 +199,19 @@ every frame or two instead of sixty times a second; **boundary voice trim**: a l
 high-water mark is per SESSION while any one song's working set is per SONG, so every reroll
 used to inherit the peak of every song before it — the reclaim `rerollSong` scheduled had
 been a no-op mid-jam all along, because `trimVoices` declines while playing and the dice is
-pressed while playing. Rolling every 2.5 s from a 346-source baseline, live audio sources
-reached 641 after eight rolls and 670 after sixteen and stayed there (nearly double, every
-one of them an oscillator or a forever-running param ConstantSource billed per sample); with
-the boundary form the same burst grows +149 instead of +324, and further passes reclaim
-nothing, so what's left is the current song's working set rather than the session's residue
-(.tmp/dbg-roll-pool-ab.mjs). Sound-neutral only, per the standing
+pressed while playing. Rolling every 2.5 s and settling, three runs each
+(`.tmp/dbg-roll-pool-ab.mjs`): after sixteen rolls the live source count settled at 665-680
+without the trim and 559-587 with it — about a hundred fewer running oscillators and
+forever-running param ConstantSources, each billed per sample on the audio thread — and
+growth over the session's own baseline fell from ~+280 to ~+195. The settled absolute count
+is the figure to quote; single runs swing ±50 because the dice deals songs of very different
+density, and a one-run-each comparison first read this as +324 → +149, which was luck
+dressed as precision. Pool occupancy (`.tmp/dbg-pool-occupancy.mjs`, via `audio.voiceStats()`)
+is the diagnostic underneath: a settled song plays ~23 voices with ~21 claimed, so idle
+staying near that is the proof the remainder is working set and not residue. A high-water
+sweep that trimmed to `peak(8 bars) + 1` while playing was built and measured on top of this
+and reclaimed nothing further (38 voices / 551 sources with it, 38 / 553 without), so it was
+removed rather than kept — the surplus is made at the boundary, not continuously. Sound-neutral only, per the standing
 rule: no quality or capability trades.
 
 The 2026-07-28 ultra-audit went after the same complaint on the feature-heavy

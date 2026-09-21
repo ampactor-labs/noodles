@@ -221,11 +221,14 @@ grid; the Arrangement timeline (bar ruler, track lanes, clips, playhead, loop br
 bottom-sheet editors (chords / drum rack / piano roll — the piano roll has note length,
 a velocity lane, and one-tap Transforms: Arp/Oct/Humanize/Random/Clear); and the mixer sheet
 (faders/pan/send/meters + kit picker + synth cutoff/decay). Undo/redo is **whole-session
-snapshots** — `{ song, mix, devices }`, not the song alone, so one ↶ puts a whole dice roll
-back, sounds and sends included (D30; the master bus stays out per D22). `pushUndo` before an
-edit; drag handlers snapshot on pointerdown and commit only if something changed; `restoreSnap`
-diffs the two engine trees and only re-pushes a track that actually moved, so undoing a note
-costs what it always did. `refreshAll()` re-renders everything after
+snapshots** — `{ song, mix, devices, master }`, not the song alone, so one ↶ puts a whole dice
+roll back, sounds and sends included (D30). **Every knob is an undo point**, coalesced to one
+per drag by `knob()` itself (snapshot on pointerdown, commit on pointerup only if the value
+moved); mute/solo, the resets, the morph pad, colour chips, bank/source switches, the
+per-track sound dice and the one-shot pins push one each. `restoreSnap` diffs the engine
+trees and only re-pushes a track that actually moved, so undoing a note costs what it always
+did, and `commitUndo` — not `pushUndo` — is what marks the session touched, so a
+gesture-only session is never mistaken for an untouched one. `refreshAll()` re-renders everything after
 a key/scale change or an undo (and re-applies `setScaleContext`).
 
 **`index.html`** — the dark Ableton-style CSS and the shell: `#transport`, `#session`,
@@ -317,7 +320,10 @@ Plus tier-2 performance work listed in `ROADMAP.md` (diff-based cell repaints, p
 - **Modern-browser features in use:** `structuredClone`, CSS `color-mix()`, `esnext` build
   target. Fine for the target phones; don't add polyfills.
 - **Two gates before claiming anything works:** `npm run smoke` (headless Chrome drives the
-  core flow of launch, editors, record, export, and dice, and fails on any page error) and,
+  core flow of launch, editors, record, export, and dice, and fails on any page error; it
+  also holds the D30 undo contract — a roll must be undoable whole, and a mixer move must be
+  its own undo point — and asserts the voice pools aren't carrying more idle voices than the
+  song plays) and,
   if you touched the audio chain or presets, `npm run calibrate` (renders every preset
   through the real graph and prints RMS/peak tables; read the stem spreads against the master
   row, which stays ~1 dB). A green `npm run build` proves nothing about runtime.
@@ -331,6 +337,13 @@ Plus tier-2 performance work listed in `ROADMAP.md` (diff-based cell repaints, p
 - **`window.__noodles`** (`{ song, audio, applyProject }`) and **`window.__noodlesGraph`**
   (`buildGraph` itself, so the audit measures the real chain) back the headless harnesses.
   Not a public API, but keep them working; smoke, calibrate, and audit depend on them.
+  `audio.voiceStats()` is the pool scoreboard the perf probes and smoke read.
+- **All three harnesses boot through `scripts/preview.mjs`** — don't re-copy `startPreview`,
+  which is how the same teardown bug came to live in three files at once. `npm run preview`
+  is a shell that spawns vite as a grandchild, so the child is spawned `detached` and stop()
+  signals the whole process group; without that the harnesses hung after their last
+  assertion (the grandchild held the inherited stdout pipe open, so Node's event loop never
+  drained) and left an orphaned server per run holding its port.
 
 ## Stale docs — read for philosophy, not for what to build
 
