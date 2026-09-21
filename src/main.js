@@ -40,7 +40,7 @@ import {
   stationOfPc,
   relMajorPc,
 } from "./model.js";
-import { createAudio, KIT_NAMES, SAMPLE_KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, colorNamesFor, dominantCorner, DRUM_BANKS, drumCornerNames, MASTER_DEFAULTS } from "./audio.js";
+import { createAudio, KIT_NAMES, SAMPLE_KIT_NAMES, HARMONY_PRESET_NAMES, BASS_PRESET_NAMES, MELODY_PRESET_NAMES, CORNERS, colorNamesFor, dominantCorner, DRUM_BANKS, drumCornerNames, MASTER_DEFAULTS, MIX_DEFAULTS, TRACK_VOLUME_MIN_DB, TRACK_VOLUME_MAX_DB, clampTrackDb } from "./audio.js";
 import { createCircleView } from "./circle.js";
 
 // Pitch range shown in the piano roll, per track.
@@ -84,12 +84,8 @@ const TRACKS = [
   { key: "melody", name: "Melody", color: "#7bc86c" },
 ];
 const trackColor = (k) => TRACKS.find((t) => t.key === k).color;
-const DEFAULT_TRACK_VOLUME_DB = -6;
 const METER_MIN_DB = -60;
 const METER_MAX_DB = 0;
-const TRACK_VOLUME_MIN_DB = -36;
-const TRACK_VOLUME_MAX_DB = 0;
-const clampTrackDb = (db) => Math.max(TRACK_VOLUME_MIN_DB, Math.min(TRACK_VOLUME_MAX_DB, Math.round(db)));
 const formatDb = (db) => `${db > 0 ? "+" : ""}${db} dB`;
 const meterLevel = (db) => {
   if (!Number.isFinite(db)) return 0;
@@ -315,12 +311,30 @@ let arrFollowResumeAt = 0; // brief hold-off after a manual scroll, so follow do
 let arrLastFollowLeft = -1; // scrollLeft follow last set, to tell its own scroll from the user's
 let selClip = null; // { track, idx }
 
-// --- Undo / redo (whole-song snapshots; simple and covers every edit) ---
+// --- Undo / redo (whole-session snapshots; simple and covers every edit) ---
+//
+// A snapshot is song + mixer + devices, not song alone. The dice is why: one
+// 🎲 rewrites the song, rolls four device patches and sets the sends, and a
+// song-only undo handed back the old song playing through the new sounds —
+// the headline gesture with a half-working undo, which is exactly the kind of
+// "wait, what did I just lose" the can't-make-it-wrong principle exists to
+// prevent (DECISIONS D30). The three trees are small and flat: a song measures
+// 5-10 KB, the mixer four strips of six numbers, the devices four patches, so
+// forty of them is well under a megabyte.
+//
+// The master bus stays out, deliberately — D22 says it is app character rather
+// than song state, and it doesn't ride project files either.
 const undoStack = [];
 const redoStack = [];
 let undoBtn = null;
 let redoBtn = null;
-const snapshot = () => structuredClone(song);
+const snapshot = () => ({
+  song: structuredClone(song),
+  mix: Object.fromEntries(TRACKS.map((t) => [t.key, audio.mix(t.key)])),
+  // structuredClone, not the shallow copy `patch` hands back: the drums patch
+  // carries a `pins` object, and a snapshot must not share it with the live one.
+  devices: Object.fromEntries(TRACKS.map((t) => [t.key, structuredClone(audio.patch(t.key))])),
+});
 function commitUndo(pre) {
   undoStack.push(pre);
   if (undoStack.length > 40) undoStack.shift();
@@ -341,9 +355,34 @@ function refreshAll() {
   if (view === "arrangement") renderArrangement();
   updateUndoButtons();
 }
+// Cheap "did this actually change" test for the two engine trees. A false
+// negative only costs a redundant re-apply, so it never has to be exact —
+// which is why nested values (the drum patch's `pins`) go through a plain
+// stringify rather than a deep walk.
+const sameEngineState = (a, b) => {
+  if (!a || !b) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((k) =>
+    a[k] && typeof a[k] === "object" ? JSON.stringify(a[k]) === JSON.stringify(b[k]) : a[k] === b[k]
+  );
+};
 function restoreSnap(s) {
-  Object.assign(song, structuredClone(s));
+  // Delete-then-assign, not a bare merge: a roll can drop keys the previous
+  // song had (a `dare`, a `laneNudge`), and merging over the top would leave
+  // them behind — the same reset rerollSong and applyProject already do.
+  for (const key of Object.keys(song)) delete song[key];
+  Object.assign(song, structuredClone(s.song));
   song.scenes?.forEach(normalizeScene);
+  // Only the tracks that actually moved. Most undos are a note or a hit, where
+  // both engine trees are identical to what's already loaded, and re-pushing a
+  // patch means re-blending four morph layers and a color insert for nothing.
+  for (const t of TRACKS) {
+    const mix = s.mix?.[t.key];
+    const dev = s.devices?.[t.key];
+    if (mix && !sameEngineState(mix, audio.mix(t.key))) audio.setMix(t.key, mix);
+    if (dev && !sameEngineState(dev, audio.patch(t.key))) audio.setPatch(t.key, structuredClone(dev));
+  }
   selClip = null;
   refreshAll();
 }
@@ -1480,8 +1519,10 @@ function openTempoEditor() {
 }
 
 // The dice: exactly what a fresh page load rolls — new key, scale, tempo,
-// device presets, and one magic scene — without the reload. Undo brings the
-// song back (device presets stay rolled; they're not part of song snapshots).
+// device presets, and one magic scene — without the reload. One ↶ puts all of
+// it back, sounds and sends included: the snapshot pushed here carries the
+// mixer and the device patches alongside the song (D30), so undoing a roll no
+// longer hands back the old song playing through the new instruments.
 function rerollSong() {
   pushUndo();
   const fresh = makeSong();
@@ -2211,17 +2252,11 @@ function openClipProps(sceneIndex, track) {
 // Mixer + devices
 // ---------------------------------------------------------------------------
 let mixerRAF = 0;
-// Dry by default: every send parks at the knob floor (-30 is off). The dry mix
-// is the meaty one — the master chain does the gluing, and reverb/echo are
-// there to be dialed in per track, not baked into the cold open. Reset Sends
-// returns here, i.e. to silence.
-const MIX_DEFAULTS = {
-  harmony: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -30, echo: -30, mute: false, solo: false },
-  drums: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -30, echo: -30, mute: false, solo: false },
-  bass: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -30, echo: -30, mute: false, solo: false },
-  melody: { vol: DEFAULT_TRACK_VOLUME_DB, pan: 0, verb: -30, echo: -30, mute: false, solo: false },
-};
-const mixState = structuredClone(MIX_DEFAULTS);
+// The mixer's state lives in audio.js with the channels it drives (MIX_DEFAULTS
+// there is the one copy of the defaults). This side reads it back per paint
+// through `audio.mix(track)`, exactly as it already reads devices through
+// `audio.patch(track)` — no second tree to keep in step.
+const trackMix = (track) => audio.mix(track) || { ...MIX_DEFAULTS };
 
 function knob(label, min, max, step, val, onChange, format = (v) => v) {
   const container = el("div", { class: "knob-container" });
@@ -2275,23 +2310,6 @@ function knob(label, min, max, step, val, onChange, format = (v) => v) {
   return container;
 }
 
-function applyTrackMix(track) {
-  const ms = mixState[track];
-  if (!ms) return;
-  ms.vol = clampTrackDb(ms.vol);
-  audio.setVol(track, ms.vol);
-  audio.setPan(track, ms.pan);
-  audio.setSend(track, ms.verb);
-  audio.setEcho(track, ms.echo);
-  audio.setMute(track, ms.mute);
-  audio.setSolo(track, ms.solo);
-}
-
-function applyMixState() {
-  for (const t of TRACKS) applyTrackMix(t.key);
-  updateTrackMixUI();
-}
-
 // The dice owns the sends (DECISIONS D9): a wet roll sets them, a dry roll
 // clears them back to default — otherwise wetness would accumulate across
 // rolls. Faders, pan, and mutes stay the player's. vibe.wet is keyed by
@@ -2300,23 +2318,15 @@ function applyMixState() {
 // callers repaint the full UI right after, so no updateTrackMixUI here.
 function applyVibeMix(vibe) {
   for (const t of TRACKS) {
-    for (const send of ["verb", "echo"]) {
-      mixState[t.key][send] = vibe?.wet?.[t.key]?.[send] ?? MIX_DEFAULTS[t.key][send];
-    }
-    applyTrackMix(t.key);
+    audio.setMix(t.key, {
+      verb: vibe?.wet?.[t.key]?.verb ?? MIX_DEFAULTS.verb,
+      echo: vibe?.wet?.[t.key]?.echo ?? MIX_DEFAULTS.echo,
+    });
   }
 }
 
 function resetTrackMix(track, { sendsOnly = false } = {}) {
-  const next = structuredClone(MIX_DEFAULTS[track]);
-  if (!next) return;
-  if (sendsOnly) {
-    mixState[track].verb = next.verb;
-    mixState[track].echo = next.echo;
-  } else {
-    Object.assign(mixState[track], next);
-  }
-  applyTrackMix(track);
+  audio.resetMix(track, { sendsOnly });
   updateTrackMixUI();
 }
 
@@ -2324,13 +2334,13 @@ function resetAllMix({ sendsOnly = false } = {}) {
   for (const t of TRACKS) resetTrackMix(t.key, { sendsOnly });
 }
 
-function trackMutedByState(track) {
-  const anySolo = Object.values(mixState).some((s) => s.solo);
-  return mixState[track]?.mute || (anySolo && !mixState[track]?.solo);
-}
+// Effective audibility (own mute, or un-soloed while something else is soloed)
+// is the engine's rule to state — the export and the channel gates read the
+// same one. This is the grid's name for it.
+const trackMutedByState = (track) => audio.trackMuted(track);
 function updateTrackMixUI() {
   document.querySelectorAll("[data-track-toggle]").forEach((btn) => {
-    const state = mixState[btn.dataset.track];
+    const state = audio.mix(btn.dataset.track);
     const kind = btn.dataset.trackToggle;
     const on = !!state?.[kind];
     btn.classList.toggle("on", on);
@@ -2339,37 +2349,37 @@ function updateTrackMixUI() {
   document.querySelectorAll(".track-head[data-track], .arr-thead[data-track], .mx-strip[data-track]").forEach((node) => {
     const track = node.dataset.track;
     node.classList.toggle("muted", trackMutedByState(track));
-    node.classList.toggle("soloed", !!mixState[track]?.solo);
+    node.classList.toggle("soloed", !!audio.mix(track)?.solo);
   });
   document.querySelectorAll(".clip[data-track], .arr-lane[data-track]").forEach((node) => {
     node.classList.toggle("track-muted", trackMutedByState(node.dataset.track));
   });
 }
 function setTrackMute(track, on) {
-  if (!mixState[track] || mixState[track].mute === on) return;
-  mixState[track].mute = on;
+  const ms = audio.mix(track);
+  if (!ms || ms.mute === on) return;
   audio.setMute(track, on);
   updateTrackMixUI();
 }
 function setTrackSolo(track, on) {
-  if (!mixState[track] || mixState[track].solo === on) return;
-  mixState[track].solo = on;
+  const ms = audio.mix(track);
+  if (!ms || ms.solo === on) return;
   audio.setSolo(track, on);
   updateTrackMixUI();
 }
 function toggleTrackMute(track) {
-  setTrackMute(track, !mixState[track]?.mute);
+  setTrackMute(track, !audio.mix(track)?.mute);
 }
 function toggleTrackSolo(track) {
-  setTrackSolo(track, !mixState[track]?.solo);
+  setTrackSolo(track, !audio.mix(track)?.solo);
 }
 function trackToggleButton(track, kind) {
   const isMute = kind === "mute";
   return el("div", {
-    class: `msbtn ${mixState[track]?.[kind] ? "on" : ""}`,
+    class: `msbtn ${audio.mix(track)?.[kind] ? "on" : ""}`,
     text: isMute ? "M" : "S",
     role: "button",
-    "aria-pressed": String(!!mixState[track]?.[kind]),
+    "aria-pressed": String(!!audio.mix(track)?.[kind]),
     "data-track": track,
     "data-track-toggle": kind,
     onpointerdown: (e) => {
@@ -2492,7 +2502,7 @@ function openTrackOptions(track) {
   resetSheet(meta.color);
   const trackChoice = (kind, label) =>
     el("div", {
-      class: `choice track-choice ${mixState[track][kind] ? "on" : ""}`,
+      class: `choice track-choice ${trackMix(track)[kind] ? "on" : ""}`,
       text: label,
       "data-track": track,
       "data-track-toggle": kind,
@@ -2534,8 +2544,9 @@ function openMixer(focusTrack = null) {
   const meterBars = {};
   for (const t of TRACKS) {
     const k = t.key;
-    const ms = mixState[k];
-    ms.vol = clampTrackDb(ms.vol);
+    // A read, not a handle: the strip paints from the engine's state and
+    // writes back through the setters, so nothing here can drift from it.
+    const ms = trackMix(k);
     const mState = {};
     meterBars[k] = mState;
     const volMeter = makeVolMeter(mState, { withHandle: true });
@@ -2545,14 +2556,13 @@ function openMixer(focusTrack = null) {
     volMeter.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       const startY = e.clientY;
-      const startVol = ms.vol;
+      const startVol = trackMix(k).vol;
       const range = TRACK_VOLUME_MAX_DB - TRACK_VOLUME_MIN_DB;
       const height = volMeter.getBoundingClientRect().height || 1;
       capturePointer(volMeter, e.pointerId);
       const move = (ev) => {
         const next = clampTrackDb(startVol + (-(ev.clientY - startY) / height) * range);
-        if (next === ms.vol) return;
-        ms.vol = next;
+        if (next === trackMix(k).vol) return;
         audio.setVol(k, next);
         mState.handleEl.style.top = `${volToPct(next)}%`;
         volLabel.textContent = formatDb(next);
@@ -2567,9 +2577,9 @@ function openMixer(focusTrack = null) {
       volMeter.addEventListener("pointercancel", up);
     });
 
-    const panSlider = knob("pan", -1, 1, 0.05, ms.pan, (v) => { ms.pan = v; audio.setPan(k, v); }, (v) => (v === 0 ? "C" : v < 0 ? `L${Math.round(-v * 100)}` : `R${Math.round(v * 100)}`));
-    const verbSlider = knob("verb", -30, 0, 1, ms.verb, (v) => { ms.verb = v; audio.setSend(k, v); });
-    const echoSlider = knob("echo", -30, 0, 1, ms.echo, (v) => { ms.echo = v; audio.setEcho(k, v); });
+    const panSlider = knob("pan", -1, 1, 0.05, ms.pan, (v) => audio.setPan(k, v), (v) => (v === 0 ? "C" : v < 0 ? `L${Math.round(-v * 100)}` : `R${Math.round(v * 100)}`));
+    const verbSlider = knob("verb", -30, 0, 1, ms.verb, (v) => audio.setSend(k, v));
+    const echoSlider = knob("echo", -30, 0, 1, ms.echo, (v) => audio.setEcho(k, v));
 
     // One path to the device: the sound sheet. The old preset dropdowns were
     // a third, flattened way to pick corners the pad already owns, and the
@@ -2834,7 +2844,7 @@ function openSoundSheet(track) {
 
   const pctFmt = (v) => `${Math.round(v * 100)}%`;
   const sendFmt = (v) => (v <= -29 ? "off" : `${Math.round(v)}`);
-  const mix = mixState[track];
+  const mix = trackMix(track);
   const knobs = [
     knob("amount", 0, 1, 0.01, patch.amount, (v) => audio.setPatch(track, { amount: v }), pctFmt),
     knob("motion", 0, 1, 0.01, patch.motion, (v) => audio.setPatch(track, { motion: v }), pctFmt),
@@ -2848,17 +2858,12 @@ function openSoundSheet(track) {
     );
   }
   // The ride surface owns the sends too: with the arm on this sheet, a verb
-  // or echo sweep here records a lane exactly like amount/motion. Writes go
-  // through the mixer's state so its strip reopens where you left it.
+  // or echo sweep here records a lane exactly like amount/motion. Writes land
+  // on the engine's strip, the same one the mixer sheet paints, so it reopens
+  // where you left it.
   knobs.push(
-    knob("verb", -30, 0, 1, mix.verb, (v) => {
-      mix.verb = v;
-      audio.setSend(track, v);
-    }, sendFmt),
-    knob("echo", -30, 0, 1, mix.echo, (v) => {
-      mix.echo = v;
-      audio.setEcho(track, v);
-    }, sendFmt)
+    knob("verb", -30, 0, 1, mix.verb, (v) => audio.setSend(track, v), sendFmt),
+    knob("echo", -30, 0, 1, mix.echo, (v) => audio.setEcho(track, v), sendFmt)
   );
   body.appendChild(
     el("div", { class: "propsection" }, [
@@ -4753,7 +4758,7 @@ function projectDevices() {
 // loaded, plays through the same compiled master. The panel still moves
 // it live; it just doesn't travel in files.
 function projectMix() {
-  return Object.fromEntries(TRACKS.map((t) => [t.key, structuredClone(mixState[t.key])]));
+  return Object.fromEntries(TRACKS.map((t) => [t.key, trackMix(t.key)]));
 }
 
 function captureProject() {
@@ -4761,7 +4766,10 @@ function captureProject() {
     schema: PROJECT_SCHEMA,
     version: PROJECT_VERSION,
     savedAt: new Date().toISOString(),
-    song: snapshot(),
+    // The file's three trees are the same three an undo snapshot carries; it
+    // spells them out separately because the on-disk device shape also stores
+    // corner names for v1 readers (see projectDevices).
+    song: structuredClone(song),
     mix: projectMix(),
     devices: projectDevices(),
   };
@@ -4795,25 +4803,26 @@ function restoreDevices(devices = {}) {
   }
 }
 
+// The file-format adapter: a saved strip may be v1 (`send` for what is now
+// `verb`) or missing keys outright. Shape it here, then hand the whole strip
+// to the engine — clamping and the graph writes are its job, not this side's.
 function restoreMix(mix = {}) {
   for (const t of TRACKS) {
-    const key = t.key;
-    const defaults = MIX_DEFAULTS[key];
-    const src = mix[key] || {};
-    const parsed = {
-      vol: Number.isFinite(Number(src.vol)) ? Number(src.vol) : defaults.vol,
-      pan: Number.isFinite(Number(src.pan)) ? Number(src.pan) : defaults.pan,
-      verb: Number.isFinite(Number(src.verb)) ? Number(src.verb) : Number.isFinite(Number(src.send)) ? Number(src.send) : defaults.verb,
-      echo: Number.isFinite(Number(src.echo)) ? Number(src.echo) : defaults.echo,
+    const src = mix[t.key] || {};
+    const num = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
+    audio.setMix(t.key, {
+      vol: num(src.vol, MIX_DEFAULTS.vol),
+      pan: num(src.pan, MIX_DEFAULTS.pan),
+      verb: num(src.verb, num(src.send, MIX_DEFAULTS.verb)),
+      echo: num(src.echo, MIX_DEFAULTS.echo),
       mute: !!src.mute,
       solo: !!src.solo,
-    };
-    Object.assign(mixState[key], parsed);
+    });
   }
   // The master never rides a file (D22): a load resets it to the compiled
   // defaults, whatever the file or this session had dialed in.
   audio.setMaster({ ...MASTER_DEFAULTS });
-  applyMixState();
+  updateTrackMixUI();
 }
 
 function applyProject(rawProject) {

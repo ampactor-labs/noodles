@@ -164,8 +164,14 @@ playback, emitting UI events through the rAF visual pump (`scheduleVisual`, late
 compensated against the audio clock) → `onVisual`. Public API:
 `init/play/stop/playing`, `launchScene`/`launchClip`, `playArrangement`/`setArrangePos`/
 `enterArrangement`, `setTempo`/`setSwing`, `preview`/`previewHit`/`previewNote`, mixer
-`setVol`/`setPan`/`setSend`/`setEcho`/`setMute`/`setSolo`/`meter`, preset getters/setters
-per track, `onVisual`, and `renderOffline(soloTrack)`. Context is created with
+`mix`/`setMix`/`resetMix`/`setVol`/`setPan`/`setSend`/`setEcho`/`setMute`/`setSolo`/
+`trackMuted`/`anySolo`/`meter`, preset getters/setters
+per track, `onVisual`, and `renderOffline(soloTrack)`. **Engine state is audio.js's to own
+and main.js's to read** (D30): the mixer strip paints from `audio.mix(track)` and the sound
+sheet from `audio.patch(track)`, neither keeps a private copy, and `MIX_DEFAULTS` plus the
+fader range live here with the channels they drive. What "muted" means once solo is in play
+is stated once, as `trackMuted` — the channel gates, the grid's dimming, the session-record
+mute lane and the export's `audible()` all ask it rather than re-deriving it. Context is created with
 `latencyHint:"playback"`, `lookAhead: 0.25`, and `updateInterval: 0.05` (pinned — Tone
 otherwise derives it as lookAhead/2 and the scheduler tick quietly coarsens to 125 ms) —
 scheduling runs on the main thread, and on little cores a janky frame under 0.1 s of
@@ -214,9 +220,12 @@ then BPM ±, KEY + scale picker, GROOVE, Session|Arrange toggle, Mix, +); the Se
 grid; the Arrangement timeline (bar ruler, track lanes, clips, playhead, loop brace); the
 bottom-sheet editors (chords / drum rack / piano roll — the piano roll has note length,
 a velocity lane, and one-tap Transforms: Arp/Oct/Humanize/Random/Clear); and the mixer sheet
-(faders/pan/send/meters + kit picker + synth cutoff/decay). Undo/redo is **whole-song
-`structuredClone` snapshots** (`pushUndo` before an edit; drag handlers snapshot on
-pointerdown and commit only if something changed). `refreshAll()` re-renders everything after
+(faders/pan/send/meters + kit picker + synth cutoff/decay). Undo/redo is **whole-session
+snapshots** — `{ song, mix, devices }`, not the song alone, so one ↶ puts a whole dice roll
+back, sounds and sends included (D30; the master bus stays out per D22). `pushUndo` before an
+edit; drag handlers snapshot on pointerdown and commit only if something changed; `restoreSnap`
+diffs the two engine trees and only re-pushes a track that actually moved, so undoing a note
+costs what it always did. `refreshAll()` re-renders everything after
 a key/scale change or an undo (and re-applies `setScaleContext`).
 
 **`index.html`** — the dark Ableton-style CSS and the shell: `#transport`, `#session`,

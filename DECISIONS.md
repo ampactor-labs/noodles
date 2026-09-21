@@ -619,3 +619,50 @@ must agree to -120 dB. It fails loudly on the old constants (+5.8 dB/s,
 room into one AudioWorklet, where the DSP is ours and sample-exact
 rather than the browser's to schedule. That also retires the last reason
 D28 feared construction cost.
+
+### D30 — Undo covers the session, and the mixer has one owner
+
+Two halves of the same complaint: after a few dice rolls the app got
+slower, and the builder's first guess was undo. Undo was innocent of
+the slowdown — a song snapshot is 5-10 KB and the stack caps at 40, so
+the whole history is under half a megabyte, and the real cost was voice
+pools nothing reclaimed mid-jam. But looking at it turned up the thing
+undo *was* getting wrong, and the reason it was easy to get wrong.
+
+The dice writes three trees: the song, four device patches
+(`randomizePresets`), and the sends (`applyVibeMix`, per D9). A snapshot
+was `structuredClone(song)` alone, so one ↶ handed back the old song
+playing through the new instruments in the new space. That is the
+headline gesture with a half-working undo, and it fails
+can't-make-it-wrong on the exact stroke the whole cold open is built
+around: the reason it's safe to hit 🎲 is that ↶ is right there. A
+snapshot is now `{ song, mix, devices }`. The master bus stays out, per
+D22 — it's app character, not song state, and it doesn't ride project
+files either. Ordinary edits pay nothing extra: `restoreSnap` diffs each
+engine tree and only re-pushes a track that actually moved, so undoing a
+note is the same work it always was.
+
+Why it was easy to get wrong is the second half. The mixer's state
+existed twice — `mixState` in main.js, `channelState` in audio.js — with
+a one-way `applyTrackMix` push between them and nothing reading back.
+Devices already ran the other way round (`audio.patch(track)` is the
+read, `setPatch` the write), so the two halves of the same engine used
+opposite conventions, and a snapshot written against one of them had no
+obvious reason to think about the other. The drift was already there and
+already harmless: "send off" was -60 in the engine and -30 in the UI, and
+neither was wrong enough to hear, because `sendGain` calls anything at or
+under -29 silence.
+
+So the mixer moves to the devices' convention: `channelState` is the one
+copy, `audio.mix(track)` is the read, and the strip paints from it rather
+than from a handle it holds. `MIX_DEFAULTS` and the fader range live in
+audio.js with the channels they drive; `setMix`/`resetMix` are the bulk
+writes that a vibe roll, a project load and an undo all go through; and
+"muted" — own mute, or un-soloed while something else is soloed — is
+stated once as `trackMuted`, where the channel gates, the grid's dimming,
+the session-record mute lane and the export's `audible()` had each been
+spelling it out for themselves.
+
+The rule this leaves: engine state is audio.js's to own and main.js's to
+read. Anything the UI keeps a private copy of is a thing undo, save and
+the export can each disagree about.

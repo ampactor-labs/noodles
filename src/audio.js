@@ -94,7 +94,29 @@ export const TRACK_KEYS = ["harmony", "drums", "bass", "melody"];
 export const MELODIC_TRACKS = ["harmony", "bass", "melody"];
 
 const DEFAULT_TRACK_VOLUME_DB = -6;
-const SEND_OFF_DB = -60;
+// The fader's range, exported because the mixer UI draws it. It used to keep
+// its own copy of these three and of the defaults below, which is how the
+// engine's idea of "send off" (-60) and the UI's (-30, the knob floor) drifted
+// apart without either being wrong enough to notice: sendGain() calls anything
+// at or under -29 silence, so both read as off and nothing ever disagreed
+// audibly. One definition now, and it is the knob's floor, so a default
+// round-trips through the strip unchanged.
+export const TRACK_VOLUME_MIN_DB = -36;
+export const TRACK_VOLUME_MAX_DB = 0;
+export const clampTrackDb = (db) => Math.max(TRACK_VOLUME_MIN_DB, Math.min(TRACK_VOLUME_MAX_DB, Math.round(db)));
+const SEND_FLOOR_DB = -30;
+const clampSendDb = (db) => Math.max(SEND_FLOOR_DB, Math.min(0, Math.round(Number(db) || SEND_FLOOR_DB)));
+// Dry by default: every send parks at the knob floor. The dry mix is the meaty
+// one — the master chain does the gluing, and reverb/echo are there to be
+// dialed in per track, not baked into the cold open. Reset Sends returns here.
+export const MIX_DEFAULTS = Object.freeze({
+  vol: DEFAULT_TRACK_VOLUME_DB,
+  pan: 0,
+  verb: SEND_FLOOR_DB,
+  echo: SEND_FLOOR_DB,
+  mute: false,
+  solo: false,
+});
 // Relative to Tone.now(), which already includes the 0.25 s lookAhead — the
 // press-to-first-sound total is lookAhead + this. 0.1 keeps the first tick
 // ≥300 ms of scheduling room under the 50 ms ticker (was 0.18 when the ticker
@@ -2016,14 +2038,10 @@ export function createAudio(song) {
   // built fresh and a graph with defaults applied are the same chain.
   let masterState = normalizeMaster();
 
-  const channelState = Object.fromEntries(TRACK_KEYS.map((track) => [track, {
-    vol: DEFAULT_TRACK_VOLUME_DB,
-    pan: 0,
-    verb: SEND_OFF_DB,
-    echo: SEND_OFF_DB,
-    mute: false,
-    solo: false,
-  }]));
+  // The mixer's one copy. The UI reads it back through `mix(track)` the way it
+  // already reads devices back through `patch(track)`; it does not keep a
+  // second tree and push it down, which is what it used to do.
+  const channelState = Object.fromEntries(TRACK_KEYS.map((track) => [track, { ...MIX_DEFAULTS }]));
 
   // Dry park: with every send off — the default, and most dice rolls —
   // Freeverb's comb bank and the feedback delay process silence full-time,
@@ -2114,11 +2132,49 @@ export function createAudio(song) {
       }
     }
   }
+  // What "muted" means once solo is in play, in one place: the grid's dimming,
+  // the session-record mute lane, the channel gates and the export's audible()
+  // all used to spell it out for themselves.
+  const anySoloOn = () => TRACK_KEYS.some((track) => channelState[track].solo);
+  const trackMutedNow = (track) => {
+    const st = channelState[track];
+    return !!st && (st.mute || (anySoloOn() && !st.solo));
+  };
   function applyTrackGates() {
-    const anySolo = TRACK_KEYS.some((track) => channelState[track].solo);
-    for (const track of TRACK_KEYS) {
-      live.channels[track].mute = channelState[track].mute || (anySolo && !channelState[track].solo);
-    }
+    for (const track of TRACK_KEYS) live.channels[track].mute = trackMutedNow(track);
+  }
+
+  // The six writes the mixer owns. Split out of the public setters so setMix()
+  // — the merge that vibe rolls, project loads and undo all go through — can
+  // reach them without going back through the API object.
+  const applyVol = (track, db) => {
+    channelState[track].vol = db;
+    live.channels[track].volume.value = db;
+  };
+  const applyPan = (track, p) => {
+    channelState[track].pan = p;
+    live.channels[track].pan.value = p;
+  };
+  const applySendOf = (track, kind, db) => {
+    channelState[track][kind] = db;
+    if (motionArmed[track]) motionDirty[track].add(kind);
+    if (sendGain(db) > 0) wakeReturn(kind); // reconnect BEFORE the gain opens
+    const sends = kind === "verb" ? live.verbSends : live.echoSends;
+    sends[track].gain.rampTo(sendGain(db), 0.02, tapTime());
+    if (!anySendOn(kind)) parkReturnSoon(kind);
+  };
+  // Absent keys are left alone, so a sends-only write is sends-only.
+  function mergeMix(track, partial = {}) {
+    const st = channelState[track];
+    if (!st) return null;
+    if ("vol" in partial) applyVol(track, clampTrackDb(partial.vol));
+    if ("pan" in partial) applyPan(track, Math.max(-1, Math.min(1, Number(partial.pan) || 0)));
+    if ("verb" in partial) applySendOf(track, "verb", clampSendDb(partial.verb));
+    if ("echo" in partial) applySendOf(track, "echo", clampSendDb(partial.echo));
+    if ("mute" in partial) st.mute = !!partial.mute;
+    if ("solo" in partial) st.solo = !!partial.solo;
+    if ("mute" in partial || "solo" in partial) applyTrackGates();
+    return { ...st };
   }
 
   const liveVoice = { prev: null };
@@ -2659,28 +2715,32 @@ export function createAudio(song) {
       wakeContext();
       playNoteStack(track, [{ midi, len: 1, vel: 0.9 }], tapTime());
     },
-    // --- mixer ---
+    // --- mixer. channelState is the only copy; `mix` is how the UI reads it
+    // back, the same shape `patch` already has for devices. ---
+    mix(track) {
+      return channelState[track] ? { ...channelState[track] } : null;
+    },
+    // Effective audibility, solo included — the question the grid, the strip
+    // and the session-record mute lane all actually want to ask.
+    trackMuted: (track) => trackMutedNow(track),
+    anySolo: () => anySoloOn(),
+    // The merge behind every bulk write: a vibe's wet roll, a project load,
+    // an undo. Absent keys are left alone, so a sends-only roll is a
+    // sends-only write and the player's faders survive it.
+    setMix: (track, partial) => mergeMix(track, partial),
+    resetMix: (track, { sendsOnly = false } = {}) =>
+      mergeMix(track, sendsOnly ? { verb: MIX_DEFAULTS.verb, echo: MIX_DEFAULTS.echo } : { ...MIX_DEFAULTS }),
     setVol(track, db) {
-      channelState[track].vol = db;
-      live.channels[track].volume.value = db;
+      applyVol(track, db);
     },
     setPan(track, p) {
-      channelState[track].pan = p;
-      live.channels[track].pan.value = p;
+      applyPan(track, p);
     },
     setSend(track, db) {
-      channelState[track].verb = db;
-      if (motionArmed[track]) motionDirty[track].add("verb");
-      if (sendGain(db) > 0) wakeReturn("verb"); // reconnect BEFORE the gain opens
-      live.verbSends[track].gain.rampTo(sendGain(db), 0.02, tapTime());
-      if (!anySendOn("verb")) parkReturnSoon("verb");
+      applySendOf(track, "verb", db);
     },
     setEcho(track, db) {
-      channelState[track].echo = db;
-      if (motionArmed[track]) motionDirty[track].add("echo");
-      if (sendGain(db) > 0) wakeReturn("echo");
-      live.echoSends[track].gain.rampTo(sendGain(db), 0.02, tapTime());
-      if (!anySendOn("echo")) parkReturnSoon("echo");
+      applySendOf(track, "echo", db);
     },
     setMute(track, on) {
       if (!channelState[track]) return;
@@ -2865,8 +2925,11 @@ export function createAudio(song) {
           // Which returns does this pass need? Only sends on AUDIBLE tracks
           // count — a muted stem's send carries silence, and an export-grade
           // return that isn't built costs nothing (see buildGraph).
-          const anySoloed = TRACK_KEYS.some((track) => channelState[track].solo);
-          const audible = (k) => !(soloTrack ? k !== soloTrack : channelState[k].mute || (anySoloed && !channelState[k].solo));
+          // Same mute rule the live gates use (trackMutedNow), plus the one
+          // thing only an export has: a stems pass mutes everything but its
+          // own track, whatever the desk says.
+          const stemMuted = (k) => (soloTrack ? k !== soloTrack : trackMutedNow(k));
+          const audible = (k) => !stemMuted(k);
           // A return is needed when a static send is open OR a recorded ride
           // opens one mid-song — without the scan a ride would render dry.
           const rides = (kind) =>
@@ -2882,10 +2945,9 @@ export function createAudio(song) {
           });
           for (const t of TRACK_KEYS) applyPatchTo(g, t, patchesCopy[t]);
           applyMasterTo(g, masterCopy); // the export hears the same bus moves
-          const anySolo = TRACK_KEYS.some((track) => channelState[track].solo);
           for (const k of TRACK_KEYS) {
             const st = channelState[k];
-            const muted = soloTrack ? k !== soloTrack : st.mute || (anySolo && !st.solo);
+            const muted = stemMuted(k);
             g.channels[k].set({ volume: muted ? -Infinity : st.vol, pan: st.pan, mute: muted });
             g.verbSends[k].gain.value = sendGain(st.verb);
             g.echoSends[k].gain.value = sendGain(st.echo);
