@@ -2617,34 +2617,47 @@ export function createAudio(song) {
     // its own working set either way.
     //
     // Measured on the built app, playing, rolling every 2.5 s and settling,
-    // three runs each (.tmp/dbg-roll-pool-ab.mjs). After sixteen rolls the
-    // live source count settles at 665-680 without this and 559-587 with it:
-    // about a hundred fewer running oscillators and forever-running param
+    // three runs each (npm run probe:pool --runs 3 --rolls 16). After sixteen
+    // rolls the live source count settles at 665-680 without this and 522-545
+    // with it: ~135 fewer running oscillators and forever-running param
     // ConstantSources, every one of them billed per sample on the phone's
-    // audio thread. Growth over the session's own baseline falls from ~+280
-    // to ~+195. (Single runs of this vary by ±50 because the dice deals
-    // songs of different density — the settled ABSOLUTE count is the stable
-    // figure, and an earlier one-run-each comparison here read +324 -> +149,
-    // which was luck dressed as precision.)
+    // audio thread. Quote the settled ABSOLUTE count, not the growth: single
+    // runs of growth vary by ±50 because the dice deals songs of very
+    // different density, and a one-run-each comparison here first read
+    // +324 -> +149, which was luck dressed as precision.
     //
-    // The floor is the same 1 per pool it is at rest. This started at 2 for
-    // the bar in progress, which was wrong by inspection once the pools were
-    // counted (.tmp/dbg-pool-occupancy.mjs): a settled song plays at ~23
-    // voices with ~21 of them claimed, so 2 per pool allows 24 idle pool-wide
-    // — more than an entire working set, and the trim it was supposed to
-    // arm became a no-op. Dropping it to 1 is not separable from run noise in
-    // the source count, but a warm floor larger than everything the song plays
-    // is not a floor.
+    // The floor is the same 1 per pool it is at rest. It started at 2 "for the
+    // bar in progress", and that was wrong twice over. Wrong by inspection:
+    // twelve pools at 2 allows 24 idle pool-wide, more than the ~23 voices a
+    // settled song holds in total, so the floor was larger than everything
+    // being played. And wrong in fact: at any settled moment the pools carry
+    // 1-2 idle each, so a floor of 2 meant the trim disposed NOTHING — ten
+    // consecutive trims left 42/28/14 untouched. It only ever fired at the
+    // boundary itself, where a retired song dumps 4-6 voices into a pool at
+    // once, which is why a broken floor still measured as a win. At 1 the
+    // same trim takes 15 idle to 10 and then converges, as an idempotent
+    // trim should. Post-roll settled source counts, three runs each
+    // (npm run probe:pool --runs 3 --rolls 16): 665-680 with no boundary
+    // trim, 559-587 at a floor of 2, 522-545 at a floor of 1.
     //
     // Safe mid-playback by the same invariant stealDontDrop rests on: only
     // _availableVoices is touched, and the _makeVoiceAvailable guard there
     // refuses to return a voice with anything on its timeline ahead of now,
     // so a voice sitting in that pool cannot be one the transport's
     // lookAhead-early JIT has already claimed.
+    // Returns what it did, so a harness can assert the trim ran rather than
+    // infer it from a count that a release landing a millisecond later
+    // rewrites. `floor` is the invariant worth pinning: it was once 2 while
+    // playing, which is above the 1-2 idle a settled pool carries, so the
+    // trim silently disposed nothing for a whole session of rolls and every
+    // behavioural check still passed.
     trimVoices({ atBoundary = false } = {}) {
-      if (playing && !atBoundary) return;
-      const keep = playing ? 2 : 1;
-      for (const t of MELODIC_TRACKS) for (const layer of live.layers[t]) trimVoicePool(layer, keep);
+      const FLOOR = 1;
+      if (playing && !atBoundary) return { ran: false, floor: FLOOR, disposed: 0 };
+      const before = this.voiceStats();
+      for (const t of MELODIC_TRACKS) for (const layer of live.layers[t]) trimVoicePool(layer, FLOOR);
+      const after = this.voiceStats();
+      return { ran: true, floor: FLOOR, disposed: before.voices - after.voices, idleBefore: before.idle, idleAfter: after.idle, pools: after.pools };
     },
     // The trim's scoreboard, across all twelve layer pools: how many voices
     // exist, how many are claimed this instant, how many sit idle. `idle` is
@@ -2654,9 +2667,10 @@ export function createAudio(song) {
     // infer. Guarded like the rest of the pool code: if Tone's internals move,
     // this reports zeros instead of throwing.
     voiceStats() {
-      const stats = { voices: 0, active: 0, idle: 0, caps: 0 };
+      const stats = { pools: 0, voices: 0, active: 0, idle: 0, caps: 0 };
       for (const t of MELODIC_TRACKS) {
         for (const layer of live.layers[t]) {
+          stats.pools += 1;
           stats.voices += layer._voices?.length || 0;
           stats.active += layer._activeVoices?.length || 0;
           stats.idle += layer._availableVoices?.length || 0;

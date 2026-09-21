@@ -932,20 +932,38 @@ try {
     assertState(roll.preset !== "deep" || roll.minMidi >= 36, `dice dealt deep bass below octave 2 (min midi ${roll.minMidi})`);
   }
 
-  // Voice pools must not grow without bound across a session's rolls. The
-  // pools are capped, so the guard is on IDLE surplus, which is what a trim
-  // can reclaim and what the high-water sweep exists to hold down: after a
-  // burst of rolls the pool may not be carrying a whole extra working set of
-  // voices nobody is playing. (Pre-fix this ran away — 23 voices at boot to
-  // 47 after eight rolls, ~16 of them idle.)
-  const poolAfterRolls = await page.evaluate(() => window.__noodles.audio.voiceStats());
+  // The boundary trim must actually dispose. An earlier version of this guard
+  // only bounded idle surplus loosely, and a trim that had been silently
+  // no-op'd for a whole session's worth of rolls sailed straight through it:
+  // the floor was 2 per pool while a settled song carries 1-2 idle per pool,
+  // so nothing ever exceeded it. The tight invariant is the floor itself —
+  // after a trim, no pool may hold more than one idle voice, so total idle
+  // cannot exceed the pool count. That fails loudly on a dead trim.
+  const pools = await page.evaluate(() => {
+    const { audio } = window.__noodles;
+    return { report: audio.trimVoices({ atBoundary: true }), stats: audio.voiceStats() };
+  });
   assertState(
-    poolAfterRolls.voices > 0 && poolAfterRolls.voices <= poolAfterRolls.caps,
-    `voice pools past their caps: ${JSON.stringify(poolAfterRolls)}`
+    pools.stats.voices > 0 && pools.stats.voices <= pools.stats.caps,
+    `voice pools past their caps: ${JSON.stringify(pools.stats)}`
+  );
+  // The floor, pinned. This is the deterministic half: a behavioural check
+  // only bites when surplus happens to exist at that instant, and the broken
+  // floor sailed through one. One idle voice per pool is what a settled song
+  // carries, so anything above it disposes nothing.
+  assertState(
+    pools.report.ran && pools.report.floor === 1,
+    `the boundary trim did not run at a floor of 1: ${JSON.stringify(pools.report)}`
+  );
+  // And the behavioural half, when there is anything to reclaim.
+  assertState(
+    pools.report.idleBefore <= pools.report.pools || pools.report.disposed > 0,
+    `the trim saw ${pools.report.idleBefore} idle voices across ${pools.report.pools} pools and disposed none: ` +
+    JSON.stringify(pools.report)
   );
   assertState(
-    poolAfterRolls.idle <= Math.max(24, poolAfterRolls.active),
-    `voice pools carrying more idle voices than the song plays — the trim is not reclaiming: ${JSON.stringify(poolAfterRolls)}`
+    pools.report.idleAfter <= pools.report.pools,
+    `the trim left ${pools.report.idleAfter} idle across ${pools.report.pools} pools: ${JSON.stringify(pools.report)}`
   );
 
   assertState(errors.length === 0, `runtime errors:\n${errors.join("\n")}`);

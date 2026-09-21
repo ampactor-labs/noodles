@@ -322,8 +322,8 @@ Plus tier-2 performance work listed in `ROADMAP.md` (diff-based cell repaints, p
 - **Two gates before claiming anything works:** `npm run smoke` (headless Chrome drives the
   core flow of launch, editors, record, export, and dice, and fails on any page error; it
   also holds the D30 undo contract — a roll must be undoable whole, and a mixer move must be
-  its own undo point — and asserts the voice pools aren't carrying more idle voices than the
-  song plays) and,
+  its own undo point — and pins the voice trim's floor at one idle voice per pool, which is
+  the check a dead trim cannot pass) and,
   if you touched the audio chain or presets, `npm run calibrate` (renders every preset
   through the real graph and prints RMS/peak tables; read the stem spreads against the master
   row, which stays ~1 dB). A green `npm run build` proves nothing about runtime.
@@ -337,7 +337,11 @@ Plus tier-2 performance work listed in `ROADMAP.md` (diff-based cell repaints, p
 - **`window.__noodles`** (`{ song, audio, applyProject }`) and **`window.__noodlesGraph`**
   (`buildGraph` itself, so the audit measures the real chain) back the headless harnesses.
   Not a public API, but keep them working; smoke, calibrate, and audit depend on them.
-  `audio.voiceStats()` is the pool scoreboard the perf probes and smoke read.
+  `audio.voiceStats()` is the pool scoreboard the perf probes and smoke read, and
+  `audio.trimVoices()` returns what it disposed so a harness can assert the trim RAN rather
+  than infer it from a count a later release rewrites. **`npm run probe:pool`** is the
+  dice's voice-pool receipt (`--runs 3 --rolls 16` for the burst, `--occupancy` for the
+  pools); it prints evidence and asserts nothing — the thresholds live in smoke.
 - **All three harnesses boot through `scripts/preview.mjs`** — don't re-copy `startPreview`,
   which is how the same teardown bug came to live in three files at once. `npm run preview`
   is a shell that spawns vite as a grandchild, so the child is spawned `detached` and stop()

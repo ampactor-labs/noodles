@@ -199,19 +199,22 @@ every frame or two instead of sixty times a second; **boundary voice trim**: a l
 high-water mark is per SESSION while any one song's working set is per SONG, so every reroll
 used to inherit the peak of every song before it — the reclaim `rerollSong` scheduled had
 been a no-op mid-jam all along, because `trimVoices` declines while playing and the dice is
-pressed while playing. Rolling every 2.5 s and settling, three runs each
-(`.tmp/dbg-roll-pool-ab.mjs`): after sixteen rolls the live source count settled at 665-680
-without the trim and 559-587 with it — about a hundred fewer running oscillators and
-forever-running param ConstantSources, each billed per sample on the audio thread — and
-growth over the session's own baseline fell from ~+280 to ~+195. The settled absolute count
-is the figure to quote; single runs swing ±50 because the dice deals songs of very different
-density, and a one-run-each comparison first read this as +324 → +149, which was luck
-dressed as precision. Pool occupancy (`.tmp/dbg-pool-occupancy.mjs`, via `audio.voiceStats()`)
-is the diagnostic underneath: a settled song plays ~23 voices with ~21 claimed, so idle
-staying near that is the proof the remainder is working set and not residue. A high-water
-sweep that trimmed to `peak(8 bars) + 1` while playing was built and measured on top of this
-and reclaimed nothing further (38 voices / 551 sources with it, 38 / 553 without), so it was
-removed rather than kept — the surplus is made at the boundary, not continuously. Sound-neutral only, per the standing
+pressed while playing. `npm run probe:pool` is the receipt (`--runs 3 --rolls 16`, or `--occupancy` for the pools
+themselves via `audio.voiceStats()`). Rolling every 2.5 s and settling, three runs each: after
+sixteen rolls the live source count settles at 665-680 with no boundary trim, 559-587 at a
+floor of 2 idle voices per pool, and 522-545 at a floor of 1 — ~135 fewer running oscillators
+and forever-running param ConstantSources, each billed per sample on the audio thread. Quote
+the settled absolute count, not the growth: single runs of growth swing ±50 because the dice
+deals songs of very different density, and a one-run-each comparison first read this as
++324 → +149, which was luck dressed as precision. The floor mattered more than it looked:
+a settled song carries only 1-2 idle voices per pool, so a floor of 2 meant the trim disposed
+*nothing* at any settled moment — ten consecutive trims left 42/28/14 untouched — and only
+ever fired at the boundary itself, where a retired song dumps 4-6 voices into a pool at once.
+A broken floor still measured as a win, which is why `npm run smoke` now pins the floor
+directly rather than inferring it from a count. A high-water sweep trimming to
+`peak(8 bars) + 1` while playing was built and measured on top of this, reclaimed nothing
+further (38 voices / 551 sources with it, 38 / 553 without), and was removed rather than
+kept — the surplus is made at the boundary, not continuously. Sound-neutral only, per the standing
 rule: no quality or capability trades.
 
 The 2026-07-28 ultra-audit went after the same complaint on the feature-heavy

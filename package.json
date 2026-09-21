@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "smoke": "node scripts/smoke.mjs",
     "probe:vamp": "node scripts/vamp-probe.mjs",
+    "probe:pool": "node scripts/pool-probe.mjs",
     "calibrate": "node scripts/calibrate.mjs",
     "audit": "node scripts/audit.mjs",
     "samples": "node scripts/make-samples.mjs",
