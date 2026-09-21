@@ -195,7 +195,16 @@ muted stem) drops its whole source side (layers, filters, chorus, color) out of 
 with one cut at the color junction and wakes synchronously on any trigger; stems export
 measured ~40% faster since a solo pass renders one track's DSP, not four; clock-pump
 writes quantized (0.5% pies, ¼-px playhead) and skipped when unchanged, so pies repaint
-every frame or two instead of sixty times a second. Sound-neutral only, per the standing
+every frame or two instead of sixty times a second; **boundary voice trim**: a layer pool's
+high-water mark is per SESSION while any one song's working set is per SONG, so every reroll
+used to inherit the peak of every song before it — the reclaim `rerollSong` scheduled had
+been a no-op mid-jam all along, because `trimVoices` declines while playing and the dice is
+pressed while playing. Rolling every 2.5 s from a 346-source baseline, live audio sources
+reached 641 after eight rolls and 670 after sixteen and stayed there (nearly double, every
+one of them an oscillator or a forever-running param ConstantSource billed per sample); with
+the boundary form the same burst grows +149 instead of +324, and further passes reclaim
+nothing, so what's left is the current song's working set rather than the session's residue
+(.tmp/dbg-roll-pool-ab.mjs). Sound-neutral only, per the standing
 rule: no quality or capability trades.
 
 The 2026-07-28 ultra-audit went after the same complaint on the feature-heavy

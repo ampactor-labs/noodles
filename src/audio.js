@@ -2540,13 +2540,37 @@ export function createAudio(song) {
       setTimeout(() => this.trimVoices(), 1800);
     },
     // Dispose idle voices beyond a warm floor across every layer pool — the
-    // boundary-time complement to disableVoiceGC (see trimVoicePool). Only
-    // at rest: mid-jam the comp path refills a trimmed pool within a bar,
-    // so a playing-time trim buys nothing and bills the main thread for the
-    // disposals plus the reconstruction burst. The stop path re-runs it.
-    trimVoices() {
-      if (playing) return;
-      for (const t of MELODIC_TRACKS) for (const layer of live.layers[t]) trimVoicePool(layer);
+    // boundary-time complement to disableVoiceGC (see trimVoicePool). A
+    // free-running trim mid-jam would be the GC this app switched off: the
+    // comp path refills a sparse pool within a bar, so it buys nothing and
+    // bills the main thread for the disposals plus the reconstruction burst.
+    // So the default stays at-rest only, and the stop path re-runs it.
+    //
+    // `atBoundary` is the exception the dice roll needs. The pools' high-water
+    // mark is per SESSION while any one song's working set is per SONG, so
+    // without a trim each roll inherits every previous song's peak — and a
+    // burst of rolls looking for a song is the common gesture, not a rare one.
+    // Measured on the built app, playing, rolling every 2.5 s and settling
+    // (.tmp/dbg-roll-pool-ab.mjs): from a 346-source baseline, eight rolls
+    // reached 641 and sixteen reached 670 and stayed, every one of those
+    // oscillators and forever-running param ConstantSources billed per sample
+    // on the phone's audio thread. With the boundary trim the same burst grows
+    // +149 instead of +324, and further boundary passes reclaim nothing — what
+    // is left is the current song's working set, not the session's residue.
+    // The refill objection doesn't apply here because the pool being trimmed
+    // belongs to a song that no longer exists — the new one builds its own
+    // working set either way. Keep 2 rather than 1 while playing so the bar
+    // in progress doesn't rebuild from empty.
+    //
+    // Safe mid-playback by the same invariant stealDontDrop rests on: only
+    // _availableVoices is touched, and the _makeVoiceAvailable guard there
+    // refuses to return a voice with anything on its timeline ahead of now,
+    // so a voice sitting in that pool cannot be one the transport's
+    // lookAhead-early JIT has already claimed.
+    trimVoices({ atBoundary = false } = {}) {
+      if (playing && !atBoundary) return;
+      const keep = playing ? 2 : 1;
+      for (const t of MELODIC_TRACKS) for (const layer of live.layers[t]) trimVoicePool(layer, keep);
     },
     get playing() {
       return playing;
