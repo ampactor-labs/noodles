@@ -72,7 +72,8 @@ just that the play button lights up. `npm run calibrate` renders every device
 preset through the real signal chain and prints RMS/peak tables; those numbers
 are the ground truth behind the preset gain trims in `src/audio.js`.
 `npm run probe:render` times the audio render thread on seeded songs (the budget a
-phone crackles past).
+phone crackles past), and `npm run probe:music` rolls thousands of songs and
+measures the notes the dice deals.
 
 ## Verification
 

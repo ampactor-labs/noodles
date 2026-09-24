@@ -23,7 +23,7 @@
 // point a finger or a dice can reach is already mixed.
 
 import * as Tone from "tone";
-import { CHORDS, DRUM_VOICES, voiceLead, harmonyChord, harmonyIndexAt, clipAt, arrangeLength, clipLaunch, clipLengthBars, noteSlot, stepsFor, compHitAt, arpNoteAt } from "./model.js";
+import { CHORDS, DRUM_VOICES, chordVoicing, harmonyChord, harmonyIndexAt, clipAt, arrangeLength, clipLaunch, clipLengthBars, noteSlot, stepsFor, compHitAt, arpNoteAt } from "./model.js";
 
 // Per-track swing: offbeat lane steps get delayed by up to a third of a 16th
 // (1.0 = full triplet feel). Each track reads its own amount, falling back to
@@ -2168,23 +2168,8 @@ function eachActiveLayer(g, track, patch, fn) {
 // oct is the clip's whole-octave shift. It lands AFTER voice leading (prev
 // stays register-independent) and moves the pad and its halo together; the
 // low root hint stays anchored — it is the harmonic glue under the chord,
-// and bass owns the register it would otherwise wander into.
-// The heard shape of any chord entry: the triad voice-leads for continuity,
-// the stack (7-9-11-13) climbs tone over tone above it, and the bass is the
-// inversion's tone — which is what an inversion IS to the ear.
-function chordVoicing(entry, vstate) {
-  const ch = harmonyChord(entry);
-  const voiced = voiceLead(ch.pcs.slice(0, 3), vstate.prev);
-  vstate.prev = voiced;
-  const notes = voiced.slice();
-  let top = Math.max(...voiced);
-  for (const pc of ch.pcs.slice(3)) {
-    const n = pc + 12 * Math.ceil((top + 1 - pc) / 12);
-    notes.push(n);
-    top = n;
-  }
-  return { notes, top, bass: ch.bass ?? ch.pcs[0] };
-}
+// and bass owns the register it would otherwise wander into. The voicing
+// itself is model theory (chordVoicing), shared with npm run probe:music.
 
 // The comp path: one call per 16th for the harmony clip, so the rolled
 // gesture (vibe.comp) can place hits anywhere in the bar instead of only on
@@ -2199,6 +2184,10 @@ function playCompStepOn(g, patches, vstate, song, entry, stepInBar, time, oct = 
   const comp = song.vibe?.comp;
   if (attack) {
     vstate.compVoicing = chordVoicing(entry, vstate);
+    // The arp walks the voicing low to high and back. chordVoicing lists the
+    // triad in voice order (the staff's threads need that identity), which
+    // made the "up the stack" walk hop around the chord instead.
+    vstate.compVoicing.rising = vstate.compVoicing.notes.slice().sort((a, b) => a - b);
     const { top, bass } = vstate.compVoicing;
     const shift = 12 * oct;
     // Half-bar chords ring half a bar; whole-bar chords keep their whole note.
@@ -2213,7 +2202,7 @@ function playCompStepOn(g, patches, vstate, song, entry, stepInBar, time, oct = 
   const at = Math.max(0, time + swingOffsetFor(song, "harmony", stepInBar));
   const dur = hit.len >= 16 ? "1n" : sixteenth() * hit.len;
   if (hit.arp != null) {
-    const n = arpNoteAt(notes, hit.arp);
+    const n = arpNoteAt(vstate.compVoicing.rising, hit.arp);
     eachActiveLayer(g, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(midiToFreq(n + shift), dur, at, hit.vel));
   } else if (hit.vel == null) {
     eachActiveLayer(g, "harmony", patches.harmony, (layer) => layer.triggerAttackRelease(notes.map((m) => midiToFreq(m + shift)), dur, at));
@@ -3152,6 +3141,7 @@ export function createAudio(song) {
       try { live.halo?.triggerRelease(at); } catch {}
       try { live.sub.triggerRelease(at); } catch {}
       liveVoice.prev = null;
+      liveVoice.prevAll = null;
       parkContextSoon();
       visualQueue.length = 0;
       for (const track of TRACK_KEYS) queuedTracks[track] = -1; // clear queues on stop

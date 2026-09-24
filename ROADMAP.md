@@ -16,6 +16,19 @@ yet agreed: all-scenes sheet music, mixer ∿ badges for send-ride lanes
 (dice sets follow-actions so A→B→A plays itself — deferred because it
 changes session-launch defaults, the builder's call to make).
 
+The dice learned to deal music 2026-09-24 (D32), measured by `npm run
+probe:music` over 4000 rolls: per-mode progression decks (26% of songs
+held a diminished chord, 71% of phrygian ones; now 0%, and 70% open on
+the tonic), a pad voicing that places its seventh and one color tone
+rub-free instead of stacking them skyward (top-line leaps of a fourth or
+more 18% -> 5%), bass roots in A1-G#2 instead of half the rolls in
+octave 1, the melody over the pad instead of inside it (47% -> 1.6% of
+notes under its top voice), minor-second rubs against the sounding pad
+7.9% -> 1.7% of melody time, the polymeter bass pedaling the real tonic
+(it droned whatever scale note sat just above C: the leading tone in D
+major, the fourth in G), at most one featured color per roll, and a
+pitch-ordered arp.
+
 Session playback learned the phrase 2026-08-09: `clipLengthBars` said 1
 for every non-harmony track, so the session transport wrapped every
 drum/bass/melody clip at bar one — D19's multi-bar lanes paged four bars

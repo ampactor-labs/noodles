@@ -127,8 +127,11 @@ applied at playback after voice leading so chord continuity stays register-indep
 Circle-of-fifths theory (station math, signatures, mode offsets, `keyDisplayName`) lives
 here too. `scaleNotes(base, rows)` and
 `snapToScale(midi)` drive the piano roll. `SCALES` has major/minor/dorian/phrygian/lydian/
-mixolydian (all 7-note, so 7 chords each). Also here: `voiceLead`, `sharedTones`, `euclid`,
-the drum-voice metadata, and `makeSong` / `makeScene` / `cloneScene` / `arrangeLength` / `clipAt`.
+mixolydian (all 7-note, so 7 chords each). Also here: `voiceLead` and `chordVoicing` (the
+pad's heard voicing — triad voice-led, seventh and one color tone placed rub-free; playback,
+the staff painter and `npm run probe:music` all call it, D32), `sharedTones`, `euclid`,
+the drum-voice metadata, the per-mode progression decks the dice deals from, and `makeSong` /
+`makeScene` / `cloneScene` / `arrangeLength` / `clipAt`.
 
 **`src/audio.js`** — `createAudio(song)` builds the Tone.js graph and returns the transport
 API. The one rule that matters: **`buildGraph()` is the only place the signal chain exists.**
@@ -352,8 +355,10 @@ Plus tier-2 performance work listed in `ROADMAP.md` (diff-based cell repaints, p
   `idle` is zero by construction since D31). **`npm run probe:render`** is the render-thread
   receipt: it plays the built app, traces the audio render callbacks, and prints render ms per
   wall second and the slowest quantum for a seeded cold open and dice rolls (`--rolls`,
-  `--listen`, `--seed`). It prints evidence and asserts nothing — read it before and after,
-  like calibrate.
+  `--listen`, `--seed`). **`npm run probe:music`** rolls thousands of songs through model.js
+  (no browser) and measures the notes: diminished chords per mode, voicing span and top-line
+  motion, bass register, melody register, and minor-second rubs against the sounding pad.
+  Both print evidence and assert nothing — read them before and after, like calibrate.
 - **All three harnesses boot through `scripts/preview.mjs`** — don't re-copy `startPreview`,
   which is how the same teardown bug came to live in three files at once. `npm run preview`
   is a shell that spawns vite as a grandchild, so the child is spawned `detached` and stop()

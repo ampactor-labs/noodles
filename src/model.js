@@ -410,6 +410,125 @@ export function voiceLead(pcs, prev) {
   return best;
 }
 
+// The tones of a stack the pad actually sounds. The ladder stores the whole
+// stack (a 13 holds seven tones), and the pad used to play every one of them
+// climbing tone over tone above the triad: a 13 spanned 23 semitones up to
+// A5, and alternating a triad with a 7th jumped the top voice (and the halo
+// an octave over it) by a fourth or more on 18% of chord changes (npm run
+// probe:music). A pianist voices it the way the ear hears it instead: the
+// triad, the seventh, and the one color tone the rung is named for (the 9,
+// 11 or 13). The natural 11 over a major third is the textbook avoid note —
+// a minor ninth against the third — so a major-third 11 sounds its 9, and a
+// ♭9 color (a semitone over the root) is left out. Four-tone stacks (a 7th,
+// an add9) sound whole.
+function heardExtensions(pcs) {
+  const ext = pcs.slice(3);
+  if (ext.length <= 1) return ext;
+  const r = (x) => (((x - pcs[0]) % 12) + 12) % 12;
+  let color = ext[ext.length - 1];
+  if (r(color) === 5 && r(pcs[1]) === 4) color = ext[1];
+  return r(color) === 1 ? [ext[0]] : [ext[0], color];
+}
+
+// Where an extension may sit: inside the pad's register, never on a voice
+// already there. Top of the window is E5 — above it the halo (an octave over
+// the top voice) starts to whistle on a phone speaker.
+const PAD_EXT_LO = 52;
+const PAD_EXT_HI = 76;
+
+// The heard shape of any chord entry: the triad voice-leads for continuity
+// (its three voices keep their identity from chord to chord — the staff draws
+// those threads), the color tones are placed around it, and the bass is the
+// inversion's tone — which is what an inversion IS to the ear. vstate.prev
+// carries the triad's voice-leading memory, vstate.prevAll the whole last
+// voicing, so a seventh or a ninth moves by step like any other voice.
+//
+// Placement is a small search, every octave option of each color tone inside
+// the window — or leaving it out — scored: a minor second or minor ninth
+// against any voice is a rub, priced past anything else so a color tone that
+// can only rub is dropped instead; a second down in the mud below middle C, a
+// span past fourteen semitones, and a color tone under the triad's floor cost
+// a little; so does distance from what just sounded, and the top voice (the
+// line the ear follows, doubled by the halo) moving far. Leaving out the
+// seventh costs more than leaving out a color tone.
+export function chordVoicing(entry, vstate) {
+  const ch = harmonyChord(entry);
+  const led = voiceLead(ch.pcs.slice(0, 3), vstate.prev);
+  const ext = heardExtensions(ch.pcs);
+  let voiced = led;
+  let colors = [];
+  if (ext.length) {
+    const prevAll = vstate.prevAll;
+    const prevTop = prevAll?.length ? Math.max(...prevAll) : null;
+    const inWindow = (m) => m >= PAD_EXT_LO && m <= PAD_EXT_HI;
+    // A triad voice may drop or rise an octave to make room (the root under
+    // a major seventh instead of a semitone over it), at a cost that keeps
+    // the voice-led triad unless the color can't sit otherwise.
+    const triadOpts = led.map((m) => [m, m - 12, m + 12].filter((x, i) => i === 0 || inWindow(x)));
+    const extOpts = ext.map((pc) => {
+      const opts = [null];
+      for (let m = pc + 12 * Math.ceil((PAD_EXT_LO - pc) / 12); m <= PAD_EXT_HI; m += 12) opts.push(m);
+      return opts;
+    });
+    let bestCost = Infinity;
+    const score = (tri, picked) => {
+      const cand = picked.filter((m) => m != null);
+      const all = tri.concat(cand);
+      if (new Set(all).size < all.length) return Infinity;
+      // moving a led voice, and omitting: the seventh is the chord's
+      // identity, a color tone is color
+      let cost = tri.reduce((c, m, i) => c + (m === led[i] ? 0 : 3), 0);
+      cost += picked.reduce((c, m, i) => c + (m == null ? (i === 0 ? 12 : 6) : 0), 0);
+      for (let a = 0; a < all.length; a++) {
+        for (let b = a + 1; b < all.length; b++) {
+          const lo = Math.min(all[a], all[b]);
+          const d = Math.abs(all[a] - all[b]);
+          if (d % 12 === 1) cost += 100;
+          else if (d === 2 && lo < 60) cost += 1.5;
+        }
+      }
+      const top = Math.max(...all);
+      const floor = Math.min(...tri);
+      const span = top - Math.min(...all);
+      if (span > 14) cost += (span - 14) * 1.5;
+      for (const m of cand) {
+        if (m < floor) cost += 2;
+        if (prevAll?.length) cost += 0.3 * Math.min(...prevAll.map((p) => Math.abs(p - m)));
+      }
+      if (prevTop != null) cost += 0.6 * Math.abs(top - prevTop);
+      return cost;
+    };
+    for (const a of triadOpts[0]) {
+      for (const b of triadOpts[1]) {
+        for (const c of triadOpts[2]) {
+          const tri = [a, b, c];
+          const walk = (i, picked) => {
+            if (i === extOpts.length) {
+              const cost = score(tri, picked);
+              if (cost < bestCost) {
+                bestCost = cost;
+                voiced = tri;
+                colors = picked.filter((m) => m != null);
+              }
+              return;
+            }
+            for (const m of extOpts[i]) {
+              picked.push(m);
+              walk(i + 1, picked);
+              picked.pop();
+            }
+          };
+          walk(0, []);
+        }
+      }
+    }
+  }
+  vstate.prev = voiced;
+  const notes = voiced.concat(colors);
+  vstate.prevAll = notes;
+  return { notes, top: Math.max(...notes), bass: ch.bass ?? ch.pcs[0] };
+}
+
 // Pitch classes two chords share — the common tones that light up.
 export function sharedTones(a, b) {
   const sa = new Set(CHORDS[a].pcs);
@@ -909,6 +1028,10 @@ const FAST_COMP = { skank: ["keys", "stab"], pulse: ["keys", "stab"], tresillo: 
 // keeps every roll a CHANGE without biasing the long-run distribution much.
 // A rare wildcard roll leans into the odd corners on purpose.
 const lastRoll = { groove: null, kit: null, cadence: -1, vamp: -1 };
+// The bass register's floor: roots land in [BASS_FLOOR, BASS_FLOOR + 12),
+// A1-G#2. Older saved vibes carry their own bassBase; generation never goes
+// under the floor whatever they say.
+const BASS_FLOOR = 33;
 function rollVibe() {
   let groove = pickW(Object.entries(GROOVES).map(([name, g]) => [name, g.weight]));
   if (groove === lastRoll.groove) groove = pickW(Object.entries(GROOVES).map(([name, g]) => [name, g.weight]));
@@ -948,10 +1071,16 @@ function rollVibe() {
       return k;
     })(),
     // Registers roll once per vibe so every scene in the song lives in the
-    // same octave. Melody sits in octaves 3-5: octave 2 measured ~4 dB down
-    // through the lead highpass and sits on the bass register — out.
-    melodyBase: pickFrom([48, 60, 72]),
-    bassBase: rnd() < 0.5 ? 36 : 24,
+    // same octave. Melody sits over the pad, not inside or under it (D32): the pad's
+    // voicings live in E3-E5, and a base of C3 or C4 put the tune under the
+    // chords' top voice on 46% of its notes (19% under the lowest). G4 and C5
+    // windows keep the line on top, in the band a phone speaker is loudest.
+    melodyBase: pickFrom([67, 72]),
+    // Bass roots land in A1-G#2 (55-104 Hz) on every roll. Half of all rolls
+    // used to put them in octave 1 (32-62 Hz), which a phone speaker cannot
+    // make at all and a laptop barely hints at: 39% of dealt bass notes were
+    // under C2. The deep sine still folds up where it would vanish.
+    bassBase: BASS_FLOOR,
     // Space: every roll gets a depth FLOOR — a shared small room on the pad
     // and lead and a breath of it on the drums — because a bone-dry default
     // reads flat, not meaty (the builder's verdict overruled D9's dry
@@ -969,7 +1098,10 @@ function rollVibe() {
         },
       };
     })(),
-    harmonyOct: rnd() < 0.15 ? (rnd() < 0.5 ? 1 : -1) : 0,
+    // The pad's octave stays put now that the registers are planned: +1 put
+    // the chords on top of the melody, -1 into the bass's mud under the pad
+    // highpass. The clip's octave control is still one tap away.
+    harmonyOct: 0,
     polymeter: wildcard || rnd() < 0.1 ? (rnd() < 0.5 ? "bass" : "melody") : null,
     bScene: rnd() < 0.6,
     // The hand: half of rolls take a little of the groove's timing drift
@@ -986,8 +1118,35 @@ function rollVibe() {
 // Weighted progression families in scale degrees. Since D21 every family
 // lands as a four-bar phrase: vamps play their pair twice over, statics hold
 // one chord across all four bars.
-const CADENCES = [[0, 4, 5, 3], [0, 5, 3, 4], [5, 3, 0, 4], [0, 3, 4, 3], [1, 4, 0, 0], [0, 3, 0, 4], [0, 0, 3, 4], [5, 4, 3, 4]];
-const VAMPS = [[0, 5], [0, 3], [5, 3], [1, 4], [0, 4], [5, 4], [0, 6], [3, 4]];
+// The decks are per mode (D32). They used to be one set of major-key degree
+// patterns dealt into every mode, and a degree is not a function: I–V–vi–IV
+// in lydian is I–V–vi–♯iv°, in phrygian i–v°–VI–iv, in dorian i–v–vi°–IV.
+// Measured over 4000 rolls (npm run probe:music): 26% of songs held a
+// diminished triad, 66% of lydian and 71% of phrygian ones, and 6.6% of all
+// songs OPENED on one — a tense, unresolved chord as the first thing a cold
+// open plays. Each mode now deals the moves that mode is known for, built only
+// from its major and minor triads: major's I–V–vi–IV family, minor's
+// i–VI–III–VII and the descending i–VII–VI–v, dorian's bright IV (i–IV, the
+// i–III–v–IV turn), mixolydian's ♭VII (I–♭VII–IV), lydian's major II (I–II),
+// phrygian's ♭II (i–♭II, and iv–♭III–♭II–i). A diminished chord is still one
+// tap away on the wheel; the dice just no longer deals one.
+const MODE_CADENCES = {
+  major: [[0, 4, 5, 3], [0, 5, 3, 4], [5, 3, 0, 4], [0, 3, 4, 3], [1, 4, 0, 0], [0, 3, 0, 4], [0, 0, 3, 4], [5, 4, 3, 4], [0, 3, 5, 4], [3, 0, 4, 5]],
+  minor: [[0, 5, 2, 6], [0, 6, 5, 6], [0, 3, 6, 2], [5, 6, 0, 0], [0, 3, 4, 0], [3, 6, 2, 5], [0, 5, 3, 4], [0, 6, 5, 4]],
+  dorian: [[0, 3, 0, 3], [0, 2, 4, 3], [0, 6, 3, 0], [0, 3, 6, 0], [0, 1, 2, 1], [6, 3, 0, 0], [0, 2, 3, 0], [0, 4, 3, 0]],
+  mixolydian: [[0, 6, 3, 0], [0, 6, 0, 3], [3, 6, 0, 0], [0, 3, 6, 3], [0, 5, 6, 0], [0, 4, 3, 0], [0, 4, 6, 3]],
+  lydian: [[0, 1, 0, 1], [0, 1, 2, 1], [0, 1, 4, 0], [0, 1, 5, 4], [0, 4, 1, 0], [0, 1, 6, 0], [5, 1, 0, 0]],
+  phrygian: [[0, 1, 0, 1], [0, 1, 2, 1], [3, 2, 1, 0], [0, 6, 5, 1], [0, 5, 1, 0], [0, 1, 6, 0], [5, 1, 0, 0]],
+};
+const MODE_VAMPS = {
+  major: [[0, 5], [0, 3], [5, 3], [1, 4], [0, 4], [5, 4], [3, 4]],
+  minor: [[0, 5], [0, 3], [0, 6], [5, 6], [0, 2], [0, 4]],
+  dorian: [[0, 3], [0, 1], [0, 6], [0, 4], [0, 2]],
+  mixolydian: [[0, 6], [0, 3], [0, 4], [6, 3]],
+  lydian: [[0, 1], [0, 4], [0, 6], [0, 5]],
+  phrygian: [[0, 1], [0, 6], [0, 5], [0, 3]],
+};
+const modeDeck = (decks) => decks[curScale] || decks.major;
 const n12h = (v) => ((v % 12) + 12) % 12;
 // The scale's one diminished triad, found by interval. Fine as a passing bar
 // in a cadence or a wander; a floor-breaker held static or vamped every
@@ -995,6 +1154,16 @@ const n12h = (v) => ((v % 12) + 12) % 12;
 // with the mode: index 6 in major, 1 in minor, 4 in phrygian.
 const dimDegree = () =>
   CHORDS.findIndex((c) => (c.pcs[1] - c.pcs[0] + 12) % 12 === 3 && (c.pcs[2] - c.pcs[0] + 12) % 12 === 6);
+// Some degrees' diatonic 9th is the ♭9 rub — a semitone over the root (iii
+// in major, ii in dorian, ii and v in minor, i in phrygian). The vamp's
+// reference plays those chords plain, and so does every roll now: a dealt 9
+// caps at 7 wherever the scale doesn't give the ninth clean.
+function cleanRung(d, rung) {
+  if (rung !== "9") return rung;
+  const p = ladderPcs(d, "9");
+  return p.length >= 5 && (p[4] - p[0] + 12) % 12 === 1 ? "7" : rung;
+}
+
 export function magicHarmony(vibe) {
   // An archetype may carry its own family weights (the vamp lives on
   // vamps); everyone else keeps the house deck.
@@ -1006,10 +1175,11 @@ export function magicHarmony(vibe) {
   const fam = pickW(g?.harmonyFam || [["cadence", 62], ["wander", 22], ["vamp", 10], ["static", 6]]);
   let line;
   if (fam === "cadence") {
-    let i = rint(0, CADENCES.length - 1);
-    if (i === lastRoll.cadence) i = rint(0, CADENCES.length - 1);
+    const deck = modeDeck(MODE_CADENCES);
+    let i = rint(0, deck.length - 1);
+    if (i === lastRoll.cadence) i = rint(0, deck.length - 1);
     lastRoll.cadence = i;
-    line = CADENCES[i].slice();
+    line = deck[i].slice();
   } else if (fam === "vamp") {
     // Every roll is a four-bar phrase (D21): a vamp is its pair twice over.
     // Pairs holding the diminished degree sit out — [0, 6] is I–vii° in
@@ -1024,11 +1194,12 @@ export function magicHarmony(vibe) {
       lastRoll.vampPair = String(p);
       line = [p[0], p[1], p[0], p[1]];
     } else {
-      const ok = VAMPS.flatMap((v, i) => (v.includes(dim) ? [] : [i]));
+      const vamps = modeDeck(MODE_VAMPS);
+      const ok = vamps.flatMap((v, i) => (v.includes(dim) ? [] : [i]));
       let i = ok[rint(0, ok.length - 1)];
       if (i === lastRoll.vamp) i = ok[rint(0, ok.length - 1)];
       lastRoll.vamp = i;
-      const [a, b] = VAMPS[i];
+      const [a, b] = vamps[i];
       line = [a, b, a, b];
     }
     if (rnd() < (g?.visit ?? 0.5)) {
@@ -1041,13 +1212,27 @@ export function magicHarmony(vibe) {
       line[2 + (rnd() < 0.5 ? 0 : 1)] = pickFrom(pool);
     }
   } else if (fam === "static") {
-    // One chord held four bars — any but the diminished one (a four-bar dim
-    // drone breaks the floor); the seventh pass below can still shade it.
+    // One chord held four bars. Usually home (a static tonic is the modal
+    // groove — So What, a one-chord vamp); otherwise any major or minor
+    // degree. Never the diminished one: a four-bar dim drone breaks the
+    // floor. The seventh pass below can still shade it.
     const dim = dimDegree();
-    const d = pickFrom([0, 1, 2, 3, 4, 5, 6].filter((x) => x !== dim));
+    const d = rnd() < 0.7 ? 0 : pickFrom([1, 2, 3, 4, 5, 6].filter((x) => x !== dim));
     line = [d, d, d, d];
   } else {
-    line = Array.from({ length: 4 }, () => rint(0, 6)); // the surprise generator
+    // The surprise generator: four chords the dice has never heard of, but
+    // only the mode's major and minor triads, never the same chord twice in a
+    // row (the loop's wrap included), and home somewhere in the phrase — a
+    // random walk with no tonic in it doesn't land, it drifts.
+    const dim = dimDegree();
+    const pool = [0, 1, 2, 3, 4, 5, 6].filter((x) => x !== dim);
+    line = [];
+    for (let i = 0; i < 4; i++) {
+      const avoid = new Set([line[i - 1], i === 3 ? line[0] : -1]);
+      line.push(pickFrom(pool.filter((x) => !avoid.has(x))));
+    }
+    // no tonic dealt means no neighbor is one either, so home drops in clean
+    if (!line.includes(0)) line[rnd() < 0.6 ? 0 : rint(1, 3)] = 0;
   }
   // Color, taught by the dice: some rolls voice their line in sevenths (the
   // ladder the wheel and the rung chips already speak — the staff and the
@@ -1064,16 +1249,13 @@ export function magicHarmony(vibe) {
       // root (the ii in dorian, the ii and v in minor). The reference
       // plays those chords plain, so the rung caps at 7 and the 9s live
       // where the scale gives them clean.
-      if (rung === "9") {
-        const p = ladderPcs(d, "9");
-        if (p.length >= 5 && (p[4] - p[0] + 12) % 12 === 1) rung = "7";
-      }
+      rung = cleanRung(d, rung);
       return rung === "triad" ? d : { pcs: ladderPcs(d, rung) };
     });
   } else {
     const sevens = vibe?.wildcard || rnd() < 0.3;
     if (sevens && fam !== "wander") {
-      line = line.map((d, i) => (i === 0 && rnd() < 0.5 ? d : { pcs: ladderPcs(d, rnd() < 0.2 ? "9" : "7") }));
+      line = line.map((d, i) => (i === 0 && rnd() < 0.5 ? d : { pcs: ladderPcs(d, cleanRung(d, rnd() < 0.2 ? "9" : "7")) }));
     }
   }
   const majorSide = ["major", "lydian", "mixolydian"].includes(curScale);
@@ -1111,11 +1293,71 @@ const MOTIF_SHIFTS = [[0, 5], [1, 2], [-1, 2], [2, 1], [-2, 1]];
 // steps: the loop the lane will actually play when it isn't bars*16 (the
 // melody polymeter runs a 12-step cycle) — generating past it wrote notes
 // no one could ever hear, and the anti-dud counter believed in them.
+// The melody sings over a pad, and the ear hears every note against it. A
+// note a minor second or ninth from a voice the pad (or its halo) is holding
+// is the sound people call a wrong note; the generator only snapped its
+// strong notes to the chord's pitch classes, which says nothing about the
+// pad's actual voicing (the root sung over a major seventh rubs it) and
+// nothing about the notes between. Measured (npm run probe:music): 7.9% of
+// all melody note-time rubbed. So after drafting, every note is checked
+// against the pad it sounds over, voiced exactly as playback voices it, and a
+// rubbing note moves to the nearest window tone that sits clean — preferring
+// a chord tone on the beat — unless it is a passing tone: short, off the
+// beat, stepped into and out of. Those are the rubs a singer makes on
+// purpose. A lane shorter than the phrase (the 12-step polymeter) sounds each
+// step under every bar's chord in turn, so it has to sit clean over all of
+// them.
+function unrubMelody(melody, harmony, win) {
+  if (!harmony?.length) return melody;
+  const vs = { prev: null, prevAll: null };
+  for (const e of harmony) chordVoicing(e, vs); // steady state: the loop's second pass
+  const pads = harmony.map((e) => {
+    const v = chordVoicing(e, vs);
+    return { notes: v.notes.concat(v.top + 12), pcs: harmonyChord(e).pcs.map((p) => ((p % 12) + 12) % 12) };
+  });
+  const whole = melody.length % 16 === 0;
+  const padsAt = (s) => (whole ? [pads[Math.floor(s / 16) % pads.length]] : pads);
+  const rubs = (m, list) => list.some((pad) => pad.notes.some((p) => Math.abs(p - m) % 12 === 1));
+  const events = [];
+  melody.forEach((slot, s) => {
+    for (const n of noteSlot(slot)) events.push({ s, n });
+  });
+  events.forEach(({ s, n }, i) => {
+    const list = padsAt(s);
+    if (!rubs(n.midi, list)) return;
+    const prev = events[i - 1]?.n.midi;
+    const next = events[i + 1]?.n.midi;
+    const passing =
+      (n.len || 1) <= 2 && s % 4 !== 0 && prev != null && next != null && Math.abs(prev - n.midi) <= 2 && Math.abs(next - n.midi) <= 2;
+    if (passing) return;
+    const onBeat = s % 4 === 0;
+    let best = null;
+    let bestCost = Infinity;
+    for (const m of win) {
+      const d = Math.abs(m - n.midi);
+      if (d > 5 || rubs(m, list)) continue;
+      const tone = list.every((pad) => pad.pcs.includes(((m % 12) + 12) % 12));
+      const cost = d + (onBeat && !tone ? 2 : 0) + (next != null ? 0.1 * Math.abs(next - m) : 0);
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = m;
+      }
+    }
+    if (best != null) n.midi = best;
+  });
+  return melody;
+}
+
+const melodyWindow = (vibe) => scaleNotes(vibe.melodyBase, vibe.melodyBase >= 72 ? 11 : 14);
 function magicMelody(vibe, harmony = null, bars = 4, steps = 0) {
+  return unrubMelody(draftMelody(vibe, harmony, bars, steps), harmony, melodyWindow(vibe));
+}
+
+function draftMelody(vibe, harmony = null, bars = 4, steps = 0) {
   // Octave-5 rolls keep the brightness, lose the screech: 14 rows over base
   // 72 let motif shifts reach B6 (~2 kHz of saw fundamental on a phone
   // speaker); 11 rows cap the ceiling near F6. Lower bases keep the span.
-  const win = scaleNotes(vibe.melodyBase, vibe.melodyBase >= 72 ? 11 : 14);
+  const win = melodyWindow(vibe);
   const gap = GROOVES[vibe.groove].melodyGap;
   const total = steps || bars * 16;
   // Chord-tone gravity, per bar: with four-bar lanes (D21) the motif can
@@ -1232,10 +1474,21 @@ function magicMelody(vibe, harmony = null, bars = 4, steps = 0) {
 // Generating on the true grid — not writing 16 and truncating — keeps every
 // note audible and lands the drone halves inside the cycle.
 function magicBass(vibe, steps = 16) {
-  const notes = scaleNotes(vibe.bassBase, 12);
-  const low = notes.slice(0, 5);
+  // The key's own tonic, in the bass window. This used to be "the lowest
+  // scale note at or above the base", which is the tonic only in keys whose
+  // scale holds that C: in D major it was C#, and the drone pedaled the
+  // leading tone under every chord.
+  const tonic = curKey + 12 * Math.ceil((Math.max(BASS_FLOOR, vibe.bassBase || 0) - curKey) / 12);
+  const notes = scaleNotes(tonic, 12);
   const root = notes[0];
   const fifth = notes[Math.min(4, notes.length - 1)];
+  // A one-bar lane phases against the progression and can't follow it, so
+  // it pedals: the tonic and its fifth sit under every chord a mode deals
+  // (the root or fifth of I, the third or seventh of vi and iii, the fifth
+  // or ninth of IV). Its "roots" line used to pick any of the lowest five
+  // scale tones at random, which put the second and fourth degrees under
+  // chords they clash with.
+  const low = [root, root, fifth, root + 12];
   const bass = new Array(16).fill(null);
   const behavior = pickW(GROOVES[vibe.groove].bass);
   if (behavior === "drone") {
@@ -1279,7 +1532,7 @@ function magicBass(vibe, steps = 16) {
 function magicBassFollow(vibe, harmony) {
   const bars = harmony.length;
   const lane = new Array(bars * 16).fill(null);
-  const win = scaleNotes(vibe.bassBase, 12);
+  const win = scaleNotes(Math.max(BASS_FLOOR, vibe.bassBase || 0), 12);
   const n12b = (v) => ((v % 12) + 12) % 12;
   const noteFor = (b, i) => {
     const pcs = harmonyChord(normalizeHarmonyEntry(harmony[b])).pcs;
@@ -1585,7 +1838,10 @@ export function makeSong() {
       ? magicMelody(vibe, s.harmony, 1, 12) : magicMelody(vibe, s.harmony));
     const aPrime = makeVariationScene(s, vibe);
     const outro = cloneScene(s);
-    const ped = { pcs: ladderPcs(2, rnd() < 0.5 ? "9" : "7") };
+    // The ♭III of the minor-side modes; mixolydian's third degree is
+    // diminished, so its record dissolves on the IV instead.
+    const pedDeg = CHORDS[2] && (CHORDS[2].pcs[2] - CHORDS[2].pcs[0] + 12) % 12 === 6 ? 3 : 2;
+    const ped = { pcs: ladderPcs(pedDeg, cleanRung(pedDeg, rnd() < 0.5 ? "9" : "7")) };
     outro.harmony = [ped, ped, ped, ped];
     for (const v of DRUM_VOICES) outro.drums[v].fill(0);
     if (vibe.polymeter !== "bass") outro.bass = normalizeNoteLane(magicBassFollow(vibe, outro.harmony));
@@ -1597,7 +1853,9 @@ export function makeSong() {
         : slot))
       : lane);
     outro.bass = fadeLane(outro.bass);
-    outro.melody = fadeLane(outro.melody);
+    // The A melody over the pedal: sung again, checked against the chord it
+    // now sits on (it was cleaned against A's changes, not this one).
+    outro.melody = fadeLane(unrubMelody(outro.melody, outro.harmony, melodyWindow(vibe)));
     for (const sc of [s, interlude, aPrime]) {
       for (const t of ARRANGE_TRACKS) sc.launch[t] = { ...sc.launch[t], follow: "next", followBars: 8 };
     }
