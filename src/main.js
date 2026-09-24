@@ -1535,7 +1535,6 @@ function openTempoEditor() {
 // it back, sounds and sends included: the snapshot pushed here carries the
 // mixer and the device patches alongside the song (D30), so undoing a roll no
 // longer hands back the old song playing through the new instruments.
-const trimTimers = [];
 function rerollSong() {
   pushUndo();
   const fresh = makeSong();
@@ -1549,20 +1548,6 @@ function rerollSong() {
   playingScene = -1;
   for (const t of TRACKS) playingTracks[t.key] = -1;
   refreshAll();
-  // Reclaim the old song's voice-pool growth once its tails have released —
-  // each roll otherwise leaves the pools a little fuller, and the phone's
-  // audio thread pays for every pooled voice's running param sources. The
-  // roll almost always happens mid-jam, which is exactly the case the plain
-  // trim declines (see audio.trimVoices), so ask for the boundary form.
-  //
-  // In bars, not milliseconds: a reroll doesn't stop the transport, so the
-  // old song's voices don't get released — they simply stop being retriggered
-  // and fall idle over the following bar, which is 1.5 s at 160 BPM and 4 s
-  // at 60. Two passes, because the pass that takes the voices the new song
-  // hasn't claimed yet can't also take the pad tails that are still ringing.
-  const barMs = 240000 / song.tempo;
-  for (const t of trimTimers.splice(0)) clearTimeout(t); // a burst of rolls owns one pair, not one per roll
-  for (const bars of [1, 2.5]) trimTimers.push(setTimeout(() => audio.trimVoices?.({ atBoundary: true }), bars * barMs));
 }
 
 // Change the global key/scale; harmony follows automatically (it's degree-based),

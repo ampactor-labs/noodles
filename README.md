@@ -62,7 +62,7 @@ transforms on the piano rolls, undo and redo over whole-song snapshots.
 Vite + Tone.js + vanilla DOM/CSS, no framework.
 
 - `src/model.js` — pure data and music theory. No DOM, no Tone.
-- `src/audio.js` — the Tone.js graph and the transport.
+- `src/audio.js` — the audio graph (native Web Audio nodes; Tone.js keeps the clock) and the transport.
 - `src/main.js` — all UI and interaction.
 - `index.html` — the shell and CSS.
 
@@ -71,6 +71,8 @@ and asserts the core flow, including that the transport actually advances, not
 just that the play button lights up. `npm run calibrate` renders every device
 preset through the real signal chain and prints RMS/peak tables; those numbers
 are the ground truth behind the preset gain trims in `src/audio.js`.
+`npm run probe:render` times the audio render thread on seeded songs (the budget a
+phone crackles past).
 
 ## Verification
 

@@ -176,6 +176,24 @@ Adversarial investigation verdict (high confidence): **the stack is not the bott
 the implementation is**, and the Vite dev server is a big confound. BandLab/Soundtrap run
 smoothly on the same Web Audio API on this device class. So: optimize, don't switch stacks.
 
+**The 2026-09-24 pass measured the thread that crackles (D31).** Every earlier pass
+below worked on the main thread or on voice-pool growth; none had timed the audio render
+thread itself, which is what glitches when it misses a 2.67 ms quantum. `npm run
+probe:render` traces the live render callbacks on seeded songs. On a desktop Xeon core
+the cold open cost 278 ms/s and four rolls 254/253/376/381 (a third of a fast core,
+climbing roll by roll, p99 quantum 1.2-1.8 ms with a few past the deadline even there);
+a phone's audio core is 3-4x slower. The bill was Tone's wrappers, not the sound: idle
+pooled voices priced like sounding ones (3.2 vs 3.5 ms/s each, native 0.6 sounding and 0
+idle), every Tone.Filter recomputing coefficients per sample through ConstantSource-driven
+params (3.5x a native biquad), Tone.Phaser alone 51 ms/s. The engine is native nodes now
+(per-note voices, native biquads, rebuilt chorus/phaser/tremolo/auto-filter/echo/drive,
+synth kit parked under the sample bank), sound-neutral by calibrate (every row within
+0.1 dB), audit (identical), and a Tone null test (single notes -105..-130 dB). Same
+songs after: cold 76-87 ms/s, rolls 70-106, p99 quantum 0.39-0.50 ms, no growth across
+rolls; main thread while playing 25/18/11% -> 14/10/9% busy at 4x throttle. This
+supersedes the pool machinery described below (D25's caps-and-steal pools, the GC
+switch-off, the boundary trim, `probe:pool`): there are no pools left to trim.
+
 Done: convolution reverb → Freeverb; pad 24-voice fatsaw → 4-voice single saw; MetalSynth
 hat → filtered noise burst; `latencyHint: "playback"` with `lookAhead 0.25` (scheduling
 survives main-thread jank); pinch zoom scales a CSS transform and commits ONE rebuild on

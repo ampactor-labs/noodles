@@ -145,110 +145,659 @@ const COMP_SPECS = {
 // scheduled against it, so the graph sums in phase.
 const COMP_LATENCY = 0.00602;
 
-// Tone's PolySynth runs a per-second GC that prunes one idle voice whenever
-// the pool exceeds its running average of active voices — which, on a sparse
-// lane (most melodies, every gap between chords), tears voices down between
-// phrases and rebuilds them on the next trigger: main-thread Synth
-// construction plus native-node disposal, forever, across all twelve layer
-// synths. That churn is GC-pause food on a phone. Voices are already capped
-// at maxPolyphony (4-5) and an idle voice's sources are stopped (a silent
-// subtree costs ~nothing on the audio thread), so a warm pool trades a few
-// dormant nodes for zero mid-jam churn. Guarded against Tone internals
-// moving: if the private handle isn't there, this no-ops and the stock GC
-// keeps running.
-function disableVoiceGC(synth) {
-  if (typeof synth._gcTimeout === "number" && synth._gcTimeout !== -1) {
-    synth.context.clearInterval(synth._gcTimeout);
-    synth._gcTimeout = -1;
+// --- Native voices ------------------------------------------------------------
+//
+// A melodic note is two native nodes built for that note and gone when it
+// ends: an OscillatorNode and a GainNode carrying its envelope. That is the
+// whole voice. It replaced Tone.PolySynth pools (D31), and the reason is
+// the render thread, measured on Chrome (npm run probe:render; offline
+// component bench in DECISIONS D31):
+//
+//   - A Tone.Synth voice is nine nodes, four of them ConstantSourceNodes that
+//     never stop (frequency and detune for the omni and the inner oscillator,
+//     the envelope signal). Chrome pulls those every render quantum whether
+//     or not the voice is sounding, so an IDLE pooled voice cost as much as a
+//     sounding one: 3.2 vs 3.5 ms of render time per second, against 0.6 for
+//     a sounding native voice and nothing at all for one that does not exist.
+//   - Tone drives the native oscillator's frequency through a connected
+//     Signal, which forces Chrome's sample-accurate oscillator path (a wave
+//     table lookup and an exp2 per sample). A plain value never does.
+//
+// The pools were "warm" on purpose (the stock GC churned them) and trimmed at
+// boundaries to stop them growing across rolls; every one of those voices was
+// on the render bill. Nothing here needs warming, trimming, or a GC: a voice
+// exists exactly while it can make sound.
+//
+// The sound is Tone's, event for event. The envelope below writes the same
+// automation Tone.Envelope writes — a linear attack, an exponential approach
+// for decay and release with Tone's time constant (ln(t + 1) / ln 200), held
+// at 90% and finished with a linear ramp — straight onto the gain param, with
+// the voice's level folded in (Tone multiplied it one node later). A steal
+// re-attacks the stolen oscillator from its current level at the new pitch,
+// and a mono voice retriggered while it rings continues legato, both exactly
+// as Tone's Monophonic did. The event list is mirrored here so any voice's
+// level at any time is arithmetic, not a question for the browser.
+
+// The wrapper node a natively built node connects to: a Tone node's input,
+// followed down however many Tone layers sit in front of the real node.
+const inputOf = (node) => {
+  let n = node;
+  while (n && n.input && n.input !== n) n = n.input;
+  return n;
+};
+
+const LN200 = Math.log(200);
+// Tone's exponentialApproachValueAtTime time constant.
+const approachTc = (rampTime) => Math.log(rampTime + 1) / LN200;
+
+// Level of a mirrored event list at time t, by Web Audio's rules: "set" jumps,
+// "lin" ramps from the previous event's time and value, "tgt" approaches its
+// target from wherever the curve stood when it began.
+function envValueAt(ev, t) {
+  let v = 0;
+  let t0 = 0;
+  let tgt = null;
+  for (const e of ev) {
+    if (e.t > t) {
+      if (e.k === "lin" && !tgt) return e.t > t0 ? v + (e.v - v) * ((t - t0) / (e.t - t0)) : e.v;
+      break;
+    }
+    if (e.k === "tgt") {
+      if (tgt) v = tgt.v + (v - tgt.v) * Math.exp(-(e.t - t0) / tgt.tc);
+      tgt = { v: e.v, tc: e.tc };
+    } else {
+      v = e.v;
+      tgt = null;
+    }
+    t0 = e.t;
   }
+  return tgt ? tgt.v + (v - tgt.v) * Math.exp(-(t - t0) / tgt.tc) : v;
 }
-// One-shot pool trim for musical boundaries (a dice roll, stop): dispose
-// idle voices beyond a warm floor, mirroring the body of the per-second GC
-// this app disables. The GC's churn on sparse lanes is why it's off; a trim
-// at a boundary has no lane to churn. Without it every roll's dense
-// retrigger burst leaves the pools a little fuller — measured ~13 live
-// oscillators (with forever-running param ConstantSources) per roll,
-// plateauing only when all twelve layer pools hit their caps
-// (.tmp/dbg-dice-churn.mjs) — a bill the A16's audio thread pays per sample.
-function trimVoicePool(synth, keep = 1) {
-  if (!Array.isArray(synth._voices) || !Array.isArray(synth._availableVoices)) return;
-  while (synth._availableVoices.length > keep) {
-    const v = synth._availableVoices.shift();
-    const i = synth._voices.indexOf(v);
-    if (i >= 0) synth._voices.splice(i, 1);
-    v.dispose();
+
+// Tone.Envelope.triggerAttack as events: from `from` (0 for a fresh voice; the
+// current level for a steal or a legato retrigger, which shortens the attack
+// by the distance already covered, Tone's own arithmetic) up to vel, then the
+// decay's approach to vel * sustain.
+function pushAttack(ev, shape, t0, vel, from, sampleTime) {
+  const attack = from > 0 ? (1 - from) * shape.a : shape.a;
+  if (attack < sampleTime) {
+    ev.push({ k: "set", t: t0, v: vel });
+  } else {
+    ev.push({ k: "set", t: t0, v: from });
+    ev.push({ k: "lin", t: t0 + attack, v: vel });
+  }
+  if (shape.d && shape.s < 1) {
+    const target = vel * shape.s;
+    const ds = t0 + attack;
+    const tc = approachTc(shape.d);
+    ev.push({ k: "tgt", t: ds, v: target, tc });
+    ev.push({ k: "set", t: ds + 0.9 * shape.d, v: target + (vel - target) * Math.exp((-0.9 * shape.d) / tc) });
+    ev.push({ k: "lin", t: ds + shape.d, v: target });
   }
 }
 
-// At the polyphony cap the stock pool DROPS the incoming note and
-// console.warns — per note, forever. A capped pool under the comp gestures
-// (D24: the same chord re-struck per 16th, tails overlapping) reaches the
-// cap by design, and the musical behavior there is a restrike, not a hole:
-// take the oldest released voice — its tail is the oldest sound in the pool
-// — and re-attack it at the new pitch. Envelope attacks ramp from the
-// current level, so a steal is click-free. An un-released voice is taken
-// only when every voice is still held, a burst denser than the cap, where
-// choking the oldest is still the right sound.
-//
-// One law bounds the theft: only take a voice the re-attack cannot throw
-// on. Transport callbacks run lookAhead-early and JIT-write attacks ahead
-// of the clock, so the pool holds voices claimed at FUTURE times, and
-// Source.start enforces a monotone state timeline (the 1-in-7 smoke flake
-// this replaced). Mirror Source.start's two branches: a voice that reads
-// "started" now restarts safely — Tone cancels its pending tail-end stop —
-// but only if its last start is at least a render quantum old (an
-// equal-time restart trips the strict assert); a voice that reads
-// "stopped" appends, so nothing on its timeline may lie in the future (a
-// double-released voice carries a second, later stop). Guarded like the
-// GC patch: if Tone's internals move, the stock drop-and-warn keeps
-// running.
-function stealDontDrop(synth) {
-  if (!Array.isArray(synth._availableVoices) || !Array.isArray(synth._activeVoices)) return;
-  const orig = synth._getNextAvailableVoice.bind(synth);
-  // A stolen voice's PREVIOUS life still has its silence watch pending; when
-  // it fires, the stock hand-back would return the voice to the available
-  // pool mid-new-life — the next allocation then writes a start time behind
-  // the new life's claim and Tone throws (measured: every residual
-  // chaos-harness throw carried this double-free signature). Bookkeeping
-  // can't referee it: transport JIT runs lookAhead-early, so a whole future
-  // life (start AND stop) may already sit on the timeline with its entry
-  // marked released. The state timeline is the ground truth — honor a
-  // silence signal only for a voice with nothing scheduled ahead of now,
-  // exactly once.
-  if (typeof synth._makeVoiceAvailable === "function") {
-    const origFree = synth._makeVoiceAvailable.bind(synth);
-    synth._makeVoiceAvailable = (voice) => {
-      if (synth._activeVoices.some((e) => e.voice === voice && !e.released)) return;
-      if (synth._availableVoices.includes(voice)) return;
-      const last = voice?.oscillator?._state?.get?.(1e9);
-      if (last && last.time > synth.context.currentTime) return;
-      origFree(voice);
-    };
+// Drop everything at or after t, keeping the curve's shape up to t: a linear
+// ramp that spanned t is re-ended at t (what cancelAndHoldAtTime does). Writes
+// the same cut to the native param when one is given. Returns the level at t.
+function truncateAt(ev, t, param, level) {
+  const v = envValueAt(ev, t);
+  const i = ev.findIndex((e) => e.t >= t);
+  if (i < 0) return v;
+  const spanning = ev[i].k === "lin";
+  ev.length = i;
+  if (param) param.cancelScheduledValues(t);
+  if (spanning) {
+    ev.push({ k: "lin", t, v });
+    param?.linearRampToValueAtTime(v * level, t);
   }
-  const stealable = (v, now) => {
-    const st = v?.oscillator?._state;
-    if (!st?.getValueAtTime || !st.getLastState || !st.get) return false;
-    if (st.getValueAtTime(now) === "started") {
-      const started = st.getLastState("started", 1e9);
-      return !!started && started.time < now - 0.01;
-    }
-    const last = st.get(1e9);
-    return !last || last.time <= now;
+  return v;
+}
+
+// Tone.Envelope.triggerRelease at tr, on an event list that may still hold
+// the attack and decay. Returns the time the voice is silent for good.
+function pushRelease(ev, shape, tr, sampleTime) {
+  const v = truncateAt(ev, tr);
+  if (!(v > 0)) {
+    // Already silent (a sustain-0 voice whose decay finished): Tone schedules
+    // nothing, and the voice's last event is where it reached zero.
+    const last = ev[ev.length - 1];
+    return last ? Math.min(tr, last.t) : tr;
+  }
+  if (shape.r < sampleTime) {
+    ev.push({ k: "set", t: tr, v: 0 });
+    return tr;
+  }
+  const tc = approachTc(shape.r);
+  ev.push({ k: "set", t: tr, v });
+  ev.push({ k: "tgt", t: tr, v: 0, tc });
+  ev.push({ k: "set", t: tr + 0.9 * shape.r, v: v * Math.exp((-0.9 * shape.r) / tc) });
+  ev.push({ k: "lin", t: tr + shape.r, v: 0 });
+  return tr + shape.r;
+}
+
+function writeEvents(param, ev, level, from = 0) {
+  for (let i = from; i < ev.length; i++) {
+    const e = ev[i];
+    if (e.k === "set") param.setValueAtTime(e.v * level, e.t);
+    else if (e.k === "lin") param.linearRampToValueAtTime(e.v * level, e.t);
+    else param.setTargetAtTime(e.v * level, e.t, e.tc);
+  }
+}
+
+// Tone time strings the callers use, against the graph's own transport tempo
+// (live and offline both set it from song.tempo).
+const noteSeconds = (dur) =>
+  typeof dur === "number" ? dur : dur === "1n" ? 16 * sixteenth() : dur === "2n" ? 8 * sixteenth() : Tone.Time(dur).toSeconds();
+
+// A voice ending this close to a new note is left to finish rather than
+// re-used: its stop may already be past the point a new stop() can move.
+const REUSE_MARGIN = 0.05;
+
+// One oscillator wiring per corner wave. "fmsquare" is Tone's FMOscillator as
+// this app configures it: a square carrier whose frequency a sawtooth at half
+// the pitch swings by twice the pitch (harmonicity 0.5, modulation index 2).
+function spawnVoice(raw, wave, dest, freq, t0) {
+  const env = raw.createGain();
+  env.gain.value = 0;
+  env.connect(dest);
+  const osc = raw.createOscillator();
+  // t0: when the voice started; at: its latest strike (a steal or a legato
+  // retrigger re-strikes it); tr: its release; end: silent for good.
+  const v = { osc, env, mod: null, modGain: null, ev: [], t0, at: t0, tr: t0, end: t0 };
+  if (wave === "fmsquare") {
+    osc.type = "square";
+    v.mod = raw.createOscillator();
+    v.mod.type = "sawtooth";
+    v.modGain = raw.createGain();
+    v.mod.connect(v.modGain);
+    v.modGain.connect(osc.frequency);
+  } else {
+    osc.type = wave;
+  }
+  setVoiceFreq(v, freq);
+  osc.connect(env);
+  osc.start(t0);
+  v.mod?.start(t0);
+  osc.onended = () => {
+    osc.disconnect();
+    env.disconnect();
+    v.mod?.disconnect();
+    v.modGain?.disconnect();
   };
-  synth._getNextAvailableVoice = () => {
-    if (synth._availableVoices.length || synth._voices.length < synth.maxPolyphony) return orig();
-    const list = synth._activeVoices;
-    const now = synth.context.currentTime;
-    let pick = -1;
-    for (let i = 0; i < list.length; i++) {
-      if (!stealable(list[i].voice, now)) continue;
-      if (pick < 0) pick = i;
-      if (list[i].released) { pick = i; break; }
+  return v;
+}
+function setVoiceFreq(v, freq, at) {
+  const write = (param, value) => (at == null ? (param.value = value) : param.setValueAtTime(value, at));
+  write(v.osc.frequency, freq);
+  if (v.mod) {
+    write(v.mod.frequency, freq * 0.5);
+    write(v.modGain.gain, freq * 2);
+  }
+}
+// stop() may be called again to move a voice's end (a steal, a legato
+// retrigger, a release-all): the last call wins in every current engine.
+function stopVoice(v, end) {
+  v.end = end;
+  try {
+    v.osc.stop(end);
+    v.mod?.stop(end);
+  } catch {
+    // an engine that refuses a second stop keeps the first; the envelope
+    // has already closed the voice either way
+  }
+}
+// Release a sounding voice at `time` from wherever its envelope stands.
+function releaseVoice(v, shape, time, level, sampleTime) {
+  // A re-strike queued past `time` (a steal the lookahead already wrote)
+  // takes its pitch change with it: the release rings the note sounding now.
+  v.osc.frequency.cancelScheduledValues(time);
+  v.mod?.frequency.cancelScheduledValues(time);
+  v.modGain?.gain.cancelScheduledValues(time);
+  truncateAt(v.ev, time, v.env.gain, level);
+  const mark = v.ev.length;
+  v.tr = time;
+  const end = pushRelease(v.ev, shape, time, sampleTime);
+  writeEvents(v.env.gain, v.ev, level, mark);
+  stopVoice(v, Math.max(end, time));
+}
+
+// A layer: one preset corner's oscillator and envelope, a polyphony cap, and
+// the morph weight as its output volume (the node PolySynth called volume).
+class VoiceLayer {
+  constructor(raw, preset, cap, srcDb, dest) {
+    this.raw = raw;
+    this.wave = preset.osc || preset.wave;
+    this.shape = { a: preset.attack, d: preset.decay, s: preset.sustain, r: preset.release };
+    this.cap = cap;
+    this.level = Tone.dbToGain(srcDb);
+    this.out = new Tone.Volume(0).connect(dest);
+    this.volume = this.out.volume;
+    this.input = inputOf(this.out);
+    this.voices = [];
+  }
+  // Voices that can still sound at or after t. Offline renders schedule the
+  // whole song before the clock moves, so the horizon rides the note times.
+  _live(t) {
+    const horizon = Math.max(this.raw.currentTime, t - 0.3);
+    if (this.voices.length && this.voices[0].end <= horizon) this.voices = this.voices.filter((v) => v.end > horizon);
+    return this.voices;
+  }
+  triggerAttackRelease(freqs, dur, time, vel = 1) {
+    const d = noteSeconds(dur);
+    if (Array.isArray(freqs)) for (const f of freqs) this._note(f, d, time, vel);
+    else this._note(freqs, d, time, vel);
+  }
+  _note(freq, dur, t0, vel) {
+    const st = 1 / this.raw.sampleRate;
+    const voices = this._live(t0);
+    let sounding = 0;
+    for (const v of voices) if (v.t0 <= t0 && v.end > t0 + REUSE_MARGIN) sounding++;
+    if (sounding >= this.cap) {
+      // At the cap: re-strike the oldest released voice (else the oldest) at
+      // the new pitch from wherever its envelope stands, as the pool always
+      // did. Nothing stealable (a burst denser than the cap, all at once)
+      // drops the note, as Tone's pool does.
+      let pick = null;
+      for (const v of voices) {
+        // never a voice struck at this instant: that is another note of the
+        // chord being dealt right now
+        if (!(v.at < t0 - 0.001 && v.end > t0 + REUSE_MARGIN)) continue;
+        if (!pick) pick = v;
+        if (v.tr <= t0) {
+          pick = v;
+          break;
+        }
+      }
+      if (!pick) return;
+      const from = truncateAt(pick.ev, t0, pick.env.gain, this.level);
+      const mark = pick.ev.length;
+      pushAttack(pick.ev, this.shape, t0, vel, from, st);
+      pick.at = t0;
+      pick.tr = t0 + dur;
+      const end = pushRelease(pick.ev, this.shape, pick.tr, st);
+      writeEvents(pick.env.gain, pick.ev, this.level, mark);
+      setVoiceFreq(pick, freq, t0);
+      stopVoice(pick, end);
+      // Re-struck voices move to the back: they are the newest sound now.
+      voices.splice(voices.indexOf(pick), 1);
+      voices.push(pick);
+      return;
     }
-    if (pick < 0) return orig();
-    const [e] = list.splice(pick, 1);
-    return e.voice;
-  };
+    const v = spawnVoice(this.raw, this.wave, this.input, freq, t0);
+    pushAttack(v.ev, this.shape, t0, vel, 0, st);
+    v.tr = t0 + dur;
+    const end = pushRelease(v.ev, this.shape, v.tr, st);
+    writeEvents(v.env.gain, v.ev, this.level);
+    stopVoice(v, end);
+    voices.push(v);
+  }
+  // Tone.PolySynth.releaseAll: every sounding voice releases from where it
+  // stands; a note scheduled past `time` never starts.
+  releaseAll(time) {
+    const st = 1 / this.raw.sampleRate;
+    for (const v of this._live(time)) {
+      if (v.t0 > time) stopVoice(v, v.t0);
+      else if (v.end > time && v.tr > time) releaseVoice(v, this.shape, time, this.level, st);
+    }
+  }
+}
+
+// A monophonic voice (the pad's halo and root hint): Tone's Monophonic. A
+// retrigger while the last note still rings keeps the same oscillator, jumps
+// its pitch and re-attacks from the current level — legato, no gap.
+class MonoVoice {
+  constructor(raw, preset, srcDb, dest) {
+    this.raw = raw;
+    this.wave = preset.wave;
+    this.shape = { a: preset.attack, d: preset.decay, s: preset.sustain, r: preset.release };
+    this.level = Tone.dbToGain(srcDb);
+    this.dest = dest;
+    this.cur = null;
+  }
+  triggerAttackRelease(freq, dur, t0, vel = 1) {
+    const st = 1 / this.raw.sampleRate;
+    const d = noteSeconds(dur);
+    const cur = this.cur;
+    if (cur && cur.at < t0 && cur.end > t0 + REUSE_MARGIN) {
+      const from = truncateAt(cur.ev, t0, cur.env.gain, this.level);
+      const mark = cur.ev.length;
+      pushAttack(cur.ev, this.shape, t0, vel, from, st);
+      cur.at = t0;
+      cur.tr = t0 + d;
+      const end = pushRelease(cur.ev, this.shape, cur.tr, st);
+      writeEvents(cur.env.gain, cur.ev, this.level, mark);
+      setVoiceFreq(cur, freq, t0);
+      stopVoice(cur, end);
+      return;
+    }
+    if (cur && cur.end > t0) {
+      // Rings on too briefly to carry the new note: let it close under it.
+      stopVoice(cur, Math.min(cur.end, t0 + 0.005));
+    }
+    const v = spawnVoice(this.raw, this.wave, this.dest, freq, t0);
+    pushAttack(v.ev, this.shape, t0, vel, 0, st);
+    v.tr = t0 + d;
+    const end = pushRelease(v.ev, this.shape, v.tr, st);
+    writeEvents(v.env.gain, v.ev, this.level);
+    stopVoice(v, end);
+    this.cur = v;
+  }
+  triggerRelease(time) {
+    const v = this.cur;
+    if (!v || v.end <= time) return;
+    if (v.t0 > time) stopVoice(v, v.t0);
+    else if (v.tr > time) releaseVoice(v, this.shape, time, this.level, 1 / this.raw.sampleRate);
+  }
+}
+
+// --- Native effects -----------------------------------------------------------
+//
+// Tone's effects are the same few native nodes wrapped in a great many more:
+// every LFO is an oscillator, a waveshaper, a scale stage and three always-
+// running ConstantSourceNodes; every wet knob is a StereoPanner-driven
+// crossfade with its own ConstantSource; Tone.Filter drives its biquad's four
+// params through four more. Chrome pulls every one of those every render
+// quantum, and a connected biquad param is sample-accurate: the filter
+// recomputed its coefficients (two trig calls and a pow) on every sample of
+// every channel, for filters that never moved. Measured, render ms per second
+// (Chrome, OfflineAudioContext, D31): 20 static Tone.Filters 45.9 vs 13.0
+// native; Tone.Chorus 12.5; Tone.Phaser (10 stages) 51; Tone.Tremolo 11.6;
+// Tone.AutoFilter 10.2; Tone.FeedbackDelay 4.0; Tone.Distortion 3.5.
+//
+// These are the same effects built from the parts that do the work, with
+// Tone's parameter math kept exactly: an LFO's min..max is a center the param
+// holds plus a swing an oscillator adds; Tone's phase-shifted LFOs are the
+// same PeriodicWave Tone builds (sin(wt - phase)); a wet knob is Tone.CrossFade's
+// equal-power law, cos and sin of wet * pi / 2. Each is a ToneAudioNode, so
+// connect/disconnect and the color splice treat it like any Tone effect.
+
+class NativeFx extends Tone.ToneAudioNode {
+  constructor(name, stereo = false) {
+    super();
+    this.name = name;
+    this.input = new Tone.Gain(1);
+    this.output = new Tone.Gain(1);
+    if (stereo) {
+      // Tone's StereoEffect: mono sources are made stereo at the door.
+      this.input.channelCount = 2;
+      this.input.channelCountMode = "explicit";
+    }
+  }
+}
+
+// The underlying native node of a Tone/wrapper node, for the one knob the
+// wrapper does not expose (automationRate).
+const nativeNodeOf = (node) => {
+  let n = node;
+  while (n && !n._nativeAudioNode && n.input && n.input !== n) n = n.input;
+  return n?._nativeAudioNode || null;
+};
+// Coefficients once per render quantum instead of once per sample, for a
+// filter swept by a slow LFO: at 0.05-2 Hz the cutoff moves a fraction of a
+// percent per 2.7 ms quantum, and the per-sample path paid two trig calls
+// per sample per channel to draw the same curve.
+function kRateFrequency(filter) {
+  try {
+    const nat = nativeNodeOf(filter);
+    if (nat?.frequency && "automationRate" in nat.frequency) nat.frequency.automationRate = "k-rate";
+  } catch {
+    // an engine without automationRate keeps the a-rate curve
+  }
+}
+
+// Tone.Filter's -24 dB/oct: two identical biquads in series. Returns the
+// entry; the exit feeds `dest` and rides along as .exit.
+function biquad24(opts, dest) {
+  const a = new Tone.BiquadFilter(opts);
+  const b = new Tone.BiquadFilter(opts);
+  a.connect(b);
+  b.connect(dest);
+  a.exit = b;
+  return a;
+}
+
+// Tone's LFO phase: sin(wt - phase), as the PeriodicWave Tone builds for it.
+function phasedSine(raw, deg) {
+  const osc = raw.createOscillator();
+  if (deg) {
+    const ph = (deg * Math.PI) / 180;
+    osc.setPeriodicWave(raw.createPeriodicWave(new Float32Array([0, -Math.sin(ph)]), new Float32Array([0, Math.cos(ph)])));
+  }
+  return osc;
+}
+
+const crossfadeGains = (wet) => [Math.cos((wet * Math.PI) / 2), Math.sin((wet * Math.PI) / 2)];
+
+// Tone.Chorus as configured here: sine, spread 180 (the right LFO half a cycle
+// behind the left), no feedback. One oscillator drives both delay lines, the
+// right through a negated swing: -sin(wt) is sin(wt - 180).
+class NativeChorus extends NativeFx {
+  constructor(raw, { frequency, delayTime, depth, wet }) {
+    super("Chorus", true);
+    this._center = delayTime / 1000;
+    this._dry = new Tone.Gain(0).connect(this.output);
+    this._wet = new Tone.Gain(0).connect(this.output);
+    this.input.connect(this._dry);
+    const split = raw.createChannelSplitter(2);
+    const merge = raw.createChannelMerger(2);
+    this.input.connect(split);
+    this._l = new Tone.Delay({ delayTime: this._center, maxDelay: 1 });
+    this._r = new Tone.Delay({ delayTime: this._center, maxDelay: 1 });
+    split.connect(inputOf(this._l), 0);
+    split.connect(inputOf(this._r), 1);
+    this._l.connect(merge, 0, 0);
+    this._r.connect(merge, 0, 1);
+    merge.connect(inputOf(this._wet));
+    this._lfo = raw.createOscillator();
+    this._lfo.frequency.value = frequency;
+    this._swingL = new Tone.Gain(0).connect(this._l.delayTime);
+    this._swingR = new Tone.Gain(0).connect(this._r.delayTime);
+    this._lfo.connect(inputOf(this._swingL));
+    this._lfo.connect(inputOf(this._swingR));
+    this._lfo.start();
+    this.set({ depth, wet });
+  }
+  set({ depth, wet } = {}) {
+    if (depth != null) {
+      const dev = this._center * depth;
+      this._swingL.gain.value = dev;
+      this._swingR.gain.value = -dev;
+    }
+    if (wet != null) {
+      const [a, b] = crossfadeGains(wet);
+      this._dry.gain.value = a;
+      this._wet.gain.value = b;
+    }
+    return this;
+  }
+}
+
+// Tone.Phaser: `stages` allpass filters per channel (Q 10) swept linearly in
+// Hz between base and base * 2^octaves by an LFO, the right channel half a
+// cycle behind. The sweep is 0.1-2 Hz, so the allpasses take their cutoff
+// once per quantum (kRateFrequency) — twenty filters of per-sample trig was
+// the priciest single thing a dice roll could deal.
+class NativePhaser extends NativeFx {
+  constructor(raw, { frequency, octaves, baseFrequency, stages = 10, Q = 10 }) {
+    super("Phaser", true);
+    this._base = baseFrequency;
+    this._octaves = octaves;
+    this._dry = new Tone.Gain(0).connect(this.output);
+    this._wet = new Tone.Gain(0).connect(this.output);
+    this.input.connect(this._dry);
+    const split = raw.createChannelSplitter(2);
+    const merge = raw.createChannelMerger(2);
+    this.input.connect(split);
+    this._lfo = raw.createOscillator();
+    this._lfo.frequency.value = frequency;
+    this._swingL = new Tone.Gain(0);
+    this._swingR = new Tone.Gain(0);
+    this._lfo.connect(inputOf(this._swingL));
+    this._lfo.connect(inputOf(this._swingR));
+    this._filters = [];
+    for (const [ch, swing] of [[0, this._swingL], [1, this._swingR]]) {
+      let prev = null;
+      for (let i = 0; i < stages; i++) {
+        const f = new Tone.BiquadFilter({ type: "allpass", frequency: baseFrequency, Q });
+        kRateFrequency(f);
+        swing.connect(f.frequency);
+        if (prev) prev.connect(f);
+        else split.connect(inputOf(f), ch);
+        prev = f;
+        this._filters.push(f);
+      }
+      prev.connect(merge, 0, ch);
+    }
+    merge.connect(inputOf(this._wet));
+    this._lfo.start();
+    this._range();
+  }
+  // Setters skip unchanged values: updateColor runs on every patch write,
+  // and a moved range is twenty param writes.
+  _range() {
+    const min = this._base;
+    const max = this._base * Math.pow(2, this._octaves);
+    const center = (min + max) / 2;
+    if (center === this._center) return;
+    this._center = center;
+    const dev = (max - min) / 2;
+    for (const f of this._filters) f.frequency.value = center;
+    this._swingL.gain.value = dev;
+    this._swingR.gain.value = -dev;
+  }
+  set frequency(hz) {
+    if (hz === this._hz) return;
+    this._hz = hz;
+    this._lfo.frequency.value = hz;
+  }
+  set octaves(o) {
+    this._octaves = o;
+    this._range();
+  }
+  set wet(w) {
+    if (w === this._wetValue) return;
+    this._wetValue = w;
+    const [a, b] = crossfadeGains(w);
+    this._dry.gain.value = a;
+    this._wet.gain.value = b;
+  }
+}
+
+// Tone.Tremolo (sine, wet 1): each channel's gain swings 0.5 -/+ depth/2
+// (min 1, max 0, amplitude depth), the two LFOs at phases 90 -/+ spread/2.
+class NativeTremolo extends NativeFx {
+  constructor(raw, { frequency, depth, spread }) {
+    super("Tremolo", true);
+    const split = raw.createChannelSplitter(2);
+    const merge = raw.createChannelMerger(2);
+    this.input.connect(split);
+    this._lfos = [phasedSine(raw, 90 - spread / 2), phasedSine(raw, 90 + spread / 2)];
+    this._swings = [];
+    for (let ch = 0; ch < 2; ch++) {
+      const amp = new Tone.Gain(0.5);
+      split.connect(inputOf(amp), ch);
+      amp.connect(merge, 0, ch);
+      const swing = new Tone.Gain(0).connect(amp.gain);
+      this._lfos[ch].connect(inputOf(swing));
+      this._lfos[ch].frequency.value = frequency;
+      this._swings.push(swing);
+    }
+    merge.connect(inputOf(this.output));
+    for (const l of this._lfos) l.start();
+    this.depth = depth;
+  }
+  set frequency(hz) {
+    if (hz === this._hz) return;
+    this._hz = hz;
+    for (const l of this._lfos) l.frequency.value = hz;
+  }
+  set depth(d) {
+    if (d === this._depth) return;
+    this._depth = d;
+    for (const s of this._swings) s.gain.value = -0.5 * d;
+  }
+}
+
+// Tone.AutoFilter (sine, depth 1, wet 1): a 12 dB lowpass at Q 1 swept
+// linearly in Hz between base and base * 2^octaves. This one sweeps at the
+// tempo (up to a 16th), fast enough that the cutoff keeps its per-sample
+// path: the saving is the eleven wrapper nodes, not the filter math.
+class NativeAutoFilter extends NativeFx {
+  constructor(raw, { frequency, baseFrequency, octaves }) {
+    super("AutoFilter");
+    this._filter = new Tone.BiquadFilter({ type: "lowpass", frequency: baseFrequency, Q: 1 });
+    this.input.connect(this._filter);
+    this._filter.connect(this.output);
+    this._lfo = raw.createOscillator();
+    this._lfo.frequency.value = frequency;
+    this._swing = new Tone.Gain(0).connect(this._filter.frequency);
+    this._lfo.connect(inputOf(this._swing));
+    this._lfo.start();
+    this._base = baseFrequency;
+    this._octaves = octaves;
+    this._range();
+  }
+  _range() {
+    const min = this._base;
+    const max = this._base * Math.pow(2, this._octaves);
+    if (min === this._min && max === this._max) return;
+    this._min = min;
+    this._max = max;
+    this._filter.frequency.value = (min + max) / 2;
+    this._swing.gain.value = (max - min) / 2;
+  }
+  set frequency(hz) {
+    if (hz === this._hz) return;
+    this._hz = hz;
+    this._lfo.frequency.value = hz;
+  }
+  set baseFrequency(f) {
+    this._base = f;
+    this._range();
+  }
+  set octaves(o) {
+    this._octaves = o;
+    this._range();
+  }
+}
+
+// Tone.FeedbackDelay at wet 1: y = delay(x + feedback * y).
+class NativeEcho extends NativeFx {
+  constructor({ delayTime, feedback }) {
+    super("FeedbackDelay");
+    this._delay = new Tone.Delay({ delayTime, maxDelay: 1 });
+    this.delayTime = this._delay.delayTime;
+    this._fb = new Tone.Gain(feedback);
+    this.input.connect(this._delay);
+    this._delay.connect(this.output);
+    this._delay.connect(this._fb);
+    this._fb.connect(this._delay);
+  }
+}
+
+// Tone.Distortion at wet 1: Tone's curve, (3 + k) x 20deg / (pi + k|x|) with
+// k = 100 * amount and a dead zone under 0.001, on a 1024-point table. At
+// amount 0 it is a -9.5 dB linear stage (x / 3), which the bass corner trims
+// were measured through. The table is only rebuilt when the amount moves.
+class NativeDrive extends NativeFx {
+  constructor(amount) {
+    super("Distortion");
+    this._shaper = new Tone.WaveShaper();
+    this.input.connect(this._shaper);
+    this._shaper.connect(this.output);
+    this._amount = null;
+    this.distortion = amount;
+  }
+  set distortion(amount) {
+    if (amount === this._amount) return;
+    this._amount = amount;
+    const k = amount * 100;
+    const deg = Math.PI / 180;
+    this._shaper.setMap((x) => (Math.abs(x) < 0.001 ? 0 : ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x))));
+  }
+  get distortion() {
+    return this._amount;
+  }
 }
 
 // A compressor that only compresses.
@@ -799,6 +1348,9 @@ function bassVelocityBoost(preset, midi) {
 // nodes; the dry park makes them free).
 function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb = false } = {}) {
   const g = {};
+  // The context this graph lives in. Per-note nodes bind here, never to the
+  // ambient context: Tone.Offline restores the live one before its clock runs.
+  g.raw = Tone.getContext().rawContext;
 
   // Master chain: bus trim → rumble HP → low shelf → saturation → DC block →
   // soft clip → glue drive → glue → ceiling drive → ceiling → out.
@@ -976,7 +1528,7 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   // Blocking it the moment it's made, before any symmetric stage sees it, is
   // what leaves a clean, monotonic 2nd harmonic — the octave-up a phone speaker
   // can actually reproduce. 18 Hz is flat to -0.5 dB at 60 and untouched at 120.
-  g.satDC = new Tone.Filter({ type: "highpass", frequency: 18, Q: 0.7 }).connect(g.satTrim);
+  g.satDC = new Tone.BiquadFilter({ type: "highpass", frequency: 18, Q: 0.7 }).connect(g.satTrim);
   g.satSum = new Tone.Gain(1).connect(g.satDC);
   const [satIn, satOut] = makeShaper((a) => {
     const t = Math.tanh(a);
@@ -988,12 +1540,12 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   g.saturation = new Tone.Gain(Tone.dbToGain(SAT_DRIVE_DB));
   g.saturation.connect(satIn);
   g.saturation.connect(g.satDry);
-  g.lowShelf = new Tone.Filter({ type: "lowshelf", frequency: 100, gain: 2 }).connect(g.saturation);
+  g.lowShelf = new Tone.BiquadFilter({ type: "lowshelf", frequency: 100, gain: 2 }).connect(g.saturation);
   // Subsonic guard: the piano roll reaches C0 (16 Hz) and the bass lane HP at
   // 34 Hz only takes ~14 dB off it — what's left rides into the ceiling as
   // headroom loss no speaker gives back. 18 Hz leaves a 30 Hz 808 fundamental
   // essentially untouched (≈ -0.5 dB).
-  g.rumbleHP = new Tone.Filter({ type: "highpass", frequency: 18, Q: 0.7 }).connect(g.lowShelf);
+  g.rumbleHP = new Tone.BiquadFilter({ type: "highpass", frequency: 18, Q: 0.7 }).connect(g.lowShelf);
   g.master = new Tone.Gain(Tone.dbToGain(MASTER_TRIM_DB)).connect(g.rumbleHP);
   // applyMasterTo edits the bus around these constants; the trim rides along
   // so the master level knob offsets it instead of replacing it.
@@ -1038,7 +1590,7 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   // 20 ms of pre-delay before the verb: the ear locks onto the dry signal
   // before the tail arrives, so the room reads as depth behind the mix
   // instead of wash on top of it — the front/back panner, not a wet knob.
-  g.reverbHP = new Tone.Filter({ type: "highpass", frequency: 200, Q: 0.7 });
+  g.reverbHP = new Tone.BiquadFilter({ type: "highpass", frequency: 200, Q: 0.7 });
   g.reverbPre = new Tone.Delay({ delayTime: 0.02, maxDelay: 0.05 });
   g.reverbHP.connect(g.reverbPre);
   // The lean room (D28). Freeverb was the most expensive resident of the
@@ -1130,9 +1682,9 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   if (withVerb && lazyVerb) g.ensureReverb = () => g.reverb || makeReverb();
   else if (withVerb) makeReverb().connect(g.musicDuck);
   if (withEcho) {
-    g.echo = new Tone.FeedbackDelay({ delayTime: "8n", feedback: 0.26, wet: 1 }).connect(g.musicDuck);
+    g.echo = new NativeEcho({ delayTime: Tone.Time("8n").toSeconds(), feedback: 0.26 }).connect(g.musicDuck);
   }
-  g.echoHP = new Tone.Filter({ type: "highpass", frequency: 160, Q: 0.7 });
+  g.echoHP = new Tone.BiquadFilter({ type: "highpass", frequency: 160, Q: 0.7 });
   if (g.echo) g.echoHP.connect(g.echo);
   g.echoReturn = new Tone.Gain(Tone.dbToGain(-4)).connect(g.echoHP);
 
@@ -1204,56 +1756,40 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
     g.colorTypes[k] = "none";
   }
 
-  // Layer factory: one synth per preset corner, oscillator and envelope FIXED
-  // to that corner. Morphing crossfades whole voices — each corner keeps its
-  // identity, the blend does the work. Layers below ~2% weight are muted and
-  // never triggered, so parked-at-a-corner costs what a single synth did.
-  //
-  // Construct at the track source level: PolySynth bakes the constructor
-  // volume into each lazily-created VOICE (later .volume writes only reach
-  // the output node), so this is where the voice level — and the level that
-  // hits the drive stage — gets set. The output node then carries only the
-  // morph weight (applyMorphTo).
-  // Tone's positional form — PolySynth(voice, opts) — treats the WHOLE
-  // second argument as per-voice options: a maxPolyphony in there is
-  // silently swallowed and the pool runs at the class default of 32. The
-  // cap is only real in the object form, with the voice options nested
-  // under `options` (volume must stay nested too — it bakes into each
-  // voice; a top-level volume would only move the shared output node).
-  // Measured uncapped (.tmp/dbg-comp-drops.mjs): a pulse comp on the hire
-  // patch rang the pad layer to 24 voices and priced the full-band render
-  // at 1.65x its sustain equivalent — the D24 on-device regression.
+  // Layer factory: one voice layer per preset corner, oscillator and envelope
+  // FIXED to that corner. Morphing crossfades whole voices — each corner keeps
+  // its identity, the blend does the work. Layers below ~2% weight are muted
+  // and never triggered, so parked-at-a-corner costs what a single synth did.
+  // The source level folds into each voice's envelope (the level that hits
+  // the drive stage); the layer's output volume carries only the morph weight
+  // (applyMorphTo). Caps are per layer: a full 13th is seven tones, and the
+  // pad must hold one chord plus the tail of the last.
   const makeLayers = (table, poly, dest, srcDb) =>
-    Object.values(table).map((p) => {
-      const synth = new Tone.PolySynth({
-        voice: Tone.Synth,
-        maxPolyphony: poly,
-        options: {
-          oscillator: { type: p.osc || p.wave, detune: p.detune || 0 },
-          envelope: { attack: p.attack, decay: p.decay, sustain: p.sustain, release: p.release },
-          volume: srcDb,
-        },
-      }).connect(dest);
-      if ((p.osc || p.wave) === "fmsquare") synth.set({ oscillator: { modulationType: "sawtooth", harmonicity: 0.5, modulationIndex: 2 } });
-      disableVoiceGC(synth);
-      stealDontDrop(synth);
-      return synth;
-    });
+    Object.values(table).map((p) => new VoiceLayer(g.raw, p, poly, srcDb, dest));
 
   // Harmony: morphing pad + mono shimmer an octave up + a quiet low-mid root
   // hint. Bass owns the low end, so the pad and the hint are highpassed.
-  g.chorus = new Tone.Chorus({ frequency: 0.4, delayTime: 4, depth: 0.6, wet: 0.35 }).start();
+  g.chorus = new NativeChorus(g.raw, { frequency: 0.4, delayTime: 4, depth: 0.6, wet: 0.35 });
   // −2 dB at 320 Hz takes the box out of the pad: the 250–500 band is where
   // stacked chords go dull on a phone driver, and the pad is the widest
   // stack in the mix.
-  g.padUnbox = new Tone.Filter({ type: "peaking", frequency: 320, Q: 1.1, gain: -2 });
-  g.padHighpass = new Tone.Filter({ type: "highpass", frequency: 170, Q: 0.6 });
-  g.padFilter = new Tone.Filter({ type: "lowpass", frequency: 1500, Q: 0.7 });
-  // The LFO OWNS the pad cutoff (a signal connected to a param overrides it —
-  // writing frequency.value is silently ignored and rampTo throws). Patches
-  // steer the cutoff by rescaling the LFO's min/max around the blended value.
-  g.padLfo = new Tone.LFO({ frequency: 0.05, min: 850, max: 2600 }).connect(g.padFilter.frequency);
-  g.padLfo.start();
+  g.padUnbox = new Tone.BiquadFilter({ type: "peaking", frequency: 320, Q: 1.1, gain: -2 });
+  g.padHighpass = new Tone.BiquadFilter({ type: "highpass", frequency: 170, Q: 0.6 });
+  g.padFilter = new Tone.BiquadFilter({ type: "lowpass", frequency: 1500, Q: 0.7 });
+  kRateFrequency(g.padFilter);
+  // A 0.05 Hz breath on the pad cutoff: the param holds the center and an
+  // oscillator swings it, Tone.LFO's min..max as two numbers. Patches steer
+  // the cutoff by moving both (setPadSweep).
+  const padLfo = g.raw.createOscillator();
+  padLfo.frequency.value = 0.05;
+  g.padSwing = new Tone.Gain(0).connect(g.padFilter.frequency);
+  padLfo.connect(inputOf(g.padSwing));
+  padLfo.start();
+  g.setPadSweep = (min, max) => {
+    g.padFilter.frequency.value = (min + max) / 2;
+    g.padSwing.gain.value = (max - min) / 2;
+  };
+  g.setPadSweep(850, 2600);
   g.padHighpass.connect(g.padUnbox);
   g.padUnbox.connect(g.padFilter);
   if (g.chorus) {
@@ -1266,17 +1802,9 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   // hold one chord plus the tail of the last. Idle voices are silent
   // subtrees; the cost is pay-per-chord-size.
   g.padLayers = makeLayers(HARMONY_PRESETS, 8, g.padHighpass, SOURCE_LEVEL_DB.harmonyPad);
-  g.halo = new Tone.Synth({
-    oscillator: { type: "sine" },
-    envelope: { attack: 0.9, decay: 1, sustain: 0.5, release: 1.6 },
-    volume: SOURCE_LEVEL_DB.harmonyHalo,
-  }).connect(g.colorIn.harmony);
-  g.rootHintFilter = new Tone.Filter({ type: "highpass", frequency: 120, Q: 0.7 }).connect(g.colorIn.harmony);
-  g.sub = new Tone.Synth({
-    oscillator: { type: "sine" },
-    envelope: { attack: 0.08, decay: 0.4, sustain: 0.85, release: 1.6 },
-    volume: SOURCE_LEVEL_DB.harmonyRoot,
-  }).connect(g.rootHintFilter);
+  g.halo = new MonoVoice(g.raw, { wave: "sine", attack: 0.9, decay: 1, sustain: 0.5, release: 1.6 }, SOURCE_LEVEL_DB.harmonyHalo, inputOf(g.colorIn.harmony));
+  g.rootHintFilter = new Tone.BiquadFilter({ type: "highpass", frequency: 120, Q: 0.7 }).connect(g.colorIn.harmony);
+  g.sub = new MonoVoice(g.raw, { wave: "sine", attack: 0.08, decay: 0.4, sustain: 0.85, release: 1.6 }, SOURCE_LEVEL_DB.harmonyRoot, inputOf(g.rootHintFilter));
 
   // Bass and lead: layers feed the shared drive/filter lane. The static
   // carve filters are the phone-speaker translation layer (a 250 Hz–4 kHz
@@ -1284,14 +1812,14 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   // presence at 900 Hz so its NOTE survives a speaker that can't make its
   // fundamental, and the lead gets a +1.8 dB presence shelf at 2.6 kHz —
   // under its lowpass — so the hook stays forward at low volume.
-  g.bassHighpass = new Tone.Filter({ type: "highpass", frequency: 34, Q: 0.7 }).connect(g.colorIn.bass);
-  g.bassPresence = new Tone.Filter({ type: "peaking", frequency: 900, Q: 1, gain: 2 }).connect(g.bassHighpass);
-  g.bassFilter = new Tone.Filter({ type: "lowpass", frequency: 750, Q: 0.9 }).connect(g.bassPresence);
-  g.bassDrive = new Tone.Distortion(0).connect(g.bassFilter);
+  g.bassHighpass = new Tone.BiquadFilter({ type: "highpass", frequency: 34, Q: 0.7 }).connect(g.colorIn.bass);
+  g.bassPresence = new Tone.BiquadFilter({ type: "peaking", frequency: 900, Q: 1, gain: 2 }).connect(g.bassHighpass);
+  g.bassFilter = new Tone.BiquadFilter({ type: "lowpass", frequency: 750, Q: 0.9 }).connect(g.bassPresence);
+  g.bassDrive = new NativeDrive(0).connect(g.bassFilter);
   g.bassLayers = makeLayers(BASS_PRESETS, 4, g.bassDrive, SOURCE_LEVEL_DB.bass);
-  g.leadHighpass = new Tone.Filter({ type: "highpass", frequency: 180, Q: 0.7 }).connect(g.colorIn.melody);
-  g.leadPresence = new Tone.Filter({ type: "highshelf", frequency: 2600, gain: 1.8 }).connect(g.leadHighpass);
-  g.leadFilter = new Tone.Filter({ type: "lowpass", frequency: 3200, Q: 0.6 }).connect(g.leadPresence);
+  g.leadHighpass = new Tone.BiquadFilter({ type: "highpass", frequency: 180, Q: 0.7 }).connect(g.colorIn.melody);
+  g.leadPresence = new Tone.BiquadFilter({ type: "highshelf", frequency: 2600, gain: 1.8 }).connect(g.leadHighpass);
+  g.leadFilter = new Tone.BiquadFilter({ type: "lowpass", frequency: 3200, Q: 0.6 }).connect(g.leadPresence);
   g.leadLayers = makeLayers(MELODY_PRESETS, 5, g.leadFilter, SOURCE_LEVEL_DB.melody);
   // Chops land at the color junction like the drum one-shots at theirs:
   // pre-shaped audio skips the synth lane's filters, keeps color and sends.
@@ -1303,7 +1831,7 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   // synth-shaping filters below. The open voice detours through its choke
   // gain (built first, used by both banks) so a closed hat can end a ringing
   // open one-shot exactly like it ends the synth tail.
-  g.openTone = new Tone.Filter({ type: "lowpass", frequency: 16000, rolloff: -24, Q: 0.7 }).connect(g.colorIn.drums);
+  g.openTone = biquad24({ type: "lowpass", frequency: 16000, Q: 0.7 }, g.colorIn.drums);
   g.openChoke = new Tone.Gain(1).connect(g.openTone);
   g.sampleGains = {};
   for (const v of DRUM_VOICES) {
@@ -1312,7 +1840,7 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
 
   // Kit. Hat is a filtered noise burst on purpose — MetalSynth's 6 FM
   // oscillators made the most-triggered voice the priciest drum in the kit.
-  g.kickFilter = new Tone.Filter({ type: "lowpass", frequency: 1800, Q: 0.5 }).connect(g.colorIn.drums);
+  g.kickFilter = new Tone.BiquadFilter({ type: "lowpass", frequency: 1800, Q: 0.5 }).connect(g.colorIn.drums);
   g.kick = new Tone.MembraneSynth({ volume: SOURCE_LEVEL_DB.kick }).connect(g.kickFilter);
   // The synth snare is white noise with a highpass and nothing else, so it ran
   // flat all the way to Nyquist — and near-Nyquist energy is precisely where
@@ -1322,27 +1850,41 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   // snare has nothing up at 20 kHz, no phone or Bluetooth speaker reproduces
   // it, and the codecs in between clip on it: it was pure liability. -24 dB/oct
   // from 12 kHz leaves the crack alone and takes 24 kHz down by 24 dB.
-  g.snareTone = new Tone.Filter({ type: "lowpass", frequency: 12000, rolloff: -24, Q: 0.7 }).connect(g.colorIn.drums);
-  g.snareFilter = new Tone.Filter({ type: "highpass", frequency: 950 }).connect(g.snareTone);
+  g.snareTone = biquad24({ type: "lowpass", frequency: 12000, Q: 0.7 }, g.colorIn.drums);
+  g.snareFilter = new Tone.BiquadFilter({ type: "highpass", frequency: 950 }).connect(g.snareTone);
   g.snare = new Tone.NoiseSynth({ noise: { type: "white" }, volume: SOURCE_LEVEL_DB.snare }).connect(g.snareFilter);
   // Same story as the snare, milder only because the hat is quieter: white
   // noise with a highpass runs to Nyquist. 16 kHz is above every kit's morphed
   // resonance (4-9 kHz), so this takes the ultrasonics and leaves the sizzle.
-  g.hatTone = new Tone.Filter({ type: "lowpass", frequency: 16000, rolloff: -24, Q: 0.7 }).connect(g.colorIn.drums);
-  g.hatFilter = new Tone.Filter({ type: "highpass", frequency: 7500 }).connect(g.hatTone);
+  g.hatTone = biquad24({ type: "lowpass", frequency: 16000, Q: 0.7 }, g.colorIn.drums);
+  g.hatFilter = new Tone.BiquadFilter({ type: "highpass", frequency: 7500 }).connect(g.hatTone);
   g.hat = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.02, sustain: 0 }, volume: SOURCE_LEVEL_DB.hat }).connect(g.hatFilter);
   // The open hat is the same instrument in its ringing state: same noise
   // recipe, longer envelope, slightly lower highpass so the ring has body.
   // Routed through g.openChoke (built above, shared with the sample bank).
-  g.openFilter = new Tone.Filter({ type: "highpass", frequency: 6800 }).connect(g.openChoke);
+  g.openFilter = new Tone.BiquadFilter({ type: "highpass", frequency: 6800 }).connect(g.openChoke);
   g.open = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.02 }, volume: SOURCE_LEVEL_DB.open }).connect(g.openFilter);
-  g.clapFilter = new Tone.Filter({ type: "bandpass", frequency: 1400, Q: 1.2 }).connect(g.colorIn.drums);
+  g.clapFilter = new Tone.BiquadFilter({ type: "bandpass", frequency: 1400, Q: 1.2 }).connect(g.colorIn.drums);
   g.clap = new Tone.NoiseSynth({ noise: { type: "pink" }, volume: SOURCE_LEVEL_DB.clap }).connect(g.clapFilter);
   // Shaker: a short band of noise in the 4-6 kHz pocket, under everything and
   // over nothing. The bandpass center morphs with the kit like the hat's
   // resonance does.
-  g.percFilter = new Tone.Filter({ type: "bandpass", frequency: 5200, Q: 1.6 }).connect(g.colorIn.drums);
+  g.percFilter = new Tone.BiquadFilter({ type: "bandpass", frequency: 5200, Q: 1.6 }).connect(g.colorIn.drums);
   g.perc = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.004, decay: 0.06, sustain: 0 }, volume: SOURCE_LEVEL_DB.perc }).connect(g.percFilter);
+  // The synth kit's six exits. With the sample bank playing (the default)
+  // nothing reaches these voices, but a connected Tone synth still renders:
+  // its envelope and frequency ConstantSources run every quantum. Cut at
+  // these edges the whole kit leaves the rendered graph; the first hit that
+  // falls through to it reconnects before it schedules (setSynthKit).
+  g.synthKitEdges = [
+    [g.kickFilter, g.colorIn.drums],
+    [g.snareTone.exit, g.colorIn.drums],
+    [g.hatTone.exit, g.colorIn.drums],
+    [g.openFilter, g.openChoke],
+    [g.clapFilter, g.colorIn.drums],
+    [g.percFilter, g.colorIn.drums],
+  ];
+  g.synthKitOn = true;
 
   return g;
 }
@@ -1430,8 +1972,7 @@ function applyMorphTo(g, track, patch, { ramp = false, at } = {}) {
   setTrim(g, track, blendLin(table.map((p) => p.gain), w), ramp, at);
   if (track === "harmony") {
     const filter = blendLog(table.map((p) => p.filter), w);
-    g.padLfo.min = filter * 0.5;
-    g.padLfo.max = filter * 1.5;
+    g.setPadSweep(filter * 0.5, filter * 1.5);
     g.chorus?.set({ wet: blendLin(table.map((p) => p.chorusWet), w), depth: blendLin(table.map((p) => p.chorusDepth), w) });
   } else {
     const cutoff = blendLog(table.map((p) => p.cutoff), w);
@@ -1454,55 +1995,63 @@ const motionHz = (motion) => {
 // export must stay identical to the live app. Each maker returns
 // { nodes: [...serial chain...], updateColor(amount, motion) }.
 const COLOR_MAKERS = {
-  crush(amount) {
+  crush(raw, amount) {
     // Waveshaper quantizer: bit depth from amount (8 -> 3 bits). No sample-
-    // rate reduction, but cheap, deterministic, and offline-safe.
+    // rate reduction, but cheap, deterministic, and offline-safe. The table
+    // is rebuilt only when the depth moves: updateColor runs on every patch
+    // write, per 16th while a motion lane rides the pad.
     const curve = (bits) => {
       const steps = Math.pow(2, bits - 1);
       return (x) => Math.round(x * steps) / steps;
     };
-    const shaper = new Tone.WaveShaper(curve(8 - amount * 5), 1024);
-    return { nodes: [shaper], updateColor: (a) => shaper.setMap(curve(8 - a * 5), 1024) };
-  },
-  phase(amount, motion) {
-    // Ten allpass stages per channel is mastering-grade sweep density; four
-    // keeps the character live at a fraction of the audio-thread bill.
-    const phaser = new Tone.Phaser({ frequency: 0.1 + motion * 1.9, octaves: 2 + amount * 3, baseFrequency: 300, stages: 10 });
-    phaser.wet.value = Math.min(1, 0.3 + amount * 0.7);
+    let bits = 8 - amount * 5;
+    const shaper = new Tone.WaveShaper(curve(bits), 1024);
     return {
-      nodes: [phaser],
-      updateColor: (a, m) => {
-        phaser.frequency.value = 0.1 + m * 1.9;
-        phaser.octaves = 2 + a * 3;
-        phaser.wet.value = Math.min(1, 0.3 + a * 0.7);
+      nodes: [shaper],
+      updateColor: (a) => {
+        if (8 - a * 5 === bits) return;
+        bits = 8 - a * 5;
+        shaper.setMap(curve(bits), 1024);
       },
     };
   },
-  trem(amount, motion) {
+  phase(raw, amount, motion) {
+    // Ten allpass stages per channel (the full grade, D20), swept at 0.1-2 Hz.
+    const phaser = new NativePhaser(raw, { frequency: 0.1 + motion * 1.9, octaves: 2 + amount * 3, baseFrequency: 300, stages: 10 });
+    phaser.wet = Math.min(1, 0.3 + amount * 0.7);
+    return {
+      nodes: [phaser],
+      updateColor: (a, m) => {
+        phaser.frequency = 0.1 + m * 1.9;
+        phaser.octaves = 2 + a * 3;
+        phaser.wet = Math.min(1, 0.3 + a * 0.7);
+      },
+    };
+  },
+  trem(raw, amount, motion) {
     // Chopping the signal costs duty-cycle energy; the makeup gain gives it
     // back so trem reads as movement, not a volume drop (measured ~4-5 dB).
-    const tremolo = new Tone.Tremolo({ frequency: motionHz(motion), depth: 0.3 + amount * 0.7, spread: 60 }).start();
+    const tremolo = new NativeTremolo(raw, { frequency: motionHz(motion), depth: 0.3 + amount * 0.7, spread: 60 });
     const makeup = new Tone.Gain(Tone.dbToGain(1 + amount * 5));
     return {
       nodes: [tremolo, makeup],
       updateColor: (a, m) => {
-        tremolo.frequency.value = motionHz(m);
-        tremolo.depth.value = 0.3 + a * 0.7;
+        tremolo.frequency = motionHz(m);
+        tremolo.depth = 0.3 + a * 0.7;
         makeup.gain.value = Tone.dbToGain(1 + a * 5);
       },
     };
   },
-  wob(amount, motion) {
-    const auto = new Tone.AutoFilter({
+  wob(raw, amount, motion) {
+    const auto = new NativeAutoFilter(raw, {
       frequency: motionHz(motion),
       baseFrequency: 120 + amount * 180,
       octaves: 2.5 + amount * 2,
-    }).start();
-    auto.wet.value = 1;
+    });
     return {
       nodes: [auto],
       updateColor: (a, m) => {
-        auto.frequency.value = motionHz(m);
+        auto.frequency = motionHz(m);
         auto.baseFrequency = 120 + a * 180;
         auto.octaves = 2.5 + a * 2;
       },
@@ -1555,7 +2104,7 @@ function applyColorTo(g, track, patch) {
   }
   const amount = colorAmount(track, type, patch.amount);
   const cached = g.colorCache[track][type];
-  const made = cached || (g.colorCache[track][type] = COLOR_MAKERS[type](amount, patch.motion));
+  const made = cached || (g.colorCache[track][type] = COLOR_MAKERS[type](g.raw, amount, patch.motion));
   if (cached) {
     made.updateColor(amount, patch.motion);
     // A reused chain keeps its internal wiring; only the two ends were cut.
@@ -1741,6 +2290,12 @@ function wakeOpenAt(g, time) {
   p.setValueAtTime(1, time);
 }
 
+function setSynthKit(g, on) {
+  if (g.synthKitOn === !!on) return;
+  g.synthKitOn = !!on;
+  for (const [from, to] of g.synthKitEdges) on ? from.connect(to) : from.disconnect(to);
+}
+
 function hitDrumOn(g, patches, v, time, vel = 0.9) {
   if (v === "kick") scheduleKickDuck(g.musicDuck.gain, time);
   if (v === "hat") chokeOpenAt(g, time);
@@ -1772,6 +2327,8 @@ function hitDrumOn(g, patches, v, time, vel = 0.9) {
     if (played) return;
     // fall through to the synth voice if the buffers never arrived
   }
+  setSynthKit(g, true);
+  g.synthKitLastHit = time;
   if (v === "kick") g.kick.triggerAttackRelease("C1", "8n", time, vel);
   else if (v === "snare") g.snare.triggerAttackRelease("16n", time, vel);
   else if (v === "clap") g.clap.triggerAttackRelease("16n", time, vel);
@@ -2131,6 +2688,9 @@ export function createAudio(song) {
         trackParked[t] = true;
       }
     }
+    // The synth kit parks the same way one level down: the sample bank is
+    // the default, and a kit nobody has hit for a while renders silence.
+    if (live.synthKitOn && !(live.synthKitLastHit > cutoff)) setSynthKit(live, false);
   }
   // What "muted" means once solo is in play, in one place: the grid's dimming,
   // the session-record mute lane, the channel gates and the export's audible()
@@ -2597,84 +3157,24 @@ export function createAudio(song) {
       for (const track of TRACK_KEYS) queuedTracks[track] = -1; // clear queues on stop
       queueEpoch += 1;
       scheduleVisual(() => visualCb({ type: "queue", activeScenes: activeScenes(), queuedTracks: getQueuedTracks(), queueEpoch }));
-      // Once the releases have rung out and the voices are back in the
-      // available pools, reclaim the session's pool growth.
-      setTimeout(() => this.trimVoices(), 1800);
     },
-    // Dispose idle voices beyond a warm floor across every layer pool — the
-    // boundary-time complement to disableVoiceGC (see trimVoicePool). A
-    // free-running trim mid-jam would be the GC this app switched off: the
-    // comp path refills a sparse pool within a bar, so it buys nothing and
-    // bills the main thread for the disposals plus the reconstruction burst.
-    // So the default stays at-rest only, and the stop path re-runs it.
-    //
-    // `atBoundary` is the exception the dice roll needs. The pools' high-water
-    // mark is per SESSION while any one song's working set is per SONG, so
-    // without a trim each roll inherits the peak of every song before it — and
-    // a burst of rolls looking for a song is the common gesture, not a rare
-    // one. The refill objection doesn't apply at a roll: the pool being
-    // trimmed belongs to a song that no longer exists, and the new one builds
-    // its own working set either way.
-    //
-    // Measured on the built app, playing, rolling every 2.5 s and settling,
-    // three runs each (npm run probe:pool --runs 3 --rolls 16). After sixteen
-    // rolls the live source count settles at 665-680 without this and 522-545
-    // with it: ~135 fewer running oscillators and forever-running param
-    // ConstantSources, every one of them billed per sample on the phone's
-    // audio thread. Quote the settled ABSOLUTE count, not the growth: single
-    // runs of growth vary by ±50 because the dice deals songs of very
-    // different density, and a one-run-each comparison here first read
-    // +324 -> +149, which was luck dressed as precision.
-    //
-    // The floor is the same 1 per pool it is at rest. It started at 2 "for the
-    // bar in progress", and that was wrong twice over. Wrong by inspection:
-    // twelve pools at 2 allows 24 idle pool-wide, more than the ~23 voices a
-    // settled song holds in total, so the floor was larger than everything
-    // being played. And wrong in fact: at any settled moment the pools carry
-    // 1-2 idle each, so a floor of 2 meant the trim disposed NOTHING — ten
-    // consecutive trims left 42/28/14 untouched. It only ever fired at the
-    // boundary itself, where a retired song dumps 4-6 voices into a pool at
-    // once, which is why a broken floor still measured as a win. At 1 the
-    // same trim takes 15 idle to 10 and then converges, as an idempotent
-    // trim should. Post-roll settled source counts, three runs each
-    // (npm run probe:pool --runs 3 --rolls 16): 665-680 with no boundary
-    // trim, 559-587 at a floor of 2, 522-545 at a floor of 1.
-    //
-    // Safe mid-playback by the same invariant stealDontDrop rests on: only
-    // _availableVoices is touched, and the _makeVoiceAvailable guard there
-    // refuses to return a voice with anything on its timeline ahead of now,
-    // so a voice sitting in that pool cannot be one the transport's
-    // lookAhead-early JIT has already claimed.
-    // Returns what it did, so a harness can assert the trim ran rather than
-    // infer it from a count that a release landing a millisecond later
-    // rewrites. `floor` is the invariant worth pinning: it was once 2 while
-    // playing, which is above the 1-2 idle a settled pool carries, so the
-    // trim silently disposed nothing for a whole session of rolls and every
-    // behavioural check still passed.
-    trimVoices({ atBoundary = false } = {}) {
-      const FLOOR = 1;
-      if (playing && !atBoundary) return { ran: false, floor: FLOOR, disposed: 0 };
-      const before = this.voiceStats();
-      for (const t of MELODIC_TRACKS) for (const layer of live.layers[t]) trimVoicePool(layer, FLOOR);
-      const after = this.voiceStats();
-      return { ran: true, floor: FLOOR, disposed: before.voices - after.voices, idleBefore: before.idle, idleAfter: after.idle, pools: after.pools };
-    },
-    // The trim's scoreboard, across all twelve layer pools: how many voices
-    // exist, how many are claimed this instant, how many sit idle. `idle` is
-    // what a trim can reclaim, so idle staying near zero after a burst of
-    // rolls is the proof that what's left is the song's working set and not
-    // the session's residue — a claim worth being able to check rather than
-    // infer. Guarded like the rest of the pool code: if Tone's internals move,
-    // this reports zeros instead of throwing.
+    // The voice scoreboard across all twelve layers: voices that exist right
+    // now (sounding or scheduled), how many of those are sounding, and the
+    // caps. There is no idle column to speak of any more — a native voice
+    // exists only while it can make sound (D31) — so `idle` stays for the
+    // harnesses that read it and is zero by construction.
     voiceStats() {
+      const now = Tone.getContext().rawContext.currentTime;
       const stats = { pools: 0, voices: 0, active: 0, idle: 0, caps: 0 };
       for (const t of MELODIC_TRACKS) {
         for (const layer of live.layers[t]) {
           stats.pools += 1;
-          stats.voices += layer._voices?.length || 0;
-          stats.active += layer._activeVoices?.length || 0;
-          stats.idle += layer._availableVoices?.length || 0;
-          stats.caps += layer.maxPolyphony || 0;
+          stats.caps += layer.cap;
+          for (const v of layer.voices) {
+            if (v.end <= now) continue;
+            stats.voices += 1;
+            if (v.t0 <= now) stats.active += 1;
+          }
         }
       }
       return stats;
@@ -2995,6 +3495,9 @@ export function createAudio(song) {
             withEcho: TRACK_KEYS.some((k) => audible(k) && sendGain(channelState[k].echo) > 0) || rides("echo"),
           });
           for (const t of TRACK_KEYS) applyPatchTo(g, t, patchesCopy[t]);
+          // A sample-bank render leaves the synth kit out of the graph; a hit
+          // that falls through to it (a missing buffer) reconnects it.
+          if (patchesCopy.drums.bank === "sample" && samplesReady) setSynthKit(g, false);
           applyMasterTo(g, masterCopy); // the export hears the same bus moves
           for (const k of TRACK_KEYS) {
             const st = channelState[k];

@@ -692,3 +692,80 @@ spelling it out for themselves.
 The rule this leaves: engine state is audio.js's to own and main.js's to
 read. Anything the UI keeps a private copy of is a thing undo, save and
 the export can each disagree about.
+
+### D31 — The engine is native nodes; Tone keeps the clock
+
+The builder's report was plain: on the A16, one dice roll in, the jam
+crackles, stalls and glitches. The earlier perf passes had all been aimed
+at the main thread (long tasks, lookahead, paint churn) and at voice-pool
+growth, and none of them had measured the thread that crackles. So this
+one did: `npm run probe:render` plays the built app in headless Chrome,
+traces `RealtimeAudioDestinationHandler::Render`, and reports render time
+per wall second on seeded songs. On a desktop Xeon core the cold open
+cost 278 ms/s and the next four rolls 254, 253, 376 and 381: a third of a
+fast core, climbing roll by roll, with p99 quanta at 1.2-1.8 ms and a
+handful past the 2.67 ms deadline even there. A phone's audio core is
+three to four times slower. That is the crackle, arithmetically.
+
+An offline component bench (render ms/s, Chrome) found where it went, and
+almost none of it was the sound:
+
+- **Tone voices.** A Tone.Synth voice is nine nodes, four of them
+  ConstantSourceNodes that never stop (frequency and detune for the omni
+  and inner oscillators, the envelope signal). Chrome pulls those every
+  quantum whether or not the voice is sounding: an idle pooled voice cost
+  3.2 ms/s, a sounding one 3.5, against 0.6 for a sounding native voice.
+  Tone also drives the oscillator's frequency through a connected Signal,
+  which forces Chrome's sample-accurate oscillator path. The warm pools
+  (D25) and the boundary trims existed to manage exactly this bill.
+- **Tone.Filter.** Four ConstantSources per filter wired into the biquad's
+  params. A connected biquad param is sample-accurate in Chrome, so every
+  filter in the graph — 23 of them, most never moving — recomputed its
+  coefficients (two trig calls and a pow) on every sample of every
+  channel: 20 static Tone.Filters 45.9 ms/s vs 13.0 native.
+- **Tone effects.** Each LFO is an oscillator, a waveshaper, a scale stage
+  and three ConstantSources; each wet knob a StereoPanner-driven crossfade.
+  Tone.Phaser at ten stages cost 51 ms/s on its own; Chorus 12.5, Tremolo
+  11.6, AutoFilter 10.2, FeedbackDelay 4.0, Distortion 3.5.
+
+So audio.js builds the graph from native nodes and keeps Tone for the
+transport, the clock, Params and the handful of nodes that are thin
+wrappers already (Gain, Delay, BiquadFilter, WaveShaper, Compressor,
+Channel). A melodic note is an OscillatorNode and a GainNode made for that
+note and gone when it ends (`VoiceLayer`, `MonoVoice`): no pools, no GC to
+disable, no trim, no idle voices, because a voice exists only while it can
+sound. The envelope writes Tone.Envelope's exact automation (linear attack,
+exponential approach for decay and release with Tone's time constant,
+held at 90% and finished linear) with the voice level folded in; a steal
+re-strikes the oldest released voice from its current level at the new
+pitch and a mono retrigger continues legato, both as Tone did. Every
+Tone.Filter is a Tone.BiquadFilter (native params); chorus, phaser,
+tremolo, auto-filter, echo and the bass drive are rebuilt from the parts
+that do the work with Tone's parameter math kept (an LFO's min..max is a
+held center plus a swing; phases are the same PeriodicWave; wet is the
+same equal-power law). The pad's 0.05 Hz breath and the phaser's allpasses
+take their cutoff once per quantum (k-rate); the wob keeps per-sample
+cutoff because it sweeps at the tempo. The synth drum kit leaves the graph
+while the sample bank plays and reconnects on the first hit that falls
+through to it.
+
+Receipts. Parity first, because this was a sound-neutral rule: single
+notes null against Tone to -105..-130 dB (float noise); chords, one-shots
+and legato match envelope-for-envelope within 0.3 dB (mean 0.02-0.07);
+`npm run calibrate` lands every preset, morph point and color within
+0.1 dB RMS of the old engine; `npm run audit` reproduces the chain sweep,
+slopes, makeups, alignment, kick response and room to the digit. Two
+differences are on purpose and both are fixes: Tone's pooled voices
+opened every note on the previous pitch until the next 128-sample quantum
+(a chirp on every fast attack, up to 2.7 ms), and a stop let notes already
+queued in the lookahead start and then chopped them. Then the bill, same
+seeded songs: cold 278 -> 76-87 ms/s, rolls 254/253/376/381 ->
+70-78/66-68/95-99/103-106, p99 quantum 1.2-1.8 -> 0.39-0.50 ms, and no
+growth across rolls. The main thread got lighter too: 25/18/11% busy at
+4x throttle while playing -> 14/10/9%, and the worst long task after a
+roll 59 ms median -> none over 50.
+
+The rule this leaves: nothing in the live graph may drive a native param
+through a Tone Signal, and nothing may sit connected and idle. A Tone node
+that is more than a wrapper is a render-thread bill whether or not it
+makes a sound; measure it with `npm run probe:render` before adding one.
