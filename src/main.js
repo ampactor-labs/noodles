@@ -32,7 +32,7 @@ import {
   spellScalePc,
   harmonyChord,
   harmonyEntryEquals,
-  voiceLead,
+  chordVoicing,
   scaleDegreeOfPc,
   spellChordTones,
   signatureAccFor,
@@ -130,9 +130,20 @@ function rolledPatch(track) {
   }
   return p;
 }
+// A whole-song roll features at most one color (D32). Each track used to draw
+// its own from a pool with "none" weighted double, which still colored every
+// melodic track two times in three: an average roll stacked two or three
+// inserts, a crushed pad under a tremolo lead over a wobbling bass, and read
+// as an effects demo rather than a song. Now about half of all rolls color
+// one melodic track, and the drums crush now and then. The per-track sound
+// dice keeps the whole pool: rolling one sound on purpose can land anywhere.
 function randomizePresets(vibe) {
+  const featured = Math.random() < 0.45 ? pick(["harmony", "bass", "melody"]) : null;
   for (const t of ["harmony", "bass", "melody", "drums"]) {
     const p = rolledPatch(t);
+    if (t === "drums") p.color = Math.random() < 0.15 ? "crush" : "none";
+    else if (t !== featured) p.color = "none";
+    else if (p.color === "none") p.color = pick(colorNamesFor(t).filter((c) => c !== "none"));
     // A hired corner (rolled in the vibe, weighted by the groove) pulls the
     // morph point into its quadrant — within 0.35 of the corner on each axis
     // the bilinear weights keep it dominant (0.65² = 0.42 vs 0.23 adjacent)
@@ -998,7 +1009,12 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyRate = 1, har
   const rate = harmonyRate === 2 ? 2 : 1;
   const measures = Math.ceil(harmony.length / rate);
   const oct = 12 * harmonyOct;
-  let prev = null;
+  // The painter walks the same voicing chain playback walks (model's
+  // chordVoicing): triad voices keep their identity, color tones sit where
+  // the pad sounds them. Primed with one silent pass so bar one engraves the
+  // voicing the loop actually returns to, not a cold start.
+  const vs = { prev: null, prevAll: null };
+  for (const entry of harmony) chordVoicing(entry, vs);
   // The end-repeat owns the far right: the progression loops, and repeat dots
   // are the notation that says so - the wrap stubs already point at them.
   const repeatW = S * 1.9;
@@ -1137,23 +1153,18 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyRate = 1, har
       accState.B.clear();
     }
     const ch = harmonyChord(entry);
-    const voiced = (prev = voiceLead(ch.pcs.slice(0, 3), prev));
+    const heard = chordVoicing(entry, vs);
+    const voiced = heard.notes.slice(0, 3);
     const tones = spellChordTones(entry);
     const cx = startX + i * (cellW + gridGap) + cellW / 2;
-    // The full tower: led triad, then the stack climbing tone over tone -
-    // the same shape playback voices - plus the slash bass at the octave the
-    // sub actually sounds (48 + bass, audio.js chordVoicing / preview): every
-    // notehead is a pitch the instrument plays this bar. It engraved at
-    // 36 + bass for a while - an octave below anything that sounded. The sub
-    // is anchored regardless of harmonyOct (it is the glue under the chord),
-    // so its notehead cancels the octave shift the rest of the tower takes.
-    const midis = voiced.slice();
-    let topM = Math.max(...voiced);
-    for (const pc of ch.pcs.slice(3)) {
-      const m = pc + 12 * Math.ceil((topM + 1 - pc) / 12);
-      midis.push(m);
-      topM = m;
-    }
+    // The full tower: led triad and the color tones exactly as playback
+    // voices them (chordVoicing), plus the slash bass at the octave the sub
+    // actually sounds (48 + bass): every notehead is a pitch the instrument
+    // plays this bar. It engraved at 36 + bass for a while - an octave below
+    // anything that sounded. The sub is anchored regardless of harmonyOct (it
+    // is the glue under the chord), so its notehead cancels the octave shift
+    // the rest of the tower takes.
+    const midis = heard.notes.slice();
     const inv = (typeof entry === "object" && entry.inv) || 0;
     // Deduped: when the led triad's own bottom voice already sits on the
     // sub's pitch (a first inversion often does), that's one sounding
@@ -1217,7 +1228,7 @@ function paintChordStaff(c, { w, h, S, key, scale, harmony, harmonyRate = 1, har
   // bar, so each voice leaves toward where it will actually land on bar one.
   if (barThreads.length > 1) {
     const last = barThreads[barThreads.length - 1];
-    const wrapV = voiceLead(barThreads[0].pcs, last.raw);
+    const wrapV = chordVoicing(harmony[0], { prev: last.raw, prevAll: null }).notes.slice(0, 3);
     for (let j = 0; j < 3; j++) {
       if (!last.voices[j] || !wrapV) continue;
       const dyPerX = 0.12; // gentle exit slope toward the wrap target
@@ -1535,7 +1546,6 @@ function openTempoEditor() {
 // it back, sounds and sends included: the snapshot pushed here carries the
 // mixer and the device patches alongside the song (D30), so undoing a roll no
 // longer hands back the old song playing through the new instruments.
-const trimTimers = [];
 function rerollSong() {
   pushUndo();
   const fresh = makeSong();
@@ -1549,20 +1559,6 @@ function rerollSong() {
   playingScene = -1;
   for (const t of TRACKS) playingTracks[t.key] = -1;
   refreshAll();
-  // Reclaim the old song's voice-pool growth once its tails have released —
-  // each roll otherwise leaves the pools a little fuller, and the phone's
-  // audio thread pays for every pooled voice's running param sources. The
-  // roll almost always happens mid-jam, which is exactly the case the plain
-  // trim declines (see audio.trimVoices), so ask for the boundary form.
-  //
-  // In bars, not milliseconds: a reroll doesn't stop the transport, so the
-  // old song's voices don't get released — they simply stop being retriggered
-  // and fall idle over the following bar, which is 1.5 s at 160 BPM and 4 s
-  // at 60. Two passes, because the pass that takes the voices the new song
-  // hasn't claimed yet can't also take the pad tails that are still ringing.
-  const barMs = 240000 / song.tempo;
-  for (const t of trimTimers.splice(0)) clearTimeout(t); // a burst of rolls owns one pair, not one per roll
-  for (const bars of [1, 2.5]) trimTimers.push(setTimeout(() => audio.trimVoices?.({ atBoundary: true }), bars * barMs));
 }
 
 // Change the global key/scale; harmony follows automatically (it's degree-based),

@@ -878,8 +878,9 @@ try {
     scenes: window.__noodles.song.scenes.length,
     tag: window.__noodles.song.scenes[0].tag,
   }));
-  // A roll is one magic scene, sometimes with a ✨b variation to go to.
-  assertState(afterDice.scenes >= 1 && afterDice.scenes <= 2 && afterDice.tag.includes("✨"), `dice did not roll a fresh magic song: ${JSON.stringify(afterDice)}`);
+  // A roll is one magic scene, sometimes with a ✨b variation to go to, and
+  // the vamp deals its record's four-scene arc (in, breath, back, out).
+  assertState(afterDice.scenes >= 1 && afterDice.scenes <= 4 && afterDice.tag.includes("✨"), `dice did not roll a fresh magic song: ${JSON.stringify(afterDice)}`);
   await page.evaluate(() => document.querySelector(".tbtn.undo").click());
   const scenesAfterUndo = await page.evaluate(() => window.__noodles.song.scenes.length);
   assertState(scenesAfterUndo === scenesBeforeDice, `undo did not restore the pre-dice song (${scenesAfterUndo} vs ${scenesBeforeDice})`);
@@ -932,39 +933,30 @@ try {
     assertState(roll.preset !== "deep" || roll.minMidi >= 36, `dice dealt deep bass below octave 2 (min midi ${roll.minMidi})`);
   }
 
-  // The boundary trim must actually dispose. An earlier version of this guard
-  // only bounded idle surplus loosely, and a trim that had been silently
-  // no-op'd for a whole session's worth of rolls sailed straight through it:
-  // the floor was 2 per pool while a settled song carries 1-2 idle per pool,
-  // so nothing ever exceeded it. The tight invariant is the floor itself —
-  // after a trim, no pool may hold more than one idle voice, so total idle
-  // cannot exceed the pool count. That fails loudly on a dead trim.
-  const pools = await page.evaluate(() => {
-    const { audio } = window.__noodles;
-    return { report: audio.trimVoices({ atBoundary: true }), stats: audio.voiceStats() };
-  });
+  // Voices exist only while they can sound (D31): the native engine has no
+  // pools to trim, so the invariants are the caps while playing and zero
+  // voices once a stop has rung out. The second is the one a leak cannot pass
+  // — the pooled engine this replaced held dozens of idle voices forever,
+  // each one billed to the render thread every quantum.
+  // Earlier steps toggle the transport; the invariant needs it running.
+  if (!(await page.evaluate(() => window.__noodles.audio.playing))) {
+    await page.evaluate(() => document.querySelector(".tbtn.play")?.click());
+  }
+  await wait(1500); // let the last roll's first bar schedule
+  const playingVoices = await page.evaluate(() => ({
+    stats: window.__noodles.audio.voiceStats(),
+    playing: window.__noodles.audio.playing,
+    mode: window.__noodles.audio.mode,
+  }));
   assertState(
-    pools.stats.voices > 0 && pools.stats.voices <= pools.stats.caps,
-    `voice pools past their caps: ${JSON.stringify(pools.stats)}`
+    playingVoices.playing && playingVoices.stats.voices > 0 && playingVoices.stats.voices <= playingVoices.stats.caps && playingVoices.stats.idle === 0,
+    `voices past their caps, idle, or absent while playing: ${JSON.stringify(playingVoices)}`
   );
-  // The floor, pinned. This is the deterministic half: a behavioural check
-  // only bites when surplus happens to exist at that instant, and the broken
-  // floor sailed through one. One idle voice per pool is what a settled song
-  // carries, so anything above it disposes nothing.
-  assertState(
-    pools.report.ran && pools.report.floor === 1,
-    `the boundary trim did not run at a floor of 1: ${JSON.stringify(pools.report)}`
-  );
-  // And the behavioural half, when there is anything to reclaim.
-  assertState(
-    pools.report.idleBefore <= pools.report.pools || pools.report.disposed > 0,
-    `the trim saw ${pools.report.idleBefore} idle voices across ${pools.report.pools} pools and disposed none: ` +
-    JSON.stringify(pools.report)
-  );
-  assertState(
-    pools.report.idleAfter <= pools.report.pools,
-    `the trim left ${pools.report.idleAfter} idle across ${pools.report.pools} pools: ${JSON.stringify(pools.report)}`
-  );
+  await page.evaluate(() => document.querySelector(".tbtn.play")?.click());
+  await wait(3500); // past the longest release (ambient pad, 2.5 s)
+  const restVoices = await page.evaluate(() => ({ playing: window.__noodles.audio.playing, stats: window.__noodles.audio.voiceStats() }));
+  assertState(!restVoices.playing, "the play button did not stop the transport");
+  assertState(restVoices.stats.voices === 0, `voices still alive after stop rang out: ${JSON.stringify(restVoices.stats)}`);
 
   assertState(errors.length === 0, `runtime errors:\n${errors.join("\n")}`);
   console.log(`smoke ok: ${propsShotPath}`);

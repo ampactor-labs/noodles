@@ -692,3 +692,144 @@ spelling it out for themselves.
 The rule this leaves: engine state is audio.js's to own and main.js's to
 read. Anything the UI keeps a private copy of is a thing undo, save and
 the export can each disagree about.
+
+### D31 — The engine is native nodes; Tone keeps the clock
+
+The builder's report was plain: on the A16, one dice roll in, the jam
+crackles, stalls and glitches. The earlier perf passes had all been aimed
+at the main thread (long tasks, lookahead, paint churn) and at voice-pool
+growth, and none of them had measured the thread that crackles. So this
+one did: `npm run probe:render` plays the built app in headless Chrome,
+traces `RealtimeAudioDestinationHandler::Render`, and reports render time
+per wall second on seeded songs. On a desktop Xeon core the cold open
+cost 278 ms/s and the next four rolls 254, 253, 376 and 381: a third of a
+fast core, climbing roll by roll, with p99 quanta at 1.2-1.8 ms and a
+handful past the 2.67 ms deadline even there. A phone's audio core is
+three to four times slower. That is the crackle, arithmetically.
+
+An offline component bench (render ms/s, Chrome) found where it went, and
+almost none of it was the sound:
+
+- **Tone voices.** A Tone.Synth voice is nine nodes, four of them
+  ConstantSourceNodes that never stop (frequency and detune for the omni
+  and inner oscillators, the envelope signal). Chrome pulls those every
+  quantum whether or not the voice is sounding: an idle pooled voice cost
+  3.2 ms/s, a sounding one 3.5, against 0.6 for a sounding native voice.
+  Tone also drives the oscillator's frequency through a connected Signal,
+  which forces Chrome's sample-accurate oscillator path. The warm pools
+  (D25) and the boundary trims existed to manage exactly this bill.
+- **Tone.Filter.** Four ConstantSources per filter wired into the biquad's
+  params. A connected biquad param is sample-accurate in Chrome, so every
+  filter in the graph — 23 of them, most never moving — recomputed its
+  coefficients (two trig calls and a pow) on every sample of every
+  channel: 20 static Tone.Filters 45.9 ms/s vs 13.0 native.
+- **Tone effects.** Each LFO is an oscillator, a waveshaper, a scale stage
+  and three ConstantSources; each wet knob a StereoPanner-driven crossfade.
+  Tone.Phaser at ten stages cost 51 ms/s on its own; Chorus 12.5, Tremolo
+  11.6, AutoFilter 10.2, FeedbackDelay 4.0, Distortion 3.5.
+
+So audio.js builds the graph from native nodes and keeps Tone for the
+transport, the clock, Params and the handful of nodes that are thin
+wrappers already (Gain, Delay, BiquadFilter, WaveShaper, Compressor,
+Channel). A melodic note is an OscillatorNode and a GainNode made for that
+note and gone when it ends (`VoiceLayer`, `MonoVoice`): no pools, no GC to
+disable, no trim, no idle voices, because a voice exists only while it can
+sound. The envelope writes Tone.Envelope's exact automation (linear attack,
+exponential approach for decay and release with Tone's time constant,
+held at 90% and finished linear) with the voice level folded in; a steal
+re-strikes the oldest released voice from its current level at the new
+pitch and a mono retrigger continues legato, both as Tone did. Every
+Tone.Filter is a Tone.BiquadFilter (native params); chorus, phaser,
+tremolo, auto-filter, echo and the bass drive are rebuilt from the parts
+that do the work with Tone's parameter math kept (an LFO's min..max is a
+held center plus a swing; phases are the same PeriodicWave; wet is the
+same equal-power law). The pad's 0.05 Hz breath and the phaser's allpasses
+take their cutoff once per quantum (k-rate); the wob keeps per-sample
+cutoff because it sweeps at the tempo. The synth drum kit leaves the graph
+while the sample bank plays and reconnects on the first hit that falls
+through to it.
+
+Receipts. Parity first, because this was a sound-neutral rule: single
+notes null against Tone to -105..-130 dB (float noise); chords, one-shots
+and legato match envelope-for-envelope within 0.3 dB (mean 0.02-0.07);
+`npm run calibrate` lands every preset, morph point and color within
+0.1 dB RMS of the old engine; `npm run audit` reproduces the chain sweep,
+slopes, makeups, alignment, kick response and room to the digit. Two
+differences are on purpose and both are fixes: Tone's pooled voices
+opened every note on the previous pitch until the next 128-sample quantum
+(a chirp on every fast attack, up to 2.7 ms), and a stop let notes already
+queued in the lookahead start and then chopped them. Then the bill, same
+seeded songs: cold 278 -> 76-87 ms/s, rolls 254/253/376/381 ->
+70-78/66-68/95-99/103-106, p99 quantum 1.2-1.8 -> 0.39-0.50 ms, and no
+growth across rolls. The main thread got lighter too: 25/18/11% busy at
+4x throttle while playing -> 14/10/9%, and the worst long task after a
+roll 59 ms median -> none over 50.
+
+The rule this leaves: nothing in the live graph may drive a native param
+through a Tone Signal, and nothing may sit connected and idle. A Tone node
+that is more than a wrapper is a render-thread bill whether or not it
+makes a sound; measure it with `npm run probe:render` before adding one.
+
+### D32 — The dice deals music: modes, voicings, registers, rubs
+
+The builder's second complaint, same session: look at what notes it
+plays and how it voices them, as a user would hear them. `npm run
+probe:music` rolls thousands of songs through model.js and measures the
+notes, and the answer was specific:
+
+- **Degrees are not functions.** The progression decks were major-key
+  degree patterns dealt into every mode, so I–V–vi–IV came out
+  I–V–vi–♯iv° in lydian and i–v°–VI–iv in phrygian. 26% of all songs held
+  a diminished triad (66% of lydian, 71% of phrygian, 34% of dorian), 6.6%
+  opened on one, and with one chord per bar D23's "passing bar" was a full
+  bar of it. Each mode now deals the moves it is known for, from its major
+  and minor triads only (major's I–V–vi–IV family, minor's i–VI–III–VII,
+  dorian's i–IV and i–III–v–IV, mixolydian's I–♭VII–IV, lydian's I–II,
+  phrygian's i–♭II and iv–♭III–♭II–i); statics sit on the tonic 70% of the
+  time; the wander family keeps its surprise but never deals the dim
+  triad, never repeats a neighbor, and always visits home. A dealt 9 caps
+  at 7 wherever the scale's ninth is the ♭9. This narrows D23: the dice
+  no longer deals a diminished chord at all; the wheel still plays every
+  one. Now 0% of songs, and 70% open on the tonic (was 50%), with chord
+  variety unchanged (3.3 distinct per phrase).
+- **Voicings stacked up and out.** The pad voiced the triad and then
+  climbed every stored extension above it: a 13 spanned 23 semitones to
+  A5, and alternating triads with sevenths jumped the top voice — doubled
+  an octave up by the halo — by a fourth or more on 18% of changes.
+  `chordVoicing` (now model theory, shared by playback, the staff and the
+  probe) sounds the triad, the seventh and the one color tone a rung is
+  named for, drops the avoid notes (the natural 11 over a major third, a
+  ♭9 color), and places them by a small search: rubs priced out, a triad
+  voice may move an octave to make room, span, mud and top-voice motion
+  scored. Span p90 19 -> 11 semitones, top voice p90 A5 -> C#5, top-line
+  leaps of a fourth or more 18% -> 5%, sevenths kept 100%.
+- **Registers.** Half of all rolls put bass roots in octave 1 (39% of bass
+  notes under C2, 32-62 Hz), which a phone speaker cannot make; roots now
+  land in A1-G#2 (55-104 Hz). The melody base rolled C3, C4 or C5, so the
+  tune sat under the pad's top voice on 47% of its notes and under its
+  lowest on 20%; it now rolls G4 or C5 (1.6% and 0%). The ±1 random pad
+  octave is gone: +1 put the chords on the melody, -1 into the mud.
+- **Rubs.** The melody snapped strong notes to the chord's pitch classes,
+  which knows nothing of the actual voicing (the root sung over a major
+  seventh rubs it) or of the notes between: 7.9% of melody note-time was a
+  minor second or ninth against something the pad or halo was holding.
+  Every drafted note is now checked against the pad it sounds over, voiced
+  exactly as playback voices it, and moves to the nearest clean window
+  tone unless it is a passing tone (short, off the beat, stepped into and
+  out of). 7.9% -> 1.7%, leap sizes and phrase range unchanged.
+- **Wrong roots.** The one-bar (polymeter) bass took "the lowest scale
+  note at or above C" as its root, which is the tonic only in C: in D
+  major it pedaled C#, the leading tone, under every chord, and its roots
+  line picked random low scale degrees. It now pedals the real tonic and
+  fifth. The vamp's arc outro dissolved on degree 3, which in mixolydian
+  is diminished; mixolydian dissolves on the IV.
+- **Colors.** Every melodic track drew its own color at 2 in 3 (the pool
+  weighted "none" double, which was meant to stop stacking and didn't), so
+  an average roll stacked two or three inserts. A whole-song roll now
+  features at most one colored melodic track (45% of rolls) and crushes
+  the drums 15% of the time; the per-track sound dice keeps the full pool.
+- **The arp** walked the voicing in voice order and hopped around the
+  chord; it now climbs and falls in pitch order.
+
+What the dice still does on purpose: borrowed visitors (1.6% of slots),
+stacked voicings on 28% of slots, every groove's rhythms and characters.

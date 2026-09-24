@@ -127,8 +127,11 @@ applied at playback after voice leading so chord continuity stays register-indep
 Circle-of-fifths theory (station math, signatures, mode offsets, `keyDisplayName`) lives
 here too. `scaleNotes(base, rows)` and
 `snapToScale(midi)` drive the piano roll. `SCALES` has major/minor/dorian/phrygian/lydian/
-mixolydian (all 7-note, so 7 chords each). Also here: `voiceLead`, `sharedTones`, `euclid`,
-the drum-voice metadata, and `makeSong` / `makeScene` / `cloneScene` / `arrangeLength` / `clipAt`.
+mixolydian (all 7-note, so 7 chords each). Also here: `voiceLead` and `chordVoicing` (the
+pad's heard voicing — triad voice-led, seventh and one color tone placed rub-free; playback,
+the staff painter and `npm run probe:music` all call it, D32), `sharedTones`, `euclid`,
+the drum-voice metadata, the per-mode progression decks the dice deals from, and `makeSong` /
+`makeScene` / `cloneScene` / `arrangeLength` / `clipAt`.
 
 **`src/audio.js`** — `createAudio(song)` builds the Tone.js graph and returns the transport
 API. The one rule that matters: **`buildGraph()` is the only place the signal chain exists.**
@@ -146,10 +149,19 @@ ceiling drive → soft-knee ceiling; every stage unity at the origin — `npm ru
 gate and the constants in audio.js carry their measurements). The bus is editable like a
 track device: tapping the Master strip in the mixer opens a four-knob editor
 (level/juice/weight/glue over `audio.setMaster`), defaults equal the compiled constants,
-edits render in exports and ride project save/load. Harmony = saw pad (the LFO owns its filter
-cutoff, because a signal connected to a param overrides it; presets rescale the LFO range)
-+ mono halo + a highpassed root hint; bass and lead are PolySynths behind drive/filters; the
-kit is MembraneSynth kick + filtered-noise snare/hat/clap. Each track's device is a
+edits render in exports and ride project save/load. The graph is native nodes (D31): Tone
+keeps the transport, the clock and Params, and every node that is more than a thin wrapper
+has been rebuilt from the native parts, because Tone's Signals are ConstantSourceNodes the
+render thread pulls every quantum and a connected biquad param goes sample-accurate. A
+melodic note is an OscillatorNode + envelope GainNode made for that note and gone when it
+ends (`VoiceLayer` per corner with a polyphony cap and steal-by-restrike, `MonoVoice` for
+the halo and root hint), writing Tone.Envelope's exact automation; there are no pools. Every
+filter is a `Tone.BiquadFilter`; chorus/phaser/tremolo/auto-filter/echo/drive are
+`NativeFx` classes with Tone's parameter math. Harmony = saw pad (a 0.05 Hz breath on its
+cutoff: the param holds the center, an oscillator swings it, `setPadSweep`) + mono halo + a
+highpassed root hint; bass and lead are voice layers behind drive/filters; the kit is
+MembraneSynth kick + filtered-noise snare/hat/clap, out of the graph while the sample bank
+plays. Each track's device is a
 **morph**: four synth layers (one per preset corner, oscillator + envelope fixed) crossfaded
 by a patch `{x, y}` with equal-power bilinear weights, shared tone controls blended; drums
 morph by blending kit scalars directly. Plus one **color** insert per track
@@ -309,21 +321,23 @@ Plus tier-2 performance work listed in `ROADMAP.md` (diff-based cell repaints, p
 - **Scale-aware is the core.** It's the "can't-make-it-wrong" promise and the Ableton-12 idea.
   Harmony is degree-based (follows key/scale automatically); bass/melody transpose + re-snap on
   key change. Keep every new note-producing surface scale-snapped by default.
-- **Tone.PolySynth's positional form eats the cap.** `new Tone.PolySynth(Tone.Synth,
-  {...})` treats the whole second argument as per-voice options — a `maxPolyphony` in it
-  is silently ignored and the pool runs at the class default of 32 (that was the D25
-  regression). Use the object form with voice options nested under `options`, and keep
-  per-voice `volume` inside `options` (a top-level volume only moves the shared output
-  node). Layer pools also carry steal-at-the-cap and silence hand-back guards
-  (`stealDontDrop` in audio.js); construct layer synths only through `makeLayers` so
-  they get them.
+- **The render thread is the budget that crackles (D31).** Every 2.67 ms quantum must render
+  in under 2.67 ms on a core several times slower than a desktop's. Don't put a Tone node
+  that is more than a wrapper into the live graph: Tone.Synth/PolySynth, Tone.Filter,
+  Tone.LFO and the Tone effects all carry ConstantSourceNodes that render every quantum,
+  sounding or not, and drive native params through connections that force Chrome's
+  per-sample paths (an idle pooled Tone voice cost as much as a sounding one; a static
+  Tone.Filter 3.5x a native biquad). Build voices per note (`VoiceLayer`/`MonoVoice`),
+  filters as `Tone.BiquadFilter`, effects as `NativeFx`; nothing connected may sit idle.
+  Native wrapper nodes (from `g.raw`) connect into Tone nodes via `inputOf()`, never
+  directly. `npm run probe:render` is the gate: same seeded songs, render ms per second.
 - **Modern-browser features in use:** `structuredClone`, CSS `color-mix()`, `esnext` build
   target. Fine for the target phones; don't add polyfills.
 - **Two gates before claiming anything works:** `npm run smoke` (headless Chrome drives the
   core flow of launch, editors, record, export, and dice, and fails on any page error; it
   also holds the D30 undo contract — a roll must be undoable whole, and a mixer move must be
-  its own undo point — and pins the voice trim's floor at one idle voice per pool, which is
-  the check a dead trim cannot pass) and,
+  its own undo point — and the D31 voice invariants: under the caps while playing, and zero
+  voices once a stop has rung out, which is the check a leak cannot pass) and,
   if you touched the audio chain or presets, `npm run calibrate` (renders every preset
   through the real graph and prints RMS/peak tables; read the stem spreads against the master
   row, which stays ~1 dB). A green `npm run build` proves nothing about runtime.
@@ -337,11 +351,14 @@ Plus tier-2 performance work listed in `ROADMAP.md` (diff-based cell repaints, p
 - **`window.__noodles`** (`{ song, audio, applyProject }`) and **`window.__noodlesGraph`**
   (`buildGraph` itself, so the audit measures the real chain) back the headless harnesses.
   Not a public API, but keep them working; smoke, calibrate, and audit depend on them.
-  `audio.voiceStats()` is the pool scoreboard the perf probes and smoke read, and
-  `audio.trimVoices()` returns what it disposed so a harness can assert the trim RAN rather
-  than infer it from a count a later release rewrites. **`npm run probe:pool`** is the
-  dice's voice-pool receipt (`--runs 3 --rolls 16` for the burst, `--occupancy` for the
-  pools); it prints evidence and asserts nothing — the thresholds live in smoke.
+  `audio.voiceStats()` is the voice scoreboard smoke reads (voices alive, sounding, caps;
+  `idle` is zero by construction since D31). **`npm run probe:render`** is the render-thread
+  receipt: it plays the built app, traces the audio render callbacks, and prints render ms per
+  wall second and the slowest quantum for a seeded cold open and dice rolls (`--rolls`,
+  `--listen`, `--seed`). **`npm run probe:music`** rolls thousands of songs through model.js
+  (no browser) and measures the notes: diminished chords per mode, voicing span and top-line
+  motion, bass register, melody register, and minor-second rubs against the sounding pad.
+  Both print evidence and assert nothing — read them before and after, like calibrate.
 - **All three harnesses boot through `scripts/preview.mjs`** — don't re-copy `startPreview`,
   which is how the same teardown bug came to live in three files at once. `npm run preview`
   is a shell that spawns vite as a grandchild, so the child is spawned `detached` and stop()
