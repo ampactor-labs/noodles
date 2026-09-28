@@ -944,3 +944,70 @@ The probe's "seeded" runs never were: model.js takes `const rnd =
 Math.random` when it loads, and a static import runs before the probe
 seeds, so every run differed by about a percent. It imports after seeding
 now, and two runs match exactly.
+
+### D35 — The effects audit: a real room, an honest saturator, drums on the sample
+
+The builder's third ask this session: audit the effects and DSP across the
+app and make what's worth making better. Every stage was measured, not
+judged by eye:
+
+- **The room is one AudioWorklet.** D29 left four bare damped combs and
+  named the fork: diffusion needs a room whose loops are sample-exact,
+  which the native graph does not promise. `NoodlesRoom` runs four input
+  diffusers (Schroeder allpasses) into an eight-line feedback delay
+  network with a Hadamard matrix, mono in and out, and per-line one-pole
+  absorption scaled to each line's length (Jot) so every line decays
+  alike at every frequency. It renders bit-identically every time (the
+  audit compares two renders: -240 dB apart). The combs' tail was four
+  circulating echoes, 12% of its samples above the local RMS, against
+  about 32% for noise; this tail is 31%: dense, not a flutter. It is
+  voiced and levelled to the combs it replaces, band by band with pink
+  noise through the send path: RT60 2.0 s at 125-500 Hz, 1.7 s at 1 kHz,
+  1.2 s at 2.6 kHz; tone within about a dB of the combs from 125 Hz to
+  8 kHz (a 2.6 kHz Butterworth at its input, because the combs answered
+  dark and the network taps its lines before damping); return +1.26 dB
+  over the send's input where the combs read +1.28. Cost: every delay is
+  longer than a render quantum, so each stage runs as one loop over the
+  block, and a rung-out room sleeps on a zero check. Live, 113 ms/s
+  against the combs' 105 and 112 on two runs of the same seeded songs,
+  inside run-to-run noise; offline, where timing is exact, the room and
+  the echo's filter cost 3.5 ms more per rendered second. The
+  worklet module has to be in a context before the room builds, so exports
+  and the harnesses render through `offlineRender`, which loads it before
+  making the offline context current (Tone.Offline switches first and
+  awaits after, which would hand the live transport the offline clock).
+  An engine without AudioWorklet gets the combs.
+- **The saturator folds its blend into its curve and runs 2x.** It drives
+  a bent tanh 14-20 dB deep, un-oversampled: a 7 kHz tone at -14 dBFS came
+  back with inharmonic aliases 42 dB under it, where hats and the top of
+  every saw live. Oversampling the shaper as it stood (in parallel with a
+  dry gain) combed the two paths: the resampler delays the wet one, and
+  the tone lost up to 8 dB at 44.1 kHz. The dry/wet sum now lives inside
+  one curve, (1 - wet) x + wet f(x), exact under the shaper's linear
+  interpolation, on a +-24 domain that holds the loudest juice over a
+  full-scale bus. At "none" it measures identical to the old pair; at 2x
+  the harmonic table is unchanged to the hundredth and aliasing sits at
+  -71 dB (the audit's new aliasing row fails above -60). 4x bought
+  nothing more, and oversampling the soft clip too bought 1-4 dB for
+  the same cost again. Cost: +1.7 ms per rendered second offline.
+- **The dry drums land on the sample.** Compressor lookahead is a whole
+  number of frames (264 at 44.1 kHz, 288 at 48); the dry drum bus waited
+  a flat 6.02 ms, which is 265.5 frames at 44.1 kHz. A DelayNode reads a
+  half frame by averaging two samples, so the main drum sound went out
+  through a two-tap lowpass (-2.4 dB at 10 kHz, -6 at 15) a sample and a
+  half behind its parallel half: the audit's one failing row since the
+  alignment work, now spread 0. The synth kits got up to 0.9 dB of top
+  end back (calibrate's `hi` column), and the worst true peak over the
+  audit's dice is -1.55 dBTP.
+- **The echo darkens.** Repeats circulated at full bandwidth, stacking
+  bright copies of the lead. A Butterworth lowpass at 3.2 kHz now sits in
+  the feedback path: the first repeat is the note as played, each one
+  after comes back darker, as tape and bucket-brigade delays do.
+
+Measured and left for next: the synth drum kit is still Tone's
+MembraneSynth and five NoiseSynths, whose envelope and frequency Signals
+run every quantum while the kit is connected. It costs about 10-15 ms/s
+of desktop render time over the sample bank on the third of rolls that
+play it. Porting it to per-hit native nodes on the voice engine's
+envelope mirror is the next render item, and it needs the same
+event-for-event parity pass D31 did.

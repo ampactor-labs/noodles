@@ -143,10 +143,17 @@ return-skipping, which change cost, never sound. Topology: per track a preset **
 `Tone.Channel` (drums skip the per-track input compressor; they already get parallel
 compression), reverb + echo sends whose returns ride the kick-sidechain duck along with
 everything melodic (a wet tail must pump with the dry mix, not fill the pocket), a drum bus
-with a parallel compressor, and a master section (trim → 18 Hz rumble HP → +2 dB low shelf
-at 100 → asymmetric saturation blend → DC block → soft clip → glue drive → glue compressor →
-ceiling drive → soft-knee ceiling; every stage unity at the origin — `npm run audit` is the
-gate and the constants in audio.js carry their measurements). The bus is editable like a
+with a parallel compressor (the dry half delayed by the compressors' exact whole-sample
+lookahead), and a master section (trim → 18 Hz rumble HP → +2 dB low shelf at 100 →
+asymmetric saturation, its dry/wet folded into one 2x-oversampled curve → DC block → soft
+clip → glue drive → glue compressor → ceiling drive → soft-knee ceiling at 4x; every stage
+unity at the origin — `npm run audit` is the gate and the constants in audio.js carry their
+measurements). The room is one AudioWorklet (`NoodlesRoom`, D35): four input diffusers into
+an eight-line Hadamard feedback delay network, mono, RT60 2 s, voiced and level-matched to
+the comb bank it replaced, which stays as the fallback where AudioWorklet is missing. Its
+module has to be in a context before the room builds, so offline renders go through
+`offlineRender` (Tone.Offline with the module loaded first), and harnesses that build graphs
+use `window.__noodlesOffline`. The echo's repeats darken through a lowpass in its loop. The bus is editable like a
 track device: tapping the Master strip in the mixer opens a four-knob editor
 (level/juice/weight/glue over `audio.setMaster`), defaults equal the compiled constants,
 edits render in exports and ride project save/load. The graph is native nodes (D31): Tone

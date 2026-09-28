@@ -876,11 +876,14 @@ try {
   await page.evaluate(() => document.querySelector("#dice-btn").click());
   const afterDice = await page.evaluate(() => ({
     scenes: window.__noodles.song.scenes.length,
-    tag: window.__noodles.song.scenes[0].tag,
+    tags: window.__noodles.song.scenes.map((sc) => sc.tag),
+    follows: window.__noodles.song.scenes.some((sc) => Object.values(sc.launch || {}).some((l) => l.follow !== "none" || l.mode !== "loop")),
   }));
-  // A roll is one magic scene, sometimes with a ✨b variation to go to, and
-  // the vamp deals its record's four-scene arc (in, breath, back, out).
-  assertState(afterDice.scenes >= 1 && afterDice.scenes <= 4 && afterDice.tag.includes("✨"), `dice did not roll a fresh magic song: ${JSON.stringify(afterDice)}`);
+  // A roll is A and B, both loops (D34): no follow actions, no one-shots.
+  assertState(
+    afterDice.scenes === 2 && afterDice.tags[0] === "✨" && afterDice.tags[1] === "✨b" && !afterDice.follows,
+    `dice did not deal a fresh A and B: ${JSON.stringify(afterDice)}`
+  );
   await page.evaluate(() => document.querySelector(".tbtn.undo").click());
   const scenesAfterUndo = await page.evaluate(() => window.__noodles.song.scenes.length);
   assertState(scenesAfterUndo === scenesBeforeDice, `undo did not restore the pre-dice song (${scenesAfterUndo} vs ${scenesBeforeDice})`);
@@ -952,6 +955,10 @@ try {
     playingVoices.playing && playingVoices.stats.voices > 0 && playingVoices.stats.voices <= playingVoices.stats.caps && playingVoices.stats.idle === 0,
     `voices past their caps, idle, or absent while playing: ${JSON.stringify(playingVoices)}`
   );
+  // The room is the worklet network once the transport has run (D35); the
+  // comb fallback here would mean the module never loaded.
+  const roomKind = await page.evaluate(() => window.__noodles.audio.roomKind());
+  assertState(roomKind === "worklet", `the live room is ${roomKind}, not the worklet`);
   await page.evaluate(() => document.querySelector(".tbtn.play")?.click());
   await wait(3500); // past the longest release (ambient pad, 2.5 s)
   const restVoices = await page.evaluate(() => ({ playing: window.__noodles.audio.playing, stats: window.__noodles.audio.voiceStats() }));

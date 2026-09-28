@@ -19,6 +19,18 @@ opt-in gesture rather than a default (D34 took the vamp's always-on arc
 off the dice after the builder lived with it: NEXT badges on twelve clips
 read as a glitch, and a backing track must not walk off on its own).
 
+The DSP was audited the same day (D35): the room became a dense worklet
+network at the combs' render cost; the master saturator folds its dry/wet
+into one curve and runs 2x, taking a 7 kHz tone's aliases from -42 to
+-71 dB (new audit row); the dry drum bus waits the compressors' exact
+whole-sample lookahead (it was 1.5 samples late at 44.1 kHz through a
+two-tap lowpass, the audit's one failing row); the echo's repeats darken
+in their loop. Measured and not yet done: the synth drum kit is still
+Tone's MembraneSynth and NoiseSynths (always-running envelope and
+frequency Signals) and costs ~10-15 ms/s of desktop render time over the
+sample bank on the third of rolls that play it; a native port on the
+voice engine's envelope mirror is the next render item.
+
 The pad and the dice were audited 2026-09-28 (D33, D34). The morph pad is
 one continuous sound: no dropouts mid-drag (a held chord used to fall from
 -29 to -38 dB), no silent rides, no quarter-second lag on any knob, fader,
@@ -331,8 +343,11 @@ next. The damper is Butterworth now and the allpasses are gone; the
 room is four damped combs, RT60 2.02 s, return re-matched by
 measurement to the Freeverb it replaced. `npm run audit` grew a `room`
 section that fails on a tail that grows or two renders that disagree.
-Diffusion comes back when the room moves into one AudioWorklet, which
-is also where the construction tax stops mattering.
+Diffusion came back when the room moved into one AudioWorklet (D35,
+2026-09-28): four diffusers into an eight-line feedback delay network,
+sample-exact, so it renders bit-identically every time; the tail went
+from four circulating echoes to noise-dense, with the combs' tone and
+decay per band kept within a dB and the return level matched.
 
 The 2026-08-08 audit went after the cold open, which nobody had measured end to end
 (full report + 20 harness scripts: .tmp/perf-audit-2026-08-08.md, .tmp/pa-*.mjs). Two

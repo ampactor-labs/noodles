@@ -27,11 +27,12 @@
 //   morph    The crossfade law in isolation, on bare layers with no lane
 //            filters in the way: same pitch, phase-locked, so they sum
 //            coherently and equal-power weights overshoot.
-//   room     The reverb return's impulse response. A comb bank is a ring of
+//   room     The reverb return's impulse response. A room is a ring of
 //            feedback loops: it has to decay, and it has to decay the same
 //            way twice. Neither is free — a damper that boosts anywhere
 //            makes an oscillator, and a cycle whose tap sits outside the
-//            loop leaves the timing to the browser.
+//            loop leaves the timing to the browser. The room is one worklet
+//            now (D35), its loops sample-exact; this is the proof.
 //   program  LUFS-I / true peak / crest / PLR on real renders. The verdict.
 //
 // Usage: npm run audit            (full sweep)
@@ -59,6 +60,9 @@ try {
   const report = await page.evaluate(async (quick, programOnly) => {
     const Tone = window.__noodlesTone;
     const buildGraph = window.__noodlesGraph;
+    // Tone.Offline, with the room's worklet module loaded into the offline
+    // context first (D35) — the chain these renders measure is the app's.
+    const Offline = window.__noodlesOffline || Tone.Offline;
     const { song, audio, applyProject } = window.__noodles;
     const db = (x) => 20 * Math.log10(Math.max(Math.abs(x), 1e-12));
     const r2 = (x) => Math.round(x * 100) / 100;
@@ -310,7 +314,7 @@ try {
     {
       // BS.1770-4: "a 0 dB FS 997 Hz sine wave applied to the left, centre or
       // right channel gives a reading of -3.01 LKFS".
-      const buf = await Tone.Offline(() => {
+      const buf = await Offline(() => {
         const merge = new Tone.Merge().toDestination();
         const osc = new Tone.Oscillator(997, "sine");
         osc.connect(merge, 0, 0);
@@ -337,7 +341,7 @@ try {
       // starts mid-waveform is a step discontinuity the interpolator rings on,
       // and the ringing reads as +0.57 dB of overs that belong to the test
       // rather than the signal. Real renders start from silence.
-      const buf = await Tone.Offline(() => {
+      const buf = await Offline(() => {
         const raw = Tone.getContext().rawContext;
         const n = Math.floor(raw.sampleRate * 0.5);
         const fade = Math.floor(raw.sampleRate * 0.02);
@@ -367,7 +371,7 @@ try {
 
     // A steady sine at `inDb` into a node built by `make`, measured at the tail.
     const sineThrough = async (make, inDb, freq = 1000, dur = 2) => {
-      const buf = await Tone.Offline(() => {
+      const buf = await Offline(() => {
         const osc = new Tone.Oscillator(freq, "sine").connect(make());
         osc.volume.value = inDb;
         osc.start(0);
@@ -387,7 +391,7 @@ try {
     // 4096-sample source reads -3.37 dB through the identical graph. One sample
     // of signal, padded with silence, costs nothing and keeps the source alive.
     const impulseInto = async (wire, dur = 0.08) =>
-      Tone.Offline(() => {
+      Offline(() => {
         const target = wire();
         const raw = Tone.getContext().rawContext;
         const ab = raw.createBuffer(1, Math.ceil(dur * raw.sampleRate) + 512, raw.sampleRate);
@@ -439,7 +443,7 @@ try {
     // matters is 2H: it should be present (not -55) and not swing wildly.
     out.harm = {};
     for (const inDb of [-24, -18, -12, -6]) {
-      const buf = await Tone.Offline(() => {
+      const buf = await Offline(() => {
         const osc = new Tone.Oscillator(60, "sine").connect(masterOnly());
         osc.volume.value = inDb;
         osc.start(0);
@@ -452,6 +456,43 @@ try {
       out.harm[`${inDb} dBFS`] = Object.fromEntries(
         [2, 3, 4, 5].map((k) => [`${k}H`, r2(db(toneMag(d, 60 * k, sr, from, len) / h1))])
       );
+    }
+
+    // --- Aliasing. A driven curve makes harmonics past Nyquist too, and a
+    // stage that isn't oversampled folds them back down as tones that are no
+    // harmonic of anything: grit on every hat and on the top of every saw.
+    // A 7 kHz sine at -14 dBFS through the master, and the power at every
+    // frequency that isn't a harmonic of it, against the tone. The saturator
+    // runs 2x for this (D35): un-oversampled it read -42 dB here.
+    {
+      const f0 = 7040;
+      const buf = await Offline(() => {
+        const osc = new Tone.Oscillator(f0, "sine").connect(masterOnly());
+        osc.volume.value = -14;
+        osc.start(0);
+      }, 1.2);
+      const sr = buf.sampleRate;
+      const d = buf.getChannelData(0);
+      const n = 16384;
+      const from = buf.length - n - 1;
+      const power = (f) => {
+        const w = (2 * Math.PI * f) / sr;
+        const c = 2 * Math.cos(w);
+        let q1 = 0, q2 = 0;
+        for (let i = 0; i < n; i++) {
+          const q0 = c * q1 - q2 + d[from + i] * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1)));
+          q2 = q1;
+          q1 = q0;
+        }
+        return q1 * q1 + q2 * q2 - c * q1 * q2;
+      };
+      let alias = 0;
+      for (let f = 100; f < sr / 2 - 100; f += 20) {
+        const k = Math.round(f / f0);
+        if (k >= 1 && Math.abs(f - k * f0) < 60) continue; // a harmonic's own skirt
+        alias += power(f);
+      }
+      out.alias = { toneHz: f0, inDb: -14, aliasDb: r2(10 * Math.log10(alias / power(f0))) };
     }
 
     // --- Path latency, by impulse, measured at the bus sum rather than at the
@@ -491,7 +532,7 @@ try {
     // scored against the same reference, so the comparison is the point.
     {
       const layerPair = (waveA, waveB, mix) =>
-        Tone.Offline(() => {
+        Offline(() => {
           const dest = new Tone.Gain(1).toDestination();
           const mk = (wave, gainDb) => {
             const s = new Tone.Synth({ oscillator: { type: wave }, envelope: { attack: 0.01, decay: 0.1, sustain: 1, release: 0.1 } }).connect(dest);
@@ -529,7 +570,7 @@ try {
     // correlation out: 1.000 means the two channels came out the same signal.
     {
       const throughChannel = async (cc) =>
-        Tone.Offline(() => {
+        Offline(() => {
           const chan = new Tone.Channel({ volume: 0, pan: 0, channelCount: cc }).toDestination();
           // Two independent noise sources, hard left and hard right: as
           // decorrelated as a signal gets.
@@ -625,9 +666,11 @@ try {
     //
     // So: impulse in, decay out, twice, and the two must agree exactly.
     {
+      let roomKind = null;
       const impulseRoom = () =>
-        Tone.Offline(() => {
+        Offline(() => {
           const g = buildGraph({ meters: false, withVerb: true, withEcho: false });
+          roomKind = g.roomKind;
           g.masterOut.disconnect(); // the return, not the master chain behind it
           g.reverbOut.connect(Tone.getDestination());
           const raw = Tone.getContext().rawContext;
@@ -670,6 +713,7 @@ try {
         if (d > worst) worst = d;
       }
       out.room = {
+        kind: roomKind,
         slopeDbPerSec: r2(slope),
         rt60Sec: slope < 0 ? r2(-60 / slope) : null,
         tailAt1s: r2(rms(1)),
@@ -728,6 +772,13 @@ try {
     if (Math.max(...h2) < -50) { console.log("  2H ABSENT at every level"); bad++; }
   }
 
+  if (report.alias) {
+    const a = report.alias;
+    console.log(`\n== aliasing: a ${a.toneHz} Hz tone at ${a.inDb} dBFS through the master ==`);
+    console.log(`  every non-harmonic bin ${num(a.aliasDb, 7)} dB rel. the tone${a.aliasDb > -60 ? "  <- FOLDING: a driven stage is running un-oversampled" : ""}`);
+    if (a.aliasDb > -60) bad++;
+  }
+
   console.log("\n== path latency to the bus sum (impulse) ==");
   for (const [name, a] of Object.entries(report.align)) {
     console.log(`  ${pad(name, 18)} ${num(a.samples, 5)} samples  ${num(a.ms, 6)} ms`);
@@ -757,6 +808,8 @@ try {
 
   console.log("\n== the room decays (impulse into the return) ==");
   const rm = report.room;
+  console.log(`  room        ${rm.kind === "worklet" ? "the worklet network (D35)" : `${rm.kind}  <- the worklet room did not build; this is the fallback`}`);
+  if (rm.kind !== "worklet") bad++;
   console.log(`  tail        ${num(rm.tailAt1s, 7)} dB at 1 s  ->  ${num(rm.tailAt6s, 7)} dB at 6 s`);
   console.log(`  decay       ${num(rm.slopeDbPerSec, 7)} dB/s${rm.rt60Sec ? `   RT60 ${rm.rt60Sec} s` : "   <- GROWING: loop gain is over 1, the room is an oscillator"}`);
   console.log(`  same twice  two renders agree to ${num(rm.repeatDb, 7)} dB${rm.repeatDb > -120 ? "  <- a cycle's timing is the browser's decision here, not ours" : ""}`);

@@ -137,13 +137,21 @@ const COMP_SPECS = {
   input: { threshold: -20, ratio: 4, attack: 0.005, release: 0.15, knee: 12, makeup: 6.41 },
   drumParallel: { threshold: -24, ratio: 4.5, attack: 0.004, release: 0.13, knee: 12, makeup: 8.55 },
 };
-// Every DynamicsCompressorNode carries a fixed lookahead delay (measured:
-// 6.02 ms, identical across all four configs — it is the node, not the
-// settings). It is inaudible on its own and ruinous in parallel: any bus that
-// skips a compressor arrives EARLY and combs against the buses that don't.
-// Every path into the master is delayed to this, and the kick duck is
-// scheduled against it, so the graph sums in phase.
-const COMP_LATENCY = 0.00602;
+// Every DynamicsCompressorNode carries a fixed lookahead delay, identical
+// across all four configs — it is the node, not the settings. It is
+// inaudible on its own and ruinous in parallel: any bus that skips a
+// compressor arrives EARLY and combs against the buses that don't. Every
+// path into the master is delayed to this, and the kick duck is scheduled
+// against it, so the graph sums in phase.
+//
+// It is a whole number of samples: the engine truncates 6 ms to frames
+// (264 at 44.1 kHz, 288 at 48 kHz; npm run audit measures it). The dry drum
+// bus used to wait a flat 6.02 ms, which is 265.5 frames at 44.1 kHz, and a
+// DelayNode reads a half-frame delay by averaging two samples: the main drum
+// sound went out through a two-tap lowpass (-2.4 dB at 10 kHz, -6 dB at 15)
+// and still landed a sample and a half behind the parallel half it sums with
+// (the audit's one failing row since the drums were aligned, D35).
+const compLatency = (sampleRate) => Math.floor(sampleRate * 0.006) / sampleRate;
 
 // --- Native voices ------------------------------------------------------------
 //
@@ -775,19 +783,209 @@ class NativeAutoFilter extends NativeFx {
   }
 }
 
-// Tone.FeedbackDelay at wet 1: y = delay(x + feedback * y).
+// The echo: y = delay(x + feedback * lowpass(y)). The first repeat is the
+// note as played; every pass after it goes round through a Butterworth
+// lowpass at 3.2 kHz (Q -3.01, which is Butterworth in Web Audio's decibel
+// units, so the loop can never ring: D29), so each repeat comes back darker
+// than the one before and the throw sits behind the lead instead of
+// stacking bright copies of it on top. That is what every tape, bucket-
+// brigade and plugin delay does in its loop; Tone's FeedbackDelay, which
+// this replaced, didn't, and neither did this class until D35. The
+// return's 160 Hz highpass already keeps the lows out of the loop.
 class NativeEcho extends NativeFx {
   constructor({ delayTime, feedback }) {
     super("FeedbackDelay");
     this._delay = new Tone.Delay({ delayTime, maxDelay: 1 });
     this.delayTime = this._delay.delayTime;
+    this._damp = new Tone.BiquadFilter({ type: "lowpass", frequency: 3200, Q: -3.01 });
     this._fb = new Tone.Gain(feedback);
     this.input.connect(this._delay);
     this._delay.connect(this.output);
-    this._delay.connect(this._fb);
+    this._delay.connect(this._damp);
+    this._damp.connect(this._fb);
     this._fb.connect(this._delay);
   }
 }
+
+// --- The room (D35) -------------------------------------------------------------
+//
+// One AudioWorklet: four input diffusers into an eight-line feedback delay
+// network, mono in and mono out. D29 left the room as four bare damped combs
+// and named the fork: a Schroeder allpass taps a delay from inside its loop
+// and from outside it, the native graph does not promise those are the same
+// sample, and so diffusion had to wait for a room whose DSP is ours. Here
+// every sample is this code's arithmetic, so the room renders identically
+// every time on every browser (npm run audit renders it twice and compares).
+//
+// What the combs sounded like: four echoes per ~37 ms, circulating. That is
+// a flutter, not a room - a buzzy ring on every snare and a metallic sheen
+// on a held pad, and since D17 every roll plays through it. The diffusers
+// smear each input into a burst before it reaches the network, and a
+// Hadamard matrix feeds every line into every other on each pass, so the
+// echo density multiplies instead of repeating.
+//
+// Voiced to the room it replaces: RT60 2.0 s in the lows, shortening
+// through the mids (1.75 s at 1 kHz) and gone far sooner in the top (1 s at
+// 2.6 kHz), through a one-pole lowpass per line scaled to its length (Jot's
+// absorption), so every line decays at the same rate at every frequency.
+// The tone and return level are matched in makeReverb. A silent input with
+// the tail rung out skips the arithmetic, so a parked-but-built room costs a
+// zero check per block.
+const ROOM_WORKLET = `
+class NoodlesRoom extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    const o = (options && options.processorOptions) || {};
+    const sr = sampleRate;
+    const rt60 = o.rt60 || 2;
+    const rt60Hi = o.rt60Hi || 0.5;
+    const c = Math.cos((2 * Math.PI * (o.dampHz || 2600)) / sr);
+    this.aps = [[0.00477, 0.75], [0.0036, 0.75], [0.01273, 0.625], [0.0093, 0.625]].map(([t, g]) => ({
+      buf: new Float64Array(Math.max(129, Math.round(t * sr))), i: 0, g,
+    }));
+    this.lines = [0.0297, 0.0331, 0.0371, 0.0411, 0.0437, 0.0473, 0.0517, 0.0561].map((t) => {
+      const n = Math.max(129, Math.round(t * sr));
+      const d = n / sr;
+      // the one-pole that takes this line to rt60Hi at dampHz: |H| = T there
+      const T = Math.pow(10, (-3 * d) * (1 / rt60Hi - 1 / rt60));
+      const A = 1 - T * T;
+      const B = 1 - T * T * c;
+      const a = A < 1e-9 ? 0 : (B - Math.sqrt(Math.max(0, B * B - A * A))) / A;
+      return { buf: new Float64Array(n), i: 0, g: Math.pow(10, (-3 * d) / rt60), a, z: 0, o: new Float64Array(128), m: new Float64Array(128) };
+    });
+    this.x = new Float64Array(128);
+    this.quiet = true;
+  }
+  // Every delay here is longer than a render quantum, so nothing written in
+  // this block is read in it: each stage runs as one tight loop over the
+  // block instead of the whole network per sample.
+  process(inputs, outputs) {
+    const inp = inputs[0] && inputs[0][0];
+    const out = outputs[0][0];
+    const N = out.length;
+    let live = false;
+    if (inp) for (let n = 0; n < N; n++) if (inp[n] !== 0) { live = true; break; }
+    if (!live && this.quiet) {
+      out.fill(0);
+      return true;
+    }
+    const x = this.x;
+    if (live) for (let n = 0; n < N; n++) x[n] = inp[n];
+    else x.fill(0);
+    for (let k = 0; k < 4; k++) {
+      const ap = this.aps[k];
+      const buf = ap.buf;
+      const len = buf.length;
+      const g = ap.g;
+      let i = ap.i;
+      for (let n = 0; n < N; n++) {
+        const d = buf[i];
+        const v = x[n] + g * d;
+        x[n] = d - g * v;
+        buf[i] = v;
+        if (++i === len) i = 0;
+      }
+      ap.i = i;
+    }
+    const L = this.lines;
+    for (let k = 0; k < 8; k++) {
+      const ln = L[k];
+      const buf = ln.buf;
+      const len = buf.length;
+      const o = ln.o;
+      let i = ln.i;
+      for (let n = 0; n < N; n++) {
+        o[n] = buf[i];
+        if (++i === len) i = 0;
+      }
+    }
+    const s8 = 0.35355339059327373;
+    const o0 = L[0].o, o1 = L[1].o, o2 = L[2].o, o3 = L[3].o, o4 = L[4].o, o5 = L[5].o, o6 = L[6].o, o7 = L[7].o;
+    const m0 = L[0].m, m1 = L[1].m, m2 = L[2].m, m3 = L[3].m, m4 = L[4].m, m5 = L[5].m, m6 = L[6].m, m7 = L[7].m;
+    let peak = 0;
+    for (let n = 0; n < N; n++) {
+      const a0 = o0[n] + o1[n], a1 = o0[n] - o1[n], a2 = o2[n] + o3[n], a3 = o2[n] - o3[n];
+      const a4 = o4[n] + o5[n], a5 = o4[n] - o5[n], a6 = o6[n] + o7[n], a7 = o6[n] - o7[n];
+      const y = (a1 + a3 + a5 + a7) * s8;
+      out[n] = y;
+      if (y > peak) peak = y;
+      else if (-y > peak) peak = -y;
+      const b0 = a0 + a2, b1 = a1 + a3, b2 = a0 - a2, b3 = a1 - a3;
+      const b4 = a4 + a6, b5 = a5 + a7, b6 = a4 - a6, b7 = a5 - a7;
+      m0[n] = (b0 + b4) * s8; m1[n] = (b1 + b5) * s8; m2[n] = (b2 + b6) * s8; m3[n] = (b3 + b7) * s8;
+      m4[n] = (b0 - b4) * s8; m5[n] = (b1 - b5) * s8; m6[n] = (b2 - b6) * s8; m7[n] = (b3 - b7) * s8;
+    }
+    for (let k = 0; k < 8; k++) {
+      const ln = L[k];
+      const buf = ln.buf;
+      const len = buf.length;
+      const m = ln.m;
+      const g = ln.g;
+      const a = ln.a;
+      const b = 1 - a;
+      const inj = k & 1 ? -s8 : s8;
+      let i = ln.i;
+      let z = ln.z;
+      for (let n = 0; n < N; n++) {
+        z = b * m[n] + a * z;
+        buf[i] = g * z + inj * x[n];
+        if (++i === len) i = 0;
+      }
+      ln.i = i;
+      ln.z = z;
+    }
+    if (!live && peak < 1e-6) {
+      // rung out: clear the last -120 dB of state and sleep until input
+      for (let k = 0; k < 4; k++) this.aps[k].buf.fill(0);
+      for (let k = 0; k < 8; k++) { L[k].buf.fill(0); L[k].z = 0; }
+      this.quiet = true;
+    } else {
+      this.quiet = false;
+    }
+    return true;
+  }
+}
+registerProcessor("noodles-room", NoodlesRoom);
+`;
+// The worklet room's return, matched by measurement to the combs' (see
+// makeReverb): pink noise into the send path, steady state, return RMS over
+// input RMS equal for both rooms.
+const ROOM_RETURN = 2.22;
+const ROOM_URL = typeof Blob !== "undefined" && typeof URL !== "undefined" && URL.createObjectURL
+  ? URL.createObjectURL(new Blob([ROOM_WORKLET], { type: "text/javascript" }))
+  : null;
+// One module load per context, remembered. Resolves false where there is no
+// AudioWorklet to load into; the room then builds its comb fallback.
+const roomModules = new WeakMap();
+export function roomModule(raw) {
+  if (!roomModules.has(raw)) {
+    const p = raw?.audioWorklet && ROOM_URL ? raw.audioWorklet.addModule(ROOM_URL).then(() => true, () => false) : Promise.resolve(false);
+    p.then((ok) => (p.ok = ok));
+    roomModules.set(raw, p);
+  }
+  return roomModules.get(raw);
+}
+// Tone.Offline with the room's module loaded into the offline context first.
+// The load is async, and Tone.Offline switches the ambient context BEFORE it
+// awaits its callback, so a load awaited inside that callback would leave
+// every Tone.now() the live transport asks in the meantime answered by the
+// offline clock. Here the context is created, loaded and only then made
+// current, for a build that stays synchronous. Same signature as Tone.Offline.
+export async function offlineRender(callback, duration, channels = 2, sampleRate = Tone.getContext().sampleRate) {
+  const original = Tone.getContext();
+  const context = new Tone.OfflineContext(channels, duration, sampleRate);
+  await roomModule(context.rawContext);
+  Tone.setContext(context);
+  let rendering;
+  try {
+    callback(context);
+    rendering = context.render();
+  } finally {
+    Tone.setContext(original);
+  }
+  return new Tone.ToneAudioBuffer(await rendering);
+}
+if (typeof window !== "undefined") window.__noodlesOffline = offlineRender;
 
 // Tone.Distortion at wet 1: Tone's curve, (3 + k) x 20deg / (pi + k|x|) with
 // k = 100 * amount and a dead zone under 0.001, on a 1024-point table. At
@@ -873,12 +1071,12 @@ function sliceBuffer(buf, startSec, endSec) {
   return out;
 }
 
-function scheduleKickDuck(param, time) {
+function scheduleKickDuck(param, time, latency) {
   // The duck fires where the kick is HEARD, not where it was scheduled. Gain
   // automation lands in absolute context time, but the signal it acts on has
   // been through a compressor's lookahead to get here — so a duck scheduled at
   // the kick's note time ducked a pocket the kick hadn't arrived in yet.
-  const at = time + COMP_LATENCY;
+  const at = time + latency;
   // Hold whatever the gain is at the kick instant: resetting to 1 first put a
   // +12 dB step on the music bus at the head of every kick — a tick on
   // sustained pads, worst on dense patterns where the bus never fully recovers.
@@ -1368,10 +1566,10 @@ function bassVelocityBoost(preset, midi) {
 // full chain. Everything that carries the feel — master stack, comps, duck,
 // morphing, levels — is identical in both. ---
 // withVerb/withEcho: offline renders pass false to SKIP CONSTRUCTING a return
-// no audible track sends to — Freeverb's worklet combs burn render time from
-// the moment they exist, connected or not (measured ~21x on a minimal graph),
-// so a dry export must never build them. Live always constructs (native
-// nodes; the dry park makes them free).
+// no audible track sends to — a worklet runs from the moment it exists,
+// connected or not (Tone's Freeverb, measured ~21x on a minimal graph), so a
+// dry export never builds one. Live always constructs; the dry park and the
+// room's own silence check make an idle return nearly free.
 function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb = false } = {}) {
   const g = {};
   // The context this graph lives in. Per-note nodes bind here, never to the
@@ -1487,6 +1685,9 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   g.glueDrive = new Tone.Gain(Tone.dbToGain(GLUE_DRIVE_DB)).connect(glue.input);
   g.glue = glue.input;
 
+  // Not oversampled: the saturator is the stage that folds (D35). With it at
+  // 2x, oversampling this gentler tanh as well bought 1-4 dB more alias
+  // rejection for the same render cost again.
   const [clipIn, clipOut] = makeShaper((a) => Math.tanh(1.2 * a) / 1.2, 2, 2048);
   clipOut.connect(g.glueDrive);
   g.softClip = clipIn;
@@ -1555,17 +1756,26 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   // what leaves a clean, monotonic 2nd harmonic — the octave-up a phone speaker
   // can actually reproduce. 18 Hz is flat to -0.5 dB at 60 and untouched at 120.
   g.satDC = new Tone.BiquadFilter({ type: "highpass", frequency: 18, Q: 0.7 }).connect(g.satTrim);
-  g.satSum = new Tone.Gain(1).connect(g.satDC);
+  // The dry/wet blend lives INSIDE the curve (D35): (1 - SAT_WET) x plus
+  // SAT_WET times the bent tanh, one shaper, oversampled 2x. It used to be
+  // the shaper in parallel with a dry gain, un-oversampled, and a tanh driven
+  // 14-20 dB deep folds its harmonics back down as inharmonic grit: a 7 kHz
+  // tone at -14 dBFS came back with aliases 42 dB under it, where hats and
+  // the top of every saw live (npm run audit, aliasing row). Oversampling
+  // the parallel pair wasn't an option: the resampler delays the wet path
+  // and the two halves combed, taking up to 8 dB off the tone at 44.1 kHz.
+  // One series stage has no twin to comb against. A linear term is exact
+  // under the shaper's linear interpolation, and the domain (+-24) holds the
+  // loudest juice (+20 dB) over a full-scale bus, so the dry half never
+  // meets the table's end. Same sum, same level: the drive and the trim
+  // still cancel around it.
   const [satIn, satOut] = makeShaper((a) => {
     const t = Math.tanh(a);
-    return Math.tanh(a + SAT_ASYM * t * t);
-  }, 4, 4096);
-  g.satWet = new Tone.Gain(SAT_WET).connect(g.satSum);
-  satOut.connect(g.satWet);
-  g.satDry = new Tone.Gain(1 - SAT_WET).connect(g.satSum);
+    return (1 - SAT_WET) * a + SAT_WET * Math.tanh(a + SAT_ASYM * t * t);
+  }, 24, 16384, "2x");
+  satOut.connect(g.satDC);
   g.saturation = new Tone.Gain(Tone.dbToGain(SAT_DRIVE_DB));
   g.saturation.connect(satIn);
-  g.saturation.connect(g.satDry);
   g.lowShelf = new Tone.BiquadFilter({ type: "lowshelf", frequency: 100, gain: 2 }).connect(g.saturation);
   // Subsonic guard: the piano roll reaches C0 (16 Hz) and the bass lane HP at
   // 34 Hz only takes ~14 dB off it — what's left rides into the ceiling as
@@ -1590,7 +1800,8 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   // bass were 130 degrees apart at 60 Hz on the same downbeat.
   g.musicDuck = new Tone.Gain(1).connect(g.master);
   g.drumBus = new Tone.Gain(1).connect(g.master);
-  g.drumAlign = new Tone.Delay({ delayTime: COMP_LATENCY, maxDelay: 0.05 });
+  g.compLatency = compLatency(g.raw.sampleRate);
+  g.drumAlign = new Tone.Delay({ delayTime: g.compLatency, maxDelay: 0.05 });
   g.drumDry = new Tone.Gain(DRUM_DRY_GAIN).connect(g.drumAlign);
   g.drumAlign.connect(g.drumBus);
   const drumParallel = makeComp(COMP_SPECS.drumParallel);
@@ -1598,110 +1809,99 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   g.drumParallelReturn = new Tone.Gain(DRUM_PARALLEL_GAIN).connect(g.drumBus);
   drumParallel.output.connect(g.drumParallelReturn);
 
-  // Sends. Algorithmic (Freeverb) instead of convolution — far cheaper per
-  // sample on a low-end mobile CPU, and fine for a send reverb. The highpass
-  // on the reverb input keeps kicks and 808 subs out of the tail: reverberant
-  // low end reads as mud, not space. The echo carries the same highpass, a
-  // touch lower, so its repeats don't pile low-end into the feedback loop.
-  // Both returns land on the duck bus, not the master: a wet tail that skips
-  // the sidechain fills the exact pocket the kick just carved.
-  // reverbOut is whatever node feeds the duck bus — the edge the dry park
-  // cuts, in either grade.
-  // One Freeverb, both worlds (D20 repealed the lightened live grade).
-  // Its comb worklets do run whenever the context runs, but the idle park
-  // suspends the context when nothing plays, and since D17's depth floor
-  // the verb is in use whenever something does.
-  // The HPs and send taps always exist (playback code sets their gains); a
-  // skipped return just leaves them feeding a dangling — unrendered — edge.
-  // 20 ms of pre-delay before the verb: the ear locks onto the dry signal
-  // before the tail arrives, so the room reads as depth behind the mix
+  // Sends. The highpass on the reverb input keeps kicks and 808 subs out of
+  // the tail: reverberant low end reads as mud, not space. The echo carries
+  // the same highpass, a touch lower, so its repeats don't pile low-end into
+  // the feedback loop. Both returns land on the duck bus, not the master: a
+  // wet tail that skips the sidechain fills the exact pocket the kick just
+  // carved. reverbOut is whatever node feeds the duck bus — the edge the dry
+  // park cuts. The HPs and send taps always exist (playback code sets their
+  // gains); a skipped return just leaves them feeding a dangling — unrendered
+  // — edge. 20 ms of pre-delay before the verb: the ear locks onto the dry
+  // signal before the tail arrives, so the room reads as depth behind the mix
   // instead of wash on top of it — the front/back panner, not a wet knob.
   g.reverbHP = new Tone.BiquadFilter({ type: "highpass", frequency: 200, Q: 0.7 });
   g.reverbPre = new Tone.Delay({ delayTime: 0.02, maxDelay: 0.05 });
   g.reverbHP.connect(g.reverbPre);
-  // The lean room (D28). Freeverb was the most expensive resident of the
-  // render thread — a STEREO eight-comb bank whose IIRFilterNodes Blink
-  // prices at 112 ms each just to construct (869 ms for the bank, vs 0.14
-  // ms for a biquad) — and D17 keeps a room in use whenever anything
-  // plays, so the room itself is what had to get cheap. This is a mono
-  // comb bank: one explicit downmix (the return spreads center — the app is
-  // mono-forward by design) and four biquad-damped combs. Half the feedback
-  // loops of Freeverb per channel and one channel instead of two, ~zero
-  // construction tax. Damping lowpass at the old room's 2600 Hz, and fb 0.86
-  // for RT60 1.4-2.0 s across the four delays — measured, and a LONGER room
-  // than the Freeverb it replaced, whose tail fell 46 dB in half a second
-  // (RT60 ~0.64 s). "Voiced to the old room" was only ever true of level,
-  // which is measured and matched below; the decay is D28's own choice.
-  // lazyVerb stays: even cheap, there is no reason to build before paint.
-  //
-  // A damper may only damp. Web Audio prices a lowpass/highpass Q in
-  // DECIBELS of resonance rather than as a linear Q — the spec's own
-  // alpha = sin(w0)/(2 * 10^(Q/20)) — so the Q 0.5 this filter shipped with
-  // asked for half a dB of boost and got a peak of +1.59 dB at 1.9 kHz.
-  // Inside a comb at fb 0.86 that is a loop gain of 1.033: an oscillator,
-  // not a room. It climbed 6.4 dB/s from whatever was playing and the
-  // master pinned flat against the ceiling ten seconds into any dice roll —
-  // the "runaway feedback on play" an iPhone found first only because
-  // nobody here had let a jam run half a minute. -3.01 dB is Butterworth,
-  // 20*log10(1/sqrt(2)): maximally flat, |H| <= 1 at every frequency, so
-  // the loop gain is the 0.86 the RT60 arithmetic already assumed.
-  // Receipts: .tmp/verb-stability.mjs (impulse into the return, 30 s) and
-  // .tmp/room-runaway.mjs (the master, sends at D17's depth floor).
+  // The room's history, because each step is a rule the next one kept.
+  // Freeverb (stereo, eight IIRFilterNode combs, 869 ms to construct on a
+  // phone proxy) was the priciest thing on the render thread, and D17 keeps
+  // a room in use on every roll, so D28 made it a mono four-comb bank:
+  // biquad-damped, ~zero construction tax, RT60 ~2 s. D29 found that bank
+  // ran away, because Web Audio prices a lowpass Q in DECIBELS (the spec's
+  // alpha = sin(w0)/(2 * 10^(Q/20))): Q 0.5 peaked +1.59 dB at 1.9 kHz, a
+  // loop gain of 1.033 inside a comb at fb 0.86, and the master pinned
+  // against the ceiling ten seconds into any roll. -3.01 dB is Butterworth,
+  // |H| <= 1 everywhere, so a damper can only damp. D29 also removed the
+  // Schroeder allpasses, which the native graph rendered differently render
+  // to render. D35 moves the room into one worklet, where those allpasses
+  // are sample-exact and the tail is dense instead of four circulating
+  // echoes (see NoodlesRoom). The combs remain as the fallback below.
+  // lazyVerb stays: there is no reason to build before paint.
   const DAMP_Q_DB = -3.01;
+  // The room is the worklet (D35) wherever the context has its module
+  // loaded (roomModule; offlineRender loads it before an export builds).
+  // An engine without AudioWorklet gets the four damped combs D29 left:
+  // RT60 2.0 s, return 0.52, flutter and all.
   const makeReverb = () => {
     const mono = new Tone.Gain(1);
     mono.input.channelCount = 1;
     mono.input.channelCountMode = "explicit";
-    // Return level, matched to the room this one replaced: with a strip's
-    // send wide open the return reads +1.12 dB against that strip's dry
-    // output, where Freeverb read +1.08 (.tmp/room-cal.mjs, pink noise
-    // through the real send path, mono-summed because a phone speaker sums
-    // it). That is the whole meaning of the number — the send fader keeps
-    // the wet/dry ratio it had.
-    //
-    // Not measured against the program's LUFS, which is what the old 0.006
-    // claimed: the master glue and ceiling redistribute a room's energy
-    // rather than add it, so that reading is not even monotone in this gain
-    // (0.1 -> +0.04 dB, 0.36 -> -0.10 dB, 0.58 -> +0.93 dB). It also could
-    // not have been right at any value, since the bank it was fitted against
-    // never settled — "the resonant-gain arithmetic undershot twice" was an
-    // oscillator reading loud at every return level anyone tried.
-    const out = new Tone.Gain(0.52);
-    for (const t of [0.0297, 0.0371, 0.0411, 0.0437]) {
-      const dl = new Tone.Delay({ delayTime: t, maxDelay: 0.06 });
-      // Tone.Filter clamps Q to units "positive" and would throw on a
-      // Butterworth one; Tone.BiquadFilter takes it as a plain number and
-      // wraps a single native biquad, skipping Filter's Signal cascade.
-      const damp = new Tone.BiquadFilter({ type: "lowpass", frequency: 2600, Q: DAMP_Q_DB });
-      const fb = new Tone.Gain(0.86);
-      mono.connect(dl);
-      dl.connect(damp);
-      damp.connect(fb);
-      fb.connect(dl);
-      damp.connect(out);
+    let room = null;
+    if (roomModules.get(g.raw)?.ok && Tone.getContext().rawContext === g.raw) {
+      try {
+        room = Tone.getContext().createAudioWorkletNode("noodles-room", {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          outputChannelCount: [1],
+          channelCount: 1,
+          channelCountMode: "explicit",
+          processorOptions: { rt60: 2, rt60Hi: 1, dampHz: 2600 },
+        });
+      } catch {
+        room = null;
+      }
     }
-    // The two Schroeder allpasses that used to sit here are gone, and they
-    // had to go: a Schroeder allpass (v = x + g*v[-D]; y = v[-D] - g*v) taps
-    // one delay from INSIDE its feedback loop and from outside it, and Web
-    // Audio does not promise those two taps are the same sample. Chrome
-    // breaks a cycle by giving the loop edge its own latency, decides that
-    // per graph rather than per structure, and the result was a stage that
-    // rendered as a real allpass in some renders and as something else in
-    // others: five identical renders of this room came back -6.60, -4.58,
-    // -4.58, -4.53, -4.58 dB of impulse energy (.tmp/room-alone.mjs). An
-    // allpass preserves energy, so -6.60 — the combs' own energy, unchanged
-    // — is the only one of those that was an allpass at all. The four combs
-    // on their own render bit-identically every time.
+    // Return level, matched to the room this one replaced: with a strip's
+    // send wide open the return reads the same against that strip's dry
+    // output as the combs did (+1.12 dB, where Freeverb before them read
+    // +1.08), measured with pink noise through the real send path and
+    // mono-summed because a phone speaker sums it. That is the whole meaning
+    // of the number — the send fader keeps the wet/dry ratio it had.
     //
-    // What a browser will not promise, this file cannot claim. Tone's
-    // Freeverb ran its combs and allpasses inside AudioWorklets for exactly
-    // this reason; D28 traded the worklets away for construction cost and
-    // inherited the native graph's soft cycle semantics with them. Diffusion
-    // comes back the day the room moves into one worklet — where the DSP is
-    // ours, sample-exact, and identical on every browser. Until then the
-    // room is four damped combs: less lush, and the same on every device.
+    // Not measured against the program's LUFS: the master glue and ceiling
+    // redistribute a room's energy rather than add it, so that reading is
+    // not even monotone in this gain (0.1 -> +0.04 dB, 0.36 -> -0.10 dB,
+    // 0.58 -> +0.93 dB, on the combs).
+    const out = new Tone.Gain(room ? ROOM_RETURN : 0.52);
+    if (room) {
+      // The combs' voice: their tail left through the dampers' Butterworth
+      // lowpass at 2.6 kHz, so the room answered dark, as depth behind the
+      // mix rather than wash on top of it. The network taps its lines before
+      // any damping, and without this it answered 9 dB brighter at 5 kHz and
+      // 16 dB at 8.
+      const tone = new Tone.BiquadFilter({ type: "lowpass", frequency: 2600, Q: DAMP_Q_DB });
+      mono.connect(tone);
+      tone.connect(room);
+      room.connect(inputOf(out));
+    } else {
+      for (const t of [0.0297, 0.0371, 0.0411, 0.0437]) {
+        const dl = new Tone.Delay({ delayTime: t, maxDelay: 0.06 });
+        // Tone.Filter clamps Q to units "positive" and would throw on a
+        // Butterworth one; Tone.BiquadFilter takes it as a plain number and
+        // wraps a single native biquad, skipping Filter's Signal cascade.
+        const damp = new Tone.BiquadFilter({ type: "lowpass", frequency: 2600, Q: DAMP_Q_DB });
+        const fb = new Tone.Gain(0.86);
+        mono.connect(dl);
+        dl.connect(damp);
+        damp.connect(fb);
+        fb.connect(dl);
+        damp.connect(out);
+      }
+    }
     g.reverb = mono;
     g.reverbOut = out;
+    g.roomKind = room ? "worklet" : "combs";
     g.reverbPre.connect(mono);
     return out;
   };
@@ -1784,7 +1984,7 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
 
   // Layer factory: one voice layer per preset corner, oscillator and envelope
   // FIXED to that corner. Morphing crossfades whole voices — each corner keeps
-  // its identity, the blend does the work. Layers below ~2% weight are muted
+  // its identity, the blend does the work. Layers with no morph gain are muted
   // and never triggered, so parked-at-a-corner costs what a single synth did.
   // The source level folds into each voice's envelope (the level that hits
   // the drive stage); the layer's output volume carries only the morph weight
@@ -2342,7 +2542,7 @@ function setSynthKit(g, on) {
 }
 
 function hitDrumOn(g, patches, v, time, vel = 0.9) {
-  if (v === "kick") scheduleKickDuck(g.musicDuck.gain, time);
+  if (v === "kick") scheduleKickDuck(g.musicDuck.gain, time, g.compLatency);
   if (v === "hat") chokeOpenAt(g, time);
   else if (v === "open") wakeOpenAt(g, time);
   const patch = patches.drums;
@@ -2653,8 +2853,8 @@ export function createAudio(song) {
   const channelState = Object.fromEntries(TRACK_KEYS.map((track) => [track, { ...MIX_DEFAULTS }]));
 
   // Dry park: with every send off — the default, and most dice rolls —
-  // Freeverb's comb bank and the feedback delay process silence full-time,
-  // the priciest always-on cost on a weak phone. A parked return is
+  // the room and the feedback delay would process silence full-time, the
+  // priciest always-on cost on a weak phone. A parked return is
   // disconnected from the duck bus, which takes its whole subtree out of
   // the rendered graph; it wakes BEFORE a send opens and parks again once
   // the tail has rung out. Sound-neutral by construction: a parked return
@@ -2692,7 +2892,7 @@ export function createAudio(song) {
     returns[kind].parked = true;
   }
 
-  // Building Freeverb "when a send opens" defers it by nothing: the cold open
+  // Building the room "when a send opens" defers it by nothing: the cold open
   // IS a dice roll, D17 gives every roll a depth floor, and so the boot's own
   // setSend runs inside the module evaluation that has to finish before the app
   // can paint. That is where the 869 ms went (measured .tmp/pa-7-when.mjs: the
@@ -2702,7 +2902,10 @@ export function createAudio(song) {
   // tap somehow beats that. Until it exists the send taps feed a dangling edge,
   // which is exactly what a parked return already was — the reverb cannot be
   // heard before init() starts the transport, and init() forces it.
+  // The room's worklet module loads from the start; the build waits for it
+  // (it resolves either way — without AudioWorklet the combs build).
   let verbPending = !!live.ensureReverb;
+  const roomLoaded = roomModule(live.raw);
   function buildVerbNow() {
     if (!verbPending) return;
     verbPending = false;
@@ -2710,8 +2913,9 @@ export function createAudio(song) {
     if (!returns.verb.parked) live.reverbOut.connect(live.musicDuck);
   }
   if (verbPending) {
-    if (typeof requestIdleCallback === "function") requestIdleCallback(buildVerbNow, { timeout: 4000 });
-    else setTimeout(buildVerbNow, 1200);
+    const build = () => roomLoaded.then(buildVerbNow);
+    if (typeof requestIdleCallback === "function") requestIdleCallback(build, { timeout: 4000 });
+    else setTimeout(build, 1200);
   }
 
   // Track park, same principle one level up: a track that hasn't been asked
@@ -3183,8 +3387,8 @@ export function createAudio(song) {
         // they're almost always in, so this awaits a settled promise, not a fetch.
         // The idle window has almost always built the verb by now; this is the
         // guarantee for the tap that beat it. Nothing has sounded yet either way.
+        await roomLoaded;
         buildVerbNow();
-        if (live.reverb?.ready) await live.reverb.ready;
         await loadSamples();
         clock.start(0);
       } catch (err) {
@@ -3451,6 +3655,9 @@ export function createAudio(song) {
     disarmMotion() {
       for (const t of TRACK_KEYS) motionArmed[t] = false;
     },
+    // Which room the live graph built: "worklet" (D35), "combs" (an engine
+    // without AudioWorklet), or null before the first idle window or play.
+    roomKind: () => live.roomKind || null,
     // The track whose Sound sheet is open (null when none): its notes strike
     // every corner, so the pad morphs a chord that is already sounding.
     setMorphLive(track) {
@@ -3540,7 +3747,7 @@ export function createAudio(song) {
       const runPass = (dur, stopStep, barOf) => {
         const patchesCopy = structuredClone(patches);
         const masterCopy = { ...masterState };
-        return Tone.Offline(({ transport: offTr }) => {
+        return offlineRender(({ transport: offTr }) => {
           offTr.bpm.value = song.tempo;
           // Which returns does this pass need? Only sends on AUDIBLE tracks
           // count — a muted stem's send carries silence, and an export-grade
