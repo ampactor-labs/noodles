@@ -363,16 +363,21 @@ function releaseVoice(v, shape, time, level, sampleTime) {
 
 // A layer: one preset corner's oscillator and envelope, a polyphony cap, and
 // the morph weight as its output volume (the node PolySynth called volume).
+// `pre` is a stage of the corner's own that sits between the voices and the
+// weight (the bass corners' drives), so the weight scales the corner's
+// finished sound instead of changing how hard the stage is driven.
 class VoiceLayer {
-  constructor(raw, preset, cap, srcDb, dest) {
+  constructor(raw, preset, cap, srcDb, dest, name = "", pre = null) {
     this.raw = raw;
+    this.name = name;
     this.wave = preset.osc || preset.wave;
     this.shape = { a: preset.attack, d: preset.decay, s: preset.sustain, r: preset.release };
     this.cap = cap;
     this.level = Tone.dbToGain(srcDb);
     this.out = new Tone.Volume(0).connect(dest);
     this.volume = this.out.volume;
-    this.input = inputOf(this.out);
+    if (pre) pre.connect(this.out);
+    this.input = inputOf(pre || this.out);
     this.voices = [];
   }
   // Voices that can still sound at or after t. Offline renders schedule the
@@ -511,6 +516,17 @@ class MonoVoice {
 // equal-power law, cos and sin of wet * pi / 2. Each is a ToneAudioNode, so
 // connect/disconnect and the color splice treat it like any Tone effect.
 
+// A param write that answers a gesture or a transport step: a short ramp
+// from `at` (the step's time, or the immediate clock for a finger). Tone's
+// `.value =` lands at now(), which is currentTime PLUS the 0.25 s
+// lookAhead, so every knob, fader, pad and mute written that way sounded a
+// quarter second after the hand moved (D33). No `at` means construction or
+// an offline render's setup, where now() is the right time.
+function glide(param, value, at) {
+  if (at == null) param.value = value;
+  else param.rampTo(value, 0.02, at);
+}
+
 class NativeFx extends Tone.ToneAudioNode {
   constructor(name, stereo = false) {
     super();
@@ -597,16 +613,18 @@ class NativeChorus extends NativeFx {
     this._lfo.start();
     this.set({ depth, wet });
   }
-  set({ depth, wet } = {}) {
-    if (depth != null) {
+  set({ depth, wet } = {}, at) {
+    if (depth != null && depth !== this._depth) {
+      this._depth = depth;
       const dev = this._center * depth;
-      this._swingL.gain.value = dev;
-      this._swingR.gain.value = -dev;
+      glide(this._swingL.gain, dev, at);
+      glide(this._swingR.gain, -dev, at);
     }
-    if (wet != null) {
+    if (wet != null && wet !== this._wetValue) {
+      this._wetValue = wet;
       const [a, b] = crossfadeGains(wet);
-      this._dry.gain.value = a;
-      this._wet.gain.value = b;
+      glide(this._dry.gain, a, at);
+      glide(this._wet.gain, b, at);
     }
     return this;
   }
@@ -652,34 +670,34 @@ class NativePhaser extends NativeFx {
     this._lfo.start();
     this._range();
   }
-  // Setters skip unchanged values: updateColor runs on every patch write,
+  // Writes skip unchanged values: updateColor runs on every patch write,
   // and a moved range is twenty param writes.
-  _range() {
+  _range(at) {
     const min = this._base;
     const max = this._base * Math.pow(2, this._octaves);
     const center = (min + max) / 2;
     if (center === this._center) return;
     this._center = center;
     const dev = (max - min) / 2;
-    for (const f of this._filters) f.frequency.value = center;
-    this._swingL.gain.value = dev;
-    this._swingR.gain.value = -dev;
+    for (const f of this._filters) glide(f.frequency, center, at);
+    glide(this._swingL.gain, dev, at);
+    glide(this._swingR.gain, -dev, at);
   }
-  set frequency(hz) {
-    if (hz === this._hz) return;
-    this._hz = hz;
-    this._lfo.frequency.value = hz;
-  }
-  set octaves(o) {
-    this._octaves = o;
-    this._range();
-  }
-  set wet(w) {
-    if (w === this._wetValue) return;
-    this._wetValue = w;
-    const [a, b] = crossfadeGains(w);
-    this._dry.gain.value = a;
-    this._wet.gain.value = b;
+  update({ frequency, octaves, wet }, at) {
+    if (frequency != null && frequency !== this._hz) {
+      this._hz = frequency;
+      this._lfo.frequency.value = frequency;
+    }
+    if (octaves != null) {
+      this._octaves = octaves;
+      this._range(at);
+    }
+    if (wet != null && wet !== this._wetValue) {
+      this._wetValue = wet;
+      const [a, b] = crossfadeGains(wet);
+      glide(this._dry.gain, a, at);
+      glide(this._wet.gain, b, at);
+    }
   }
 }
 
@@ -704,17 +722,17 @@ class NativeTremolo extends NativeFx {
     }
     merge.connect(inputOf(this.output));
     for (const l of this._lfos) l.start();
-    this.depth = depth;
+    this.update({ depth });
   }
-  set frequency(hz) {
-    if (hz === this._hz) return;
-    this._hz = hz;
-    for (const l of this._lfos) l.frequency.value = hz;
-  }
-  set depth(d) {
-    if (d === this._depth) return;
-    this._depth = d;
-    for (const s of this._swings) s.gain.value = -0.5 * d;
+  update({ frequency, depth }, at) {
+    if (frequency != null && frequency !== this._hz) {
+      this._hz = frequency;
+      for (const l of this._lfos) l.frequency.value = frequency;
+    }
+    if (depth != null && depth !== this._depth) {
+      this._depth = depth;
+      for (const sw of this._swings) glide(sw.gain, -0.5 * depth, at);
+    }
   }
 }
 
@@ -737,27 +755,23 @@ class NativeAutoFilter extends NativeFx {
     this._octaves = octaves;
     this._range();
   }
-  _range() {
+  _range(at) {
     const min = this._base;
     const max = this._base * Math.pow(2, this._octaves);
     if (min === this._min && max === this._max) return;
     this._min = min;
     this._max = max;
-    this._filter.frequency.value = (min + max) / 2;
-    this._swing.gain.value = (max - min) / 2;
+    glide(this._filter.frequency, (min + max) / 2, at);
+    glide(this._swing.gain, (max - min) / 2, at);
   }
-  set frequency(hz) {
-    if (hz === this._hz) return;
-    this._hz = hz;
-    this._lfo.frequency.value = hz;
-  }
-  set baseFrequency(f) {
-    this._base = f;
-    this._range();
-  }
-  set octaves(o) {
-    this._octaves = o;
-    this._range();
+  update({ frequency, baseFrequency, octaves }, at) {
+    if (frequency != null && frequency !== this._hz) {
+      this._hz = frequency;
+      this._lfo.frequency.value = frequency;
+    }
+    if (baseFrequency != null) this._base = baseFrequency;
+    if (octaves != null) this._octaves = octaves;
+    this._range(at);
   }
 }
 
@@ -778,25 +792,16 @@ class NativeEcho extends NativeFx {
 // Tone.Distortion at wet 1: Tone's curve, (3 + k) x 20deg / (pi + k|x|) with
 // k = 100 * amount and a dead zone under 0.001, on a 1024-point table. At
 // amount 0 it is a -9.5 dB linear stage (x / 3), which the bass corner trims
-// were measured through. The table is only rebuilt when the amount moves.
+// were measured through. One fixed curve per bass corner, built once.
 class NativeDrive extends NativeFx {
   constructor(amount) {
     super("Distortion");
     this._shaper = new Tone.WaveShaper();
     this.input.connect(this._shaper);
     this._shaper.connect(this.output);
-    this._amount = null;
-    this.distortion = amount;
-  }
-  set distortion(amount) {
-    if (amount === this._amount) return;
-    this._amount = amount;
     const k = amount * 100;
     const deg = Math.PI / 180;
     this._shaper.setMap((x) => (Math.abs(x) < 0.001 ? 0 : ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x))));
-  }
-  get distortion() {
-    return this._amount;
   }
 }
 
@@ -1292,12 +1297,33 @@ function cornerWeights(patch) {
   return [(1 - x) * (1 - y), x * (1 - y), (1 - x) * y, x * y];
 }
 
-// The voices that actually get triggered: the two heaviest corners,
-// renormalized to constant power. The ear tracks the nearest corners; the
-// other two still shape the sound through the blended filter/drive/envelope
-// params, which cost nothing. This caps the morph's voice bill at 2x a
-// single synth instead of 4x — the difference between a Dimensity 6300
-// keeping up and choking.
+// The melodic morph's mix (D33): bilinear corner weights with a floor taken
+// off and renormalized. Every layer's output gain, the voices a note
+// triggers, the blended trim and the blended tone controls all follow these
+// gains, so the whole sound is one continuous function of the point.
+//
+// It replaced "the two heaviest corners, renormalized", which was
+// discontinuous twice over. Where the second and third corners swap rank the
+// pair flipped, so the next note jumped timbre. Worse, a corner that left the
+// pair was muted at once: its layer held every voice already sounding, so
+// dragging across the pad mid-chord cut the chord out until the next attack
+// (measured: a held pad fell -29 -> -38 dB, the halo and root hint alone,
+// for the rest of the bar). With a floor, a corner's gain reaches zero
+// smoothly as its weight falls to the floor, so a sounding voice fades with
+// the drag instead of vanishing, and a new corner fades in at the next note.
+// At 0.18 the pad averages 2.05 sounding corners over its area (the pair
+// rule: 2.00); all four sound only in the central 4% of the pad.
+const MORPH_FLOOR = 0.18;
+function morphGains(patch) {
+  const e = cornerWeights(patch).map((w) => Math.max(0, w - MORPH_FLOOR));
+  const sum = e[0] + e[1] + e[2] + e[3];
+  return e.map((v) => v / sum);
+}
+
+// The drum sample bank's crossfade per hit: the two heaviest kits,
+// renormalized. One-shots sustain nothing, so a pair switching between hits
+// can't cut a sound off, and four kick recordings summed would smear the
+// transient the kits exist for.
 function activeLayerWeights(patch, top = 2) {
   const w = cornerWeights(patch);
   const kept = [0, 1, 2, 3]
@@ -1325,7 +1351,7 @@ const blendLog = (vals, w) => Math.exp(vals.reduce((acc, v, i) => acc + Math.log
 // Key-tracked velocity boosts: octave 1 loses audible energy to the 34 Hz
 // highpass and to small speakers, so quieter registers get pushed back up.
 // Factors close the measured octave-1 vs octave-2 RMS gaps (npm run
-// calibrate, bassOct table). Keyed by the patch's dominant corner.
+// calibrate, bassOct table). Keyed by the layer's own corner.
 function bassVelocityBoost(preset, midi) {
   if (midi >= 36) return 1;
   if (preset === "sub") return 2.5;
@@ -1764,8 +1790,8 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   // the drive stage); the layer's output volume carries only the morph weight
   // (applyMorphTo). Caps are per layer: a full 13th is seven tones, and the
   // pad must hold one chord plus the tail of the last.
-  const makeLayers = (table, poly, dest, srcDb) =>
-    Object.values(table).map((p) => new VoiceLayer(g.raw, p, poly, srcDb, dest));
+  const makeLayers = (table, poly, dest, srcDb, pre = null) =>
+    Object.entries(table).map(([name, p]) => new VoiceLayer(g.raw, p, poly, srcDb, dest, name, pre?.(p)));
 
   // Harmony: morphing pad + mono shimmer an octave up + a quiet low-mid root
   // hint. Bass owns the low end, so the pad and the hint are highpassed.
@@ -1785,9 +1811,9 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   g.padSwing = new Tone.Gain(0).connect(g.padFilter.frequency);
   padLfo.connect(inputOf(g.padSwing));
   padLfo.start();
-  g.setPadSweep = (min, max) => {
-    g.padFilter.frequency.value = (min + max) / 2;
-    g.padSwing.gain.value = (max - min) / 2;
+  g.setPadSweep = (min, max, at) => {
+    glide(g.padFilter.frequency, (min + max) / 2, at);
+    glide(g.padSwing.gain, (max - min) / 2, at);
   };
   g.setPadSweep(850, 2600);
   g.padHighpass.connect(g.padUnbox);
@@ -1806,7 +1832,7 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   g.rootHintFilter = new Tone.BiquadFilter({ type: "highpass", frequency: 120, Q: 0.7 }).connect(g.colorIn.harmony);
   g.sub = new MonoVoice(g.raw, { wave: "sine", attack: 0.08, decay: 0.4, sustain: 0.85, release: 1.6 }, SOURCE_LEVEL_DB.harmonyRoot, inputOf(g.rootHintFilter));
 
-  // Bass and lead: layers feed the shared drive/filter lane. The static
+  // Bass and lead: layers feed the shared filter lane. The static
   // carve filters are the phone-speaker translation layer (a 250 Hz–4 kHz
   // driver hears midrange or nothing): the bass gets +2 dB of upper-harmonic
   // presence at 900 Hz so its NOTE survives a speaker that can't make its
@@ -1815,8 +1841,15 @@ function buildGraph({ meters = false, withVerb = true, withEcho = true, lazyVerb
   g.bassHighpass = new Tone.BiquadFilter({ type: "highpass", frequency: 34, Q: 0.7 }).connect(g.colorIn.bass);
   g.bassPresence = new Tone.BiquadFilter({ type: "peaking", frequency: 900, Q: 1, gain: 2 }).connect(g.bassHighpass);
   g.bassFilter = new Tone.BiquadFilter({ type: "lowpass", frequency: 750, Q: 0.9 }).connect(g.bassPresence);
-  g.bassDrive = new NativeDrive(0).connect(g.bassFilter);
-  g.bassLayers = makeLayers(BASS_PRESETS, 4, g.bassDrive, SOURCE_LEVEL_DB.bass);
+  // Each bass corner drives its own voices, and the morph weight comes after
+  // the drive (D33). One shared drive at the blended amount ran every point
+  // between corners through a stage no corner uses, with a gain no trim
+  // accounts for: deep's amount-0 stage is x/3 and pluck's is +15 dB of
+  // small-signal gain, so the midpoint between them drove deep's sine through
+  // +10 dB and the pad's interior came out 3.5 dB over its corners (5x5
+  // offline map). It also rebuilt the 1024-point curve on every pointermove.
+  // Four fixed curves are built once.
+  g.bassLayers = makeLayers(BASS_PRESETS, 4, g.bassFilter, SOURCE_LEVEL_DB.bass, (p) => new NativeDrive(p.drive || 0));
   g.leadHighpass = new Tone.BiquadFilter({ type: "highpass", frequency: 180, Q: 0.7 }).connect(g.colorIn.melody);
   g.leadPresence = new Tone.BiquadFilter({ type: "highshelf", frequency: 2600, gain: 1.8 }).connect(g.leadHighpass);
   g.leadFilter = new Tone.BiquadFilter({ type: "lowpass", frequency: 3200, Q: 0.6 }).connect(g.leadPresence);
@@ -1959,27 +1992,43 @@ function setTrim(g, track, db, ramp, at) {
 // equal power for the opposite reason — see hitDrumOn.
 const layerDb = (w) => 20 * Math.log10(Math.max(w, 1e-4));
 
+// The level trim between corners (D33). The trims sit after the input
+// compressor and each one answers its own corner's loudness: ambient, loud
+// and sustained, takes -6; stab, a blip that decays to nothing, takes +3.
+// Between them the mix's loudness is ambient's, so a straight average of the
+// two trims (-1.5) left the mix 2 dB over both corners. Weighting each trim
+// by the amplitude its corner brings (a trim of T answers a level of about
+// -T) hands the mix the trim of whichever layer it is actually made of.
+function blendTrim(gains, w) {
+  let num = 0;
+  let den = 0;
+  gains.forEach((t, i) => {
+    const v = w[i] * Tone.dbToGain(-t);
+    num += v * t;
+    den += v;
+  });
+  return den ? num / den : 0;
+}
+
 function applyMorphTo(g, track, patch, { ramp = false, at } = {}) {
   const table = Object.values(PRESET_TABLES[track]);
-  const w = cornerWeights(patch);
-  const active = activeLayerWeights(patch);
+  const w = morphGains(patch);
   g.layers[track].forEach((layer, i) => {
-    const entry = active.find((a) => a.i === i);
-    const db = entry ? layerDb(entry.w) : -96;
+    const db = w[i] > 0 ? layerDb(w[i]) : -96;
     if (ramp) layer.volume.rampTo(db, 0.03, at);
     else layer.volume.value = db;
   });
-  setTrim(g, track, blendLin(table.map((p) => p.gain), w), ramp, at);
+  setTrim(g, track, blendTrim(table.map((p) => p.gain), w), ramp, at);
+  const when = ramp ? at : undefined;
   if (track === "harmony") {
     const filter = blendLog(table.map((p) => p.filter), w);
-    g.setPadSweep(filter * 0.5, filter * 1.5);
-    g.chorus?.set({ wet: blendLin(table.map((p) => p.chorusWet), w), depth: blendLin(table.map((p) => p.chorusDepth), w) });
+    g.setPadSweep(filter * 0.5, filter * 1.5, when);
+    g.chorus?.set({ wet: blendLin(table.map((p) => p.chorusWet), w), depth: blendLin(table.map((p) => p.chorusDepth), w) }, when);
   } else {
     const cutoff = blendLog(table.map((p) => p.cutoff), w);
     const node = track === "bass" ? g.bassFilter : g.leadFilter;
     if (ramp) node.frequency.rampTo(cutoff, 0.05, at);
     else node.frequency.value = cutoff;
-    if (track === "bass") g.bassDrive.distortion = blendLin(table.map((p) => p.drive || 0), w);
   }
 }
 
@@ -2018,14 +2067,10 @@ const COLOR_MAKERS = {
   phase(raw, amount, motion) {
     // Ten allpass stages per channel (the full grade, D20), swept at 0.1-2 Hz.
     const phaser = new NativePhaser(raw, { frequency: 0.1 + motion * 1.9, octaves: 2 + amount * 3, baseFrequency: 300, stages: 10 });
-    phaser.wet = Math.min(1, 0.3 + amount * 0.7);
+    phaser.update({ wet: Math.min(1, 0.3 + amount * 0.7) });
     return {
       nodes: [phaser],
-      updateColor: (a, m) => {
-        phaser.frequency = 0.1 + m * 1.9;
-        phaser.octaves = 2 + a * 3;
-        phaser.wet = Math.min(1, 0.3 + a * 0.7);
-      },
+      updateColor: (a, m, at) => phaser.update({ frequency: 0.1 + m * 1.9, octaves: 2 + a * 3, wet: Math.min(1, 0.3 + a * 0.7) }, at),
     };
   },
   trem(raw, amount, motion) {
@@ -2035,10 +2080,9 @@ const COLOR_MAKERS = {
     const makeup = new Tone.Gain(Tone.dbToGain(1 + amount * 5));
     return {
       nodes: [tremolo, makeup],
-      updateColor: (a, m) => {
-        tremolo.frequency = motionHz(m);
-        tremolo.depth = 0.3 + a * 0.7;
-        makeup.gain.value = Tone.dbToGain(1 + a * 5);
+      updateColor: (a, m, at) => {
+        tremolo.update({ frequency: motionHz(m), depth: 0.3 + a * 0.7 }, at);
+        glide(makeup.gain, Tone.dbToGain(1 + a * 5), at);
       },
     };
   },
@@ -2050,11 +2094,7 @@ const COLOR_MAKERS = {
     });
     return {
       nodes: [auto],
-      updateColor: (a, m) => {
-        auto.frequency = motionHz(m);
-        auto.baseFrequency = 120 + a * 180;
-        auto.octaves = 2.5 + a * 2;
-      },
+      updateColor: (a, m, at) => auto.update({ frequency: motionHz(m), baseFrequency: 120 + a * 180, octaves: 2.5 + a * 2 }, at),
     };
   },
 };
@@ -2067,8 +2107,8 @@ const colorAmount = (track, type, amount) => (type === "crush" && track !== "dru
 
 // The one path to a live color node's knobs — both appliers and the tempo
 // re-sync go through here so the per-track crush depth can't be skipped.
-function updateColorNode(g, track, patch) {
-  g.colorNodes[track]?.updateColor(colorAmount(track, g.colorTypes[track], patch.amount), patch.motion);
+function updateColorNode(g, track, patch, at) {
+  g.colorNodes[track]?.updateColor(colorAmount(track, g.colorTypes[track], patch.amount), patch.motion, at);
 }
 
 // Swapping a color used to dispose the old chain and construct the new one.
@@ -2085,10 +2125,10 @@ function updateColorNode(g, track, patch) {
 // to instead of at its construction phase. That was never a fixed quantity — it
 // already depended on when in the bar the swap landed — and offline renders
 // build each chain exactly once, so exports are unaffected either way.
-function applyColorTo(g, track, patch) {
+function applyColorTo(g, track, patch, at) {
   const type = patch.color;
   if (g.colorTypes[track] === type) {
-    updateColorNode(g, track, patch);
+    updateColorNode(g, track, patch, at);
     return;
   }
   g.colorIn[track].disconnect();
@@ -2106,7 +2146,7 @@ function applyColorTo(g, track, patch) {
   const cached = g.colorCache[track][type];
   const made = cached || (g.colorCache[track][type] = COLOR_MAKERS[type](g.raw, amount, patch.motion));
   if (cached) {
-    made.updateColor(amount, patch.motion);
+    made.updateColor(amount, patch.motion, at);
     // A reused chain keeps its internal wiring; only the two ends were cut.
     made.nodes.at(-1).connect(g.colorDest[track]);
     g.colorIn[track].connect(made.nodes[0]);
@@ -2123,15 +2163,16 @@ function applyColorTo(g, track, patch) {
   g.colorTypes[track] = type;
 }
 
-function applyPatchTo(g, track, patch, opts) {
-  if (track === "drums") applyKitMorphTo(g, patch);
+function applyPatchTo(g, track, patch, opts = {}) {
+  if (track === "drums") applyKitMorphTo(g, patch, opts);
   else applyMorphTo(g, track, patch, opts);
-  applyColorTo(g, track, patch);
+  applyColorTo(g, track, patch, opts.ramp ? opts.at : undefined);
 }
 
 // Kit morph: every kit parameter is a scalar, so drums morph by direct
 // blending — same one kick/snare/hat/clap, zero extra nodes or voices.
-function applyKitMorphTo(g, patch) {
+function applyKitMorphTo(g, patch, { ramp = false, at } = {}) {
+  const when = ramp ? at : undefined;
   const kits = Object.values(KITS);
   const w = cornerWeights(patch);
   const lin = (get) => blendLin(kits.map(get), w);
@@ -2143,26 +2184,38 @@ function applyKitMorphTo(g, patch) {
   });
   g.snare.set({ envelope: { attack: 0.001, decay: log((k) => k.snare), sustain: 0 } });
   g.hat.set({ envelope: { attack: 0.001, decay: log((k) => k.hat.decay), sustain: 0 } });
-  g.hatFilter.frequency.value = log((k) => k.hat.resonance);
+  glide(g.hatFilter.frequency, log((k) => k.hat.resonance), when);
   g.open.set({ envelope: { attack: 0.001, decay: log((k) => k.open.decay), sustain: 0, release: 0.02 } });
-  g.openFilter.frequency.value = log((k) => k.open.resonance) - 1200;
+  glide(g.openFilter.frequency, log((k) => k.open.resonance) - 1200, when);
   g.perc.set({ envelope: { attack: 0.004, decay: log((k) => k.perc.decay), sustain: 0 } });
-  g.percFilter.frequency.value = log((k) => k.perc.center);
+  glide(g.percFilter.frequency, log((k) => k.perc.center), when);
   g.clap.set({ envelope: { attack: 0.001, decay: log((k) => k.clap), sustain: 0 } });
   const gainDb = lin((k) => k.gain);
-  g.kick.volume.value = SOURCE_LEVEL_DB.kick + gainDb;
-  g.snare.volume.value = SOURCE_LEVEL_DB.snare + gainDb;
-  g.hat.volume.value = SOURCE_LEVEL_DB.hat + gainDb;
-  g.open.volume.value = SOURCE_LEVEL_DB.open + gainDb;
-  g.perc.volume.value = SOURCE_LEVEL_DB.perc + gainDb;
-  g.clap.volume.value = SOURCE_LEVEL_DB.clap + gainDb;
+  glide(g.kick.volume, SOURCE_LEVEL_DB.kick + gainDb, when);
+  glide(g.snare.volume, SOURCE_LEVEL_DB.snare + gainDb, when);
+  glide(g.hat.volume, SOURCE_LEVEL_DB.hat + gainDb, when);
+  glide(g.open.volume, SOURCE_LEVEL_DB.open + gainDb, when);
+  glide(g.perc.volume, SOURCE_LEVEL_DB.perc + gainDb, when);
+  glide(g.clap.volume, SOURCE_LEVEL_DB.clap + gainDb, when);
 }
 
 // --- Note triggers, parameterized by graph + patch state. vstate carries the
 // voice-leading memory ({ prev }) so each render gets its own. Only layers
-// carrying weight get triggered — silent corners cost nothing.
+// carrying weight get triggered — silent corners cost nothing — except while
+// the point can move under a sounding note: the track's Sound sheet is open
+// (a finger may land on the pad) or a recorded x/y ride is playing. Then
+// every corner gets the note, so a drag toward a corner fades its voice IN
+// instead of fading the chord out: a voice exists only on the layers it was
+// struck on, and a corner nobody struck has nothing to fade up (D33). The
+// cost is that track's voices at up to 2x, only for as long as that lasts.
 function eachActiveLayer(g, track, patch, fn) {
-  for (const { i } of activeLayerWeights(patch)) fn(g.layers[track][i]);
+  const layers = g.layers[track];
+  if (g.morphLive === track || g.ridden?.[track]) {
+    for (const layer of layers) fn(layer);
+    return;
+  }
+  const w = morphGains(patch);
+  for (let i = 0; i < 4; i++) if (w[i] > 0) fn(layers[i]);
 }
 
 // oct is the clip's whole-octave shift. It lands AFTER voice leading (prev
@@ -2220,12 +2273,15 @@ function playNoteStackOn(g, patches, track, slot, time) {
     return;
   }
   const stretch = track === "bass" ? 1.1 : 1;
-  const boostPreset = track === "bass" ? dominantCorner("bass", patches.bass) : null;
   for (const n of noteSlot(slot)) {
-    let vel = n.vel ?? 0.9;
-    if (track === "bass") vel *= bassVelocityBoost(boostPreset, n.midi);
+    const vel = n.vel ?? 0.9;
     const dur = sixteenth() * (n.len || 1) * stretch;
-    eachActiveLayer(g, track, patches[track], (layer) => layer.triggerAttackRelease(midiToFreq(n.midi), dur, time, vel));
+    // Each bass corner takes its own octave-1 boost (it used to be the
+    // dominant corner's, which jumped +8 dB on those notes where the pad's
+    // diagonal crossed into sub).
+    eachActiveLayer(g, track, patches[track], (layer) =>
+      layer.triggerAttackRelease(midiToFreq(n.midi), dur, time, track === "bass" ? vel * bassVelocityBoost(layer.name, n.midi) : vel)
+    );
   }
 }
 
@@ -2301,7 +2357,7 @@ function hitDrumOn(g, patches, v, time, vel = 0.9) {
       return;
     }
     let played = false;
-    for (const { i, w } of activeLayerWeights(patch)) {
+    for (const { i, w } of activeLayerWeights(g.ridden?.drums || patch)) {
       const kit = SAMPLE_KIT_NAMES[i];
       const buffer = sampleBuffers[kit]?.[v];
       if (!buffer) continue;
@@ -2360,6 +2416,7 @@ function applyMotionOn(g, patchesRef, mstate, track, scene, step, time) {
       }
       mstate.motionOn[track] = false;
     }
+    if (g.ridden) g.ridden[track] = null;
     return;
   }
   const eff = { ...patchesRef[track] };
@@ -2379,6 +2436,12 @@ function applyMotionOn(g, patchesRef, mstate, track, scene, step, time) {
   // the restore-once contract for whichever side rode.
   if (patchLane || mstate.motionOn[track]) applyPatchTo(g, track, eff, { ramp: true, at: time });
   mstate.motionOn[track] = true;
+  // The ridden point, for the note triggers: they are handed the base patch,
+  // and a ride that carried the mix to a corner the base never weighted used
+  // to strike only the base's corners - which the ride had just muted, so the
+  // track went silent for as long as the ride stayed away.
+  const rides = ["x", "y"].some((p) => Array.isArray(lanes[p]) && lanes[p].length);
+  (g.ridden ||= {})[track] = rides ? eff : null;
 }
 
 // One arrangement step — shared by the live transport and the offline render.
@@ -2689,8 +2752,19 @@ export function createAudio(song) {
     const st = channelState[track];
     return !!st && (st.mute || (anySoloOn() && !st.solo));
   };
+  // A strip's level is its fader, or silence while it is muted or soloed out.
+  // Mute used to be Tone.Channel's own switch: a hard step to -Infinity
+  // written with `.value`, so it landed 0.25 s after the tap and could click,
+  // and a fader write on a muted strip overwrote the -Infinity and un-muted
+  // it with the button still lit. One writer now, ramped from the immediate
+  // clock, reading both the fader and the gate every time.
+  const MUTED_DB = -120;
+  const writeStripLevel = (track) => {
+    const db = trackMutedNow(track) ? MUTED_DB : channelState[track].vol;
+    live.channels[track].volume.rampTo(db, 0.012, tapTime());
+  };
   function applyTrackGates() {
-    for (const track of TRACK_KEYS) live.channels[track].mute = trackMutedNow(track);
+    for (const track of TRACK_KEYS) writeStripLevel(track);
   }
 
   // The six writes the mixer owns. Split out of the public setters so setMix()
@@ -2702,12 +2776,12 @@ export function createAudio(song) {
   const applyVol = (track, raw) => {
     const db = clampTrackDb(raw);
     channelState[track].vol = db;
-    live.channels[track].volume.value = db;
+    writeStripLevel(track);
   };
   const applyPan = (track, raw) => {
     const p = Math.max(-1, Math.min(1, Number(raw) || 0));
     channelState[track].pan = p;
-    live.channels[track].pan.value = p;
+    live.channels[track].pan.rampTo(p, 0.012, tapTime());
   };
   const applySendOf = (track, kind, raw) => {
     const db = clampSendDb(raw);
@@ -3235,7 +3309,7 @@ export function createAudio(song) {
       transport.bpm.value = bpm;
       syncEcho(bpm);
       // Tempo-synced colors (trem/wob) chase the new grid.
-      for (const t of TRACK_KEYS) updateColorNode(live, t, patches[t]);
+      for (const t of TRACK_KEYS) updateColorNode(live, t, patches[t], tapTime());
     },
     setSwing() {
       // Global groove lives on song.swing and is read live per trigger.
@@ -3376,6 +3450,11 @@ export function createAudio(song) {
     motionArmed: (track) => motionArmed[track],
     disarmMotion() {
       for (const t of TRACK_KEYS) motionArmed[t] = false;
+    },
+    // The track whose Sound sheet is open (null when none): its notes strike
+    // every corner, so the pad morphs a chord that is already sounding.
+    setMorphLive(track) {
+      live.morphLive = MELODIC_TRACKS.includes(track) ? track : null;
     },
     // --- the chop deck ---
     async loadChopSample(arrayBuffer, name, mode = "auto") {

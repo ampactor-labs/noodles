@@ -768,7 +768,7 @@ const GROOVES = {
     weight: 26,
     tempo: [84, 110],
     swing: [0.06, 0.22],
-    bass: [["roots", 3], ["bounce", 1], ["offbeat8", 1]],
+    bass: [["roots", 2], ["lock", 2], ["bounce", 1], ["offbeat8", 1]],
     comp: [["sustain", 3], ["tresillo", 2], ["arp", 1]],
     sounds: { harmony: [["keys", 2], ["pad", 2], ["stab", 1]], bass: [["pluck", 2], ["bright", 1], ["sub", 1]], melody: [["lead", 2], ["pluck", 2], ["bell", 1]] },
     melodyGap: 0.5,
@@ -794,7 +794,7 @@ const GROOVES = {
     weight: 18,
     tempo: [70, 92],
     swing: [0, 0.15],
-    bass: [["drone", 3], ["roots", 2]],
+    bass: [["drone", 3], ["lock", 3], ["roots", 2]],
     comp: [["sustain", 4], ["arp", 1], ["tresillo", 1]],
     sounds: { harmony: [["pad", 2], ["ambient", 2], ["keys", 1]], bass: [["sub", 2], ["deep", 2], ["bright", 1]], melody: [["bell", 2], ["lead", 2], ["synth", 1]] },
     melodyGap: 0.65,
@@ -819,7 +819,7 @@ const GROOVES = {
     weight: 16,
     tempo: [118, 134],
     swing: [0.25, 0.45],
-    bass: [["roots", 2], ["offbeat8", 2], ["bounce", 1]],
+    bass: [["roots", 2], ["offbeat8", 2], ["lock", 2], ["bounce", 1]],
     comp: [["skank", 2], ["tresillo", 2], ["sustain", 2]],
     sounds: { harmony: [["stab", 2], ["keys", 2], ["pad", 1]], bass: [["pluck", 2], ["sub", 2], ["bright", 1]], melody: [["pluck", 2], ["synth", 2], ["bell", 1]] },
     melodyGap: 0.45,
@@ -848,7 +848,7 @@ const GROOVES = {
     weight: 18,
     tempo: [96, 124],
     swing: [0.1, 0.3],
-    bass: [["drone", 2], ["roots", 2], ["offbeat8", 1]],
+    bass: [["drone", 2], ["roots", 2], ["offbeat8", 1], ["lock", 1]],
     comp: [["sustain", 2], ["pulse", 2], ["arp", 2]],
     sounds: { harmony: [["ambient", 2], ["pad", 1], ["keys", 1]], bass: [["sub", 2], ["deep", 1], ["pluck", 1]], melody: [["bell", 2], ["pluck", 2], ["lead", 1]] },
     melodyGap: 0.7,
@@ -872,7 +872,7 @@ const GROOVES = {
     weight: 12,
     tempo: [126, 142],
     swing: [0.05, 0.2],
-    bass: [["roots", 2], ["offbeat8", 2], ["drone", 1]],
+    bass: [["roots", 2], ["offbeat8", 2], ["lock", 2], ["drone", 1]],
     comp: [["skank", 2], ["sustain", 2], ["tresillo", 1], ["arp", 1]],
     sounds: { harmony: [["pad", 2], ["keys", 2], ["stab", 1]], bass: [["sub", 2], ["bright", 2], ["pluck", 1]], melody: [["pluck", 2], ["bell", 2], ["lead", 1]] },
     melodyChars: [["hook", 2], ["sparse", 2], ["runner", 1]],
@@ -948,9 +948,8 @@ const GROOVES = {
     vamps: [[[0, 1], 3], [[0, 2], 2], [[0, 3], 1], [[1, 4], 1]],
     visit: 0.35,
     improv: true,
-    arc: true,
     dragKick: [15, 40],
-    bass: [["bounce", 3], ["roots", 2], ["offbeat8", 1]],
+    bass: [["bounce", 3], ["lock", 2], ["roots", 2], ["offbeat8", 1]],
     comp: [["sustain", 2], ["pulse", 2], ["tresillo", 1]],
     sounds: { harmony: [["keys", 3], ["pad", 2]], bass: [["deep", 3], ["pluck", 2], ["sub", 1]], melody: [["bell", 2], ["pluck", 2], ["lead", 1]] },
     melodyGap: 0.6,
@@ -1014,9 +1013,27 @@ export function arpNoteAt(notes, k) {
   const i = k % cycle;
   return notes[i < notes.length ? i : cycle - i];
 }
-// Corners whose attack is fast enough to carry each rhythmic comp; sustain
-// and arp take any right hand (the arp's len-3 hits survive a slow attack).
-const FAST_COMP = { skank: ["keys", "stab"], pulse: ["keys", "stab"], tresillo: ["keys", "stab", "pad"] };
+// The corners that can play each part. A rhythmic comp needs an attack fast
+// enough to speak its hits: ambient's 1 s swell turns skank hits into
+// near-silent blips. A held chord needs a sound that holds: stab decays to
+// nothing in 0.2 s, so "sustain" on a stab was one blip per bar and three
+// beats of the halo alone (D34). The sparse singer's long notes need the
+// same: pluck is gone in 0.1 s, and a line of three or four long notes over
+// four bars became three or four ticks. The arp, hook and runner take any
+// corner (the arp's len-3 hits survive a slow attack).
+const COMP_CORNERS = {
+  sustain: ["pad", "keys", "ambient"],
+  skank: ["keys", "stab"],
+  pulse: ["keys", "stab"],
+  tresillo: ["keys", "stab", "pad"],
+};
+const SINGER_CORNERS = { sparse: ["lead", "bell", "synth"] };
+// A hire that has to fit takes the groove's own taste among the corners that
+// fit, and any corner that fits when the groove's list holds none.
+function hireFor(taste, fits) {
+  const ok = taste.filter(([c]) => fits.includes(c));
+  return ok.length ? pickW(ok) : pickFrom(fits);
+}
 
 // The vibe holds ONLY rolled values (plus the groove name) — archetype
 // constants stay in GROOVES and are derived where needed, so the vibe can
@@ -1049,17 +1066,26 @@ function rollVibe() {
   const hires = Object.fromEntries(
     ["harmony", "bass", "melody"].map((t) => [t, rnd() < 0.6 ? pickW(g.sounds[t]) : null])
   );
-  const fast = FAST_COMP[comp];
-  if (fast && !fast.includes(hires.harmony)) hires.harmony = pickFrom(fast);
+  // The singer: which melodic character the roll writes in (magicMelody
+  // branches on it; ✨b's fresh melody keeps it, so the B side re-sings
+  // the same voice rather than becoming a different person).
+  const melodyChar = pickW(g.melodyChars);
+  // A part that needs a kind of sound always hires one (a null hire would
+  // leave the corner to a coin); everyone else keeps the 40% surprise.
+  const plays = COMP_CORNERS[comp];
+  if (plays && !plays.includes(hires.harmony)) hires.harmony = hireFor(g.sounds.harmony, plays);
+  const sings = SINGER_CORNERS[melodyChar];
+  if (sings && !sings.includes(hires.melody)) hires.melody = hireFor(g.sounds.melody, sings);
   return {
     groove,
     wildcard,
     comp,
     hires,
-    // The singer: which melodic character the roll writes in (magicMelody
-    // branches on it; ✨b's fresh melody keeps it, so the B side re-sings
-    // the same voice rather than becoming a different person).
-    melodyChar: pickW(g.melodyChars),
+    melodyChar,
+    // The bass player, hired once per song like the singer (D34): every scene
+    // the song deals speaks the same style, and the B side moves it up or
+    // down with the drums instead of hiring a stranger.
+    bassStyle: pickW(g.bass),
     tempo: wildcard ? (rnd() < 0.5 ? g.tempo[0] : g.tempo[1]) : rint(g.tempo[0], g.tempo[1]),
     swing: Math.round((g.swing[0] + rnd() * (g.swing[1] - g.swing[0])) * 100) / 100,
     // The groove hires its kit more often than not; the rest keep the
@@ -1102,8 +1128,10 @@ function rollVibe() {
     // the chords on top of the melody, -1 into the bass's mud under the pad
     // highpass. The clip's octave control is still one tap away.
     harmonyOct: 0,
-    polymeter: wildcard || rnd() < 0.1 ? (rnd() < 0.5 ? "bass" : "melody") : null,
-    bScene: rnd() < 0.6,
+    // A 12-step lane phasing against the bar is the wildcard's texture only
+    // (D34). It was 15% of all rolls: a melody that never lines up with the
+    // bar, or a bass pedaling under every chord, dealt as a cold open.
+    polymeter: wildcard ? (rnd() < 0.5 ? "bass" : "melody") : null,
     // The hand: half of rolls take a little of the groove's timing drift
     // (the HUMAN slider's own scale — dusty grooves drift more, machine
     // grooves stay near the grid), the rest sit tight.
@@ -1490,7 +1518,9 @@ function magicBass(vibe, steps = 16) {
   // chords they clash with.
   const low = [root, root, fifth, root + 12];
   const bass = new Array(16).fill(null);
-  const behavior = pickW(GROOVES[vibe.groove].bass);
+  // A 12-step lane can't follow a 16-step kick; the locked player plays roots.
+  const style = vibe.bassStyle || pickW(GROOVES[vibe.groove].bass);
+  const behavior = style === "lock" ? "roots" : style;
   if (behavior === "drone") {
     const half = Math.floor(steps / 2);
     bass[0] = [{ midi: root, len: half, vel: 0.9 }];
@@ -1529,7 +1559,9 @@ function magicBass(vibe, steps = 16) {
 // NEXT bar's root some of the time - the changes played, not pedaled.
 // Multi-bar lanes made this rollable in data; before them the one-bar
 // loop structurally couldn't track the progression (D18's deferral).
-function magicBassFollow(vibe, harmony) {
+// `kick` is the scene's kick lane, for the locked player; `style` overrides
+// the song's hired bass player (the B side's energy move).
+function magicBassFollow(vibe, harmony, kick = null, style = null) {
   const bars = harmony.length;
   const lane = new Array(bars * 16).fill(null);
   const win = scaleNotes(Math.max(BASS_FLOOR, vibe.bassBase || 0), 12);
@@ -1553,11 +1585,29 @@ function magicBassFollow(vibe, harmony) {
     const fifth = noteFor(b, 2);
     return win.find((m) => m > root && n12b(m) === n12b(fifth)) ?? fifth;
   };
-  const behavior = pickW(GROOVES[vibe.groove].bass);
+  let behavior = style || vibe.bassStyle || pickW(GROOVES[vibe.groove].bass);
+  if (behavior === "lock" && !kick?.some((v) => v > 0)) behavior = "roots";
   for (let b = 0; b < bars; b++) {
     const root = rootFor(b);
     const at = b * 16;
-    if (behavior === "drone") {
+    if (behavior === "lock") {
+      // The bass plays WITH the kick (D34): a note on every kick of the bar,
+      // held until the next one (a beat at most), the bar's root on the
+      // downbeat and a fifth or the octave up now and then after it — the
+      // funk, trap-808 and garage habit of one low-end rhythm instead of two.
+      // The dice used to write the bass without looking at the drums: under
+      // a syncopated kick, 70% of bass notes landed off it.
+      const hits = [];
+      for (let s = 0; s < 16; s++) if (kick[(at + s) % kick.length] > 0) hits.push(s);
+      if (hits[0] !== 0) hits.unshift(0);
+      hits.forEach((s, k) => {
+        const next = k + 1 < hits.length ? hits[k + 1] : 16;
+        const kv = kick[(at + s) % kick.length] || 0.9;
+        const color = s === 0 ? 1 : rnd();
+        const midi = color < 0.15 ? fifthFor(b) : color < 0.27 ? root + 12 : root;
+        lane[at + s] = [{ midi, len: Math.max(1, Math.min(4, next - s)), vel: 0.75 + 0.2 * kv }];
+      });
+    } else if (behavior === "drone") {
       lane[at] = [{ midi: root, len: 8, vel: 0.9 }];
       lane[at + 8] = [{ midi: rnd() < 0.3 ? root + 12 : root, len: 8, vel: 0.85 }];
     } else if (behavior === "offbeat8") {
@@ -1665,7 +1715,7 @@ export function makeMagicScene(vibe) {
   // The bass walks the changes on every roll now; polymeter keeps the old
   // one-bar behaviors (a 12-step phase and a 4-bar walk can't share a lane),
   // generated on the 12-step grid they'll actually loop.
-  const bass = vibe.polymeter === "bass" ? magicBass(vibe, 12) : magicBassFollow(vibe, harmony);
+  const bass = vibe.polymeter === "bass" ? magicBass(vibe, 12) : magicBassFollow(vibe, harmony, drums.kick);
   const melody = vibe.polymeter === "melody" ? magicMelody(vibe, harmony, 1, 12) : magicMelody(vibe, harmony);
   const scene = makeScene(harmony, drums, melody, bass, vibe.ride ? rideLanes(vibe) : null);
   scene.steps.drums = 64;
@@ -1677,32 +1727,52 @@ export function makeMagicScene(vibe) {
 }
 
 // The B side: the same song idea with the furniture moved — a fresh motif in
-// the same register (the vibe carries it), drums thinned or busied, the
-// progression rotated. Same key, same groove: somewhere to GO once the A
-// loop lands.
+// the same register (the vibe carries it), new changes from the same band,
+// and the energy moved one way on purpose. Same key, same groove: somewhere
+// to GO once the A loop lands, dealt with every roll (D34).
+//
+// The energy moves together. A breakdown thins the drums and the bass player
+// settles (toward the drone); a lift busies the drums and the bass drives
+// (toward the bounce). They used to move independently: the drums coin-
+// flipped thin or busy while the bass re-hired a different player at random,
+// so a B could thin its drums under a busier bass than A's.
+const BASS_ENERGY = { drone: 0, roots: 1, lock: 2, offbeat8: 2, bounce: 3 };
+function movedStyle(vibe, dir) {
+  const style = vibe.bassStyle;
+  if (!(style in BASS_ENERGY)) return null;
+  const moves = GROOVES[vibe.groove].bass.filter(([st]) => (BASS_ENERGY[st] - BASS_ENERGY[style]) * dir > 0);
+  return moves.length ? pickW(moves) : style;
+}
+const entryKey = (e) => JSON.stringify(normalizeHarmonyEntry(e));
 function makeVariationScene(a, vibe) {
   const b = cloneScene(a);
   b.tag = "✨b";
   // A dealt B scene MOVES (D27, builder's live verdict): fresh changes
   // from the same band, never the same four chords wearing a new hat.
   // One redraw if the deck hands back the identical line.
+  const same = (x, y) => x.length === y.length && x.every((e, i) => entryKey(e) === entryKey(y[i]));
   let line = magicHarmony(vibe);
-  if (JSON.stringify(line) === JSON.stringify(a.harmony)) line = magicHarmony(vibe);
-  b.harmony = line.map(normalizeHarmonyEntry);
-  // The bass walks the NEW changes — the old lane under a new progression
-  // played wrong roots. Polymeter basses keep their 12-step cycle.
-  if (vibe.polymeter !== "bass") {
-    b.bass = normalizeNoteLane(magicBassFollow(vibe, b.harmony));
-    b.steps.bass = b.harmony.length * 16;
+  if (same(line, a.harmony)) line = magicHarmony(vibe);
+  // And it departs: a line that opens on A's opening root (whatever its
+  // color — i9 and i are the same arrival) starts on its first other chord
+  // instead: the same loop heard from another bar, so it keeps its own voice
+  // leading, and its old opener now closes it, leading back home into A.
+  // 70% of lines open on the tonic, so this is the common case: before it,
+  // 47% of B sides opened exactly where A did.
+  const rootOf = (e) => harmonyChord(normalizeHarmonyEntry(e)).pcs[0] % 12;
+  const home = rootOf(a.harmony[0]);
+  if (rootOf(line[0]) === home) {
+    const k = line.findIndex((e) => rootOf(e) !== home);
+    if (k > 0) line = [...line.slice(k), ...line.slice(0, k)];
   }
-  b.melody = normalizeNoteLane(vibe.polymeter === "melody"
-    ? magicMelody(vibe, b.harmony, 1, 12) : magicMelody(vibe, b.harmony));
-  if (rnd() < 0.5) {
-    // thin: drop the clap, pull the hats back
+  b.harmony = line.map(normalizeHarmonyEntry);
+  const lift = rnd() < 0.5;
+  if (!lift) {
+    // breakdown: drop the clap, pull the hats back
     b.drums.clap.fill(0);
     b.drums.hat = b.drums.hat.map((v, s) => (s % 2 === 1 ? 0 : v * 0.85));
   } else {
-    // busy: ghost hats fill the gaps, one extra kick late in the bar
+    // lift: ghost hats fill the gaps, one extra kick late in the bar
     const ghosts = euclid(16, rint(9, 11), rint(0, 2));
     b.drums.hat = b.drums.hat.map((v, s) => v || (ghosts[s % 16] ? 0.3 + rnd() * 0.1 : 0));
     const extra = rnd() < 0.5 ? 10 : 14;
@@ -1710,6 +1780,14 @@ function makeVariationScene(a, vibe) {
       if (!b.drums.kick[bar * 16 + extra]) b.drums.kick[bar * 16 + extra] = 0.7;
     }
   }
+  // The bass walks the NEW changes over the NEW drums — the old lane under a
+  // new progression played wrong roots. Polymeter basses keep their cycle.
+  if (vibe.polymeter !== "bass") {
+    b.bass = normalizeNoteLane(magicBassFollow(vibe, b.harmony, b.drums.kick, movedStyle(vibe, lift ? 1 : -1)));
+    b.steps.bass = b.harmony.length * 16;
+  }
+  b.melody = normalizeNoteLane(vibe.polymeter === "melody"
+    ? magicMelody(vibe, b.harmony, 1, 12) : magicMelody(vibe, b.harmony));
   return b;
 }
 
@@ -1825,45 +1903,15 @@ export function makeSong() {
     setScaleContext(key, scale);
   }
   const s = makeMagicScene(vibe);
-  const scenes = [s];
+  // Every roll deals A and B, and both loop until you move (D34). The vamp
+  // used to deal a four-scene record instead — A, a drumless interlude, a
+  // variation and a one-shot pedal outro, chained by NEXT follow actions
+  // (DESIGN-VILLAIN V-C) — so one roll in eight filled the grid with badges
+  // and walked off on its own, and a backing track stopped after 32 bars.
+  // Form is the player's to make: every clip still takes follow actions on a
+  // long-press.
+  const scenes = [s, makeVariationScene(s, vibe)];
   const gs2 = GROOVES[vibe.groove];
-  if (gs2?.arc) {
-    // The record's form (DESIGN-VILLAIN §2): arrive, drop the drums for a
-    // breath, return changed, dissolve on the bIII pedal. Dealt with the
-    // same follow actions a long-press could set by hand — one 🎲, one ▶,
-    // and the phone plays a shape with a beginning and an end.
-    const interlude = cloneScene(s);
-    for (const v of DRUM_VOICES) interlude.drums[v].fill(0);
-    interlude.melody = normalizeNoteLane(vibe.polymeter === "melody"
-      ? magicMelody(vibe, s.harmony, 1, 12) : magicMelody(vibe, s.harmony));
-    const aPrime = makeVariationScene(s, vibe);
-    const outro = cloneScene(s);
-    // The ♭III of the minor-side modes; mixolydian's third degree is
-    // diminished, so its record dissolves on the IV instead.
-    const pedDeg = CHORDS[2] && (CHORDS[2].pcs[2] - CHORDS[2].pcs[0] + 12) % 12 === 6 ? 3 : 2;
-    const ped = { pcs: ladderPcs(pedDeg, cleanRung(pedDeg, rnd() < 0.5 ? "9" : "7")) };
-    outro.harmony = [ped, ped, ped, ped];
-    for (const v of DRUM_VOICES) outro.drums[v].fill(0);
-    if (vibe.polymeter !== "bass") outro.bass = normalizeNoteLane(magicBassFollow(vibe, outro.harmony));
-    // The record ends by leaving: played lanes fade across the outro while
-    // the keys ring on (harmony carries no per-note velocity to fade).
-    const fadeLane = (lane) => (Array.isArray(lane)
-      ? lane.map((slot, i) => (Array.isArray(slot)
-        ? slot.map((n) => ({ ...n, vel: Math.max(0.05, (n.vel ?? 0.8) * (1 - 0.6 * (i / lane.length))) }))
-        : slot))
-      : lane);
-    outro.bass = fadeLane(outro.bass);
-    // The A melody over the pedal: sung again, checked against the chord it
-    // now sits on (it was cleaned against A's changes, not this one).
-    outro.melody = fadeLane(unrubMelody(outro.melody, outro.harmony, melodyWindow(vibe)));
-    for (const sc of [s, interlude, aPrime]) {
-      for (const t of ARRANGE_TRACKS) sc.launch[t] = { ...sc.launch[t], follow: "next", followBars: 8 };
-    }
-    for (const t of ARRANGE_TRACKS) outro.launch[t] = { ...outro.launch[t], mode: "oneshot", follow: "none" };
-    scenes.push(interlude, aPrime, outro);
-  } else if (vibe.bScene) {
-    scenes.push(makeVariationScene(s, vibe));
-  }
   // Place at least 4 bars on the timeline: content loops inside a placed
   // clip, but the timeline itself has a 4-bar floor — a 1-bar vamp placed
   // at its own length would export as one bar of music and three of silence.

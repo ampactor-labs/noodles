@@ -121,7 +121,10 @@ after ears).
   bass+keys carry, fresh melody) → variation → outro (bIII pedal,
   one-shot, played lanes fade) — one 🎲, one ▶, and the phone plays a
   shape with a beginning and an end. The builder chose always-on over
-  a long-press variant by shipping it live to test with ears.
+  a long-press variant by shipping it live to test with ears. **Retired
+  from the dice by D34** after that listen: twelve NEXT badges read as a
+  glitch, and a backing track must not end itself. The vamp now deals A
+  and B like everyone else.
 - **V-D — the pocket nudge (engine landed, knob open).** `song.laneNudge`
   (ms per drum lane) rides both clocks and save/load; vamp hires roll
   the kick 15-40 ms behind. Audit ran before and after: meter self-test

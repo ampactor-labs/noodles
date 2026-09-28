@@ -1668,6 +1668,14 @@ function launchBadge(scene, track) {
   return bits.length ? el("div", { class: "clip-badge", text: bits.join(" ") }) : null;
 }
 
+// The badges sit in a strip along the clip's foot; a clip wearing one keeps
+// that strip clear, so a NEXT or 1X never covers the fourth chord's name.
+function addBadges(clip, scene, track) {
+  const badges = [launchBadge(scene, track), stateBadge(scene, track)].filter(Boolean);
+  for (const b of badges) clip.appendChild(b);
+  clip.classList.toggle("badged", badges.length > 0);
+}
+
 function bindSessionClip(clip, sceneIndex, track, filled) {
   let timer = 0;
   let longPress = false;
@@ -1884,10 +1892,7 @@ function renderSession() {
       if (filled) {
         clip.appendChild(el("div", { class: "tri", text: "▶" }));
         clip.appendChild(content);
-        const badge = launchBadge(scene, t.key);
-        if (badge) clip.appendChild(badge);
-        const state = stateBadge(scene, t.key);
-        if (state) clip.appendChild(state);
+        addBadges(clip, scene, t.key);
         refs.pies[t.key] = clip.appendChild(el("div", { class: "pie" }));
       } else {
         clip.textContent = "+";
@@ -2103,6 +2108,7 @@ function closeEditor() {
   cancelAnimationFrame(mixerRAF);
   mixerRAF = 0;
   audio.setMetersActive(false); // park the analyser taps with the meter loop
+  audio.setMorphLive(null);
   audio.disarmMotion();
   scrim.classList.remove("open");
   sheet.classList.remove("open");
@@ -2120,6 +2126,7 @@ function resetSheet(color) {
   cancelAnimationFrame(mixerRAF);
   mixerRAF = 0;
   audio.setMetersActive(false); // park the analyser taps with the meter loop
+  audio.setMorphLive(null);
   sheet.innerHTML = "";
   sheet.classList.remove("snd"); // sound-sheet sizing mode, set by openSoundSheet
   sheet.style.setProperty("--tc", color);
@@ -2719,6 +2726,7 @@ function openSoundSheet(track) {
   const meta = TRACKS.find((t) => t.key === track);
   resetSheet(meta.color);
   sheetId = `sound:${track}`;
+  audio.setMorphLive(track);
   // Motion capture: arm ●, play, and perform on the pad — the ride is written
   // into the playing scene's lanes, quantized to 16ths, and loops from then on.
   const recBtn = el("div", {
@@ -2838,9 +2846,12 @@ function openSoundSheet(track) {
       dot.style.top = `${p.y * 100}%`;
     };
     placeDot(patch);
-    xy.addEventListener("pointerdown", async (e) => {
+    xy.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      await ensureStarted();
+      // Unlock audio without waiting on it: awaiting here attached the move
+      // and up listeners only after the unlock settled, so a first touch
+      // could lift before its own up handler existed.
+      ensureStarted().catch(() => {});
       const pre = snapshot(); // the whole ride across the pad is one undo
       const before = audio.patch(track);
       const rect = xy.getBoundingClientRect();
@@ -3230,9 +3241,11 @@ function buildDrumEditor(scene) {
       return Math.max(0, Math.min(15, idx));
     };
 
-    steps.addEventListener("pointerdown", async (e) => {
+    steps.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      await ensureStarted();
+      // The drag state is set now and the audio unlock only gates the
+      // audition: awaiting the unlock first let a quick first tap lift
+      // before the drag mode existed, which then stuck on for the next one.
       drumDragPre = snapshot();
       dragRect = null; // fresh read at gesture start, reused for the drag
       const s0 = stepAtX(e.clientX);
@@ -3241,8 +3254,10 @@ function buildDrumEditor(scene) {
       scene.drums[v][B + s0] = drumDragMode === "add" ? 0.9 : 0;
       stepsArr[s0].classList.toggle("on", scene.drums[v][B + s0] > 0);
       if (drumDragMode === "add") {
-        audio.previewHit(v);
+        ensureStarted().then(() => audio.previewHit(v), () => {});
         buzz();
+      } else {
+        ensureStarted().catch(() => {});
       }
       paintClipMini(editor.scene, "drums");
       if (typeof paintDrums === "function") paintDrums();
@@ -3388,7 +3403,7 @@ function buildDrumEditor(scene) {
     }
   }
 
-  async function onDrumVelDown(e, s, bar) {
+  function onDrumVelDown(e, s, bar) {
     e.preventDefault();
     if (laneParam !== "vel") {
       const arr = scene.motion?.drums?.[laneParam];
@@ -3415,7 +3430,7 @@ function buildDrumEditor(scene) {
     let hasNotes = false;
     for (const v of DRUM_VOICES) if (scene.drums[v][B + s] > 0) hasNotes = true;
     if (!hasNotes) return;
-    await ensureStarted();
+    ensureStarted().catch(() => {});
     pushUndo();
     const rect = bar.getBoundingClientRect();
     const set = (ev) => {
@@ -4211,15 +4226,13 @@ function refreshClip(sceneIndex, track) {
   clip.classList.toggle("empty", content === null);
   if (!content) {
     clip.textContent = "+";
+    clip.classList.remove("badged");
     refs.pies[track] = null;
     return;
   }
   clip.appendChild(el("div", { class: "tri", text: "▶" }));
   clip.appendChild(content);
-  const badge = launchBadge(song.scenes[sceneIndex], track);
-  if (badge) clip.appendChild(badge);
-  const state = stateBadge(song.scenes[sceneIndex], track);
-  if (state) clip.appendChild(state);
+  addBadges(clip, song.scenes[sceneIndex], track);
   refs.pies[track] = clip.appendChild(el("div", { class: "pie" }));
 }
 
@@ -4439,10 +4452,10 @@ function arrLaneTap(track, clientX) {
   renderArrangement();
 }
 
-async function onClipDown(e, track, idx, cl, rz) {
+function onClipDown(e, track, idx, cl, rz) {
   e.stopPropagation();
   e.preventDefault();
-  await ensureStarted();
+  ensureStarted().catch(() => {}); // the drag needs no sound: never wait on it
   selClip = { track, idx };
   arrContentEl.querySelectorAll(".arr-clip.sel").forEach((n) => n.classList.remove("sel"));
   cl.classList.add("sel");

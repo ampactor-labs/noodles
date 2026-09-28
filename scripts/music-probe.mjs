@@ -10,8 +10,6 @@
 //
 // Usage: npm run probe:music [-- --n 4000] [-- --seed 7]
 
-import * as M from "../src/model.js";
-
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(`--${name}`);
   return i > -1 && process.argv[i + 1] ? Number(process.argv[i + 1]) : fallback;
@@ -25,6 +23,9 @@ Math.random = () => {
   t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 };
+// Imported only now: model.js takes its random source when it loads (const
+// rnd = Math.random), and a static import is hoisted above the seeding.
+const M = await import("../src/model.js");
 
 const n12 = (v) => ((v % 12) + 12) % 12;
 const pct = (a, b) => (b ? ((100 * a) / b).toFixed(1) + "%" : "-");
@@ -258,3 +259,149 @@ console.log(`  long notes (≥ a beat) off-chord  ${pct(S.melLongNonChord, S.mel
 console.log(`  on-beat notes that are chord tones ${pct(S.melStrongChordTone, S.melStrong)}`);
 console.log(`  leaps                            median ${quant(S.melLeaps, 0.5)}  p90 ${quant(S.melLeaps, 0.9)}  > octave: ${pct(S.melLeaps.filter((x) => x > 12).length, S.melLeaps.length)}`);
 console.log(`  phrase range                     median ${quant(S.melRange, 0.5)}  p90 ${quant(S.melRange, 0.9)} st`);
+
+// --- The deal: what one press of the dice hands you, whole. ---------------
+// Everything above reads scene A's notes. This reads the roll as a user
+// meets it: how many scenes arrive and whether any of them moves on by
+// itself, how far B travels from A, whether the bass plays with the kick,
+// where the melody leaves its phrase, and how wide the space of songs is.
+// Same seed, so these are the same songs.
+seed = arg("seed", 7) >>> 0;
+const D = {
+  songs: 0,
+  scenes: {},
+  followSongs: 0,
+  oneshotSongs: 0,
+  strayTags: 0,
+  pairs: 0,
+  bSameLine: 0,
+  bSameSet: 0,
+  bSameOpen: 0,
+  bShared: [],
+  bassOnsets: 0,
+  bassOnKick: 0,
+  kicks: 0,
+  kicksWithBass: 0,
+  lockByGroove: {},
+  endings: 0,
+  endChordTone: 0,
+  endHome: 0,
+  endStable: 0,
+  melPerBar: {},
+  melPerSec: [],
+  progressions: new Map(),
+  combos: new Set(),
+  axes: { groove: {}, scale: {}, comp: {}, melodyChar: {}, polymeter: {}, ride: {} },
+  compHire: {},
+  melHire: {},
+};
+const bump = (o, k) => (o[k] = (o[k] || 0) + 1);
+const entropy = (o) => {
+  const n = Object.values(o).reduce((a, b) => a + b, 0);
+  return -Object.values(o).reduce((h, c) => h + (c / n) * Math.log2(c / n), 0);
+};
+const chordKey = (e) => {
+  const ch = M.harmonyChord(e);
+  return `${ch.roman}`;
+};
+for (let i = 0; i < N; i++) {
+  const song = M.makeSong();
+  M.setScaleContext(song.key, song.scale);
+  D.songs += 1;
+  bump(D.scenes, song.scenes.length);
+  const launches = song.scenes.flatMap((sc) => Object.values(sc.launch || {}));
+  if (launches.some((l) => l.follow && l.follow !== "none")) D.followSongs += 1;
+  if (launches.some((l) => l.mode === "oneshot")) D.oneshotSongs += 1;
+  if (song.scenes.some((sc) => !String(sc.tag).startsWith("✨"))) D.strayTags += 1;
+  const v = song.vibe;
+  const A = song.scenes[0];
+  const line = A.harmony.map(chordKey).join(" ");
+  D.progressions.set(line, (D.progressions.get(line) || 0) + 1);
+  for (const k of Object.keys(D.axes)) bump(D.axes[k], String((k === "scale" ? song.scale : v[k]) ?? "-"));
+  D.combos.add([v.groove, song.scale, v.comp, v.melodyChar, line].join("|"));
+  bump(D.compHire, `${v.comp}+${v.hires?.harmony || "any"}`);
+  bump(D.melHire, `${v.melodyChar}+${v.hires?.melody || "any"}`);
+  if (song.scenes.length > 1) {
+    const B = song.scenes[1];
+    D.pairs += 1;
+    const la = A.harmony.map(chordKey);
+    const lb = B.harmony.map(chordKey);
+    if (la.join() === lb.join()) D.bSameLine += 1;
+    const sa = new Set(la);
+    const sb = new Set(lb);
+    if (sa.size === sb.size && [...sa].every((x) => sb.has(x))) D.bSameSet += 1;
+    if (la[0] === lb[0]) D.bSameOpen += 1;
+    D.bShared.push([...sb].filter((x) => sa.has(x)).length / sb.size);
+  }
+  // Bass against kick, over A's four bars.
+  const bassSteps = M.stepsFor(A, "bass");
+  const drumSteps = M.stepsFor(A, "drums");
+  const g = (D.lockByGroove[v.groove] ||= { on: 0, n: 0 });
+  for (let s = 0; s < 64; s++) {
+    const kick = A.drums.kick[s % drumSteps] > 0;
+    const bass = M.noteSlot(A.bass[s % bassSteps]).length > 0;
+    if (kick) D.kicks += 1;
+    if (bass) {
+      D.bassOnsets += 1;
+      g.n += 1;
+    }
+    if (kick && bass) {
+      D.bassOnKick += 1;
+      D.kicksWithBass += 1;
+      g.on += 1;
+    }
+  }
+  // The melody's last note before the loop comes round (A, four-bar lanes).
+  const melSteps = M.stepsFor(A, "melody");
+  if (melSteps === 64) {
+    let last = null;
+    let lastStep = -1;
+    let count = 0;
+    for (let s = 0; s < 64; s++) {
+      for (const n of M.noteSlot(A.melody[s])) {
+        last = n;
+        lastStep = s;
+        count += 1;
+      }
+    }
+    if (last) {
+      const bar = Math.floor(lastStep / 16) % A.harmony.length;
+      const ch = M.harmonyChord(A.harmony[bar]);
+      const pc = n12(last.midi);
+      D.endings += 1;
+      if (ch.pcs.map(n12).includes(pc)) D.endChordTone += 1;
+      if (pc === n12(song.key)) D.endHome += 1;
+      // stable: root, third or fifth of the home triad
+      const home = M.harmonyChord(0).pcs.map(n12);
+      if (home.includes(pc)) D.endStable += 1;
+    }
+    (D.melPerBar[v.melodyChar] ||= []).push(count / 4);
+    D.melPerSec.push(count / ((4 * 240) / song.tempo));
+  }
+}
+const top = [...D.progressions.entries()].sort((a, b) => b[1] - a[1]);
+const top10 = top.slice(0, 10).reduce((s, [, c]) => s + c, 0);
+console.log(`\n== the deal: ${D.songs} rolls, whole ==`);
+console.log(`structure`);
+console.log(`  scenes per roll                  ${Object.entries(D.scenes).map(([k, c]) => `${k}: ${pct(c, D.songs)}`).join("  ")}`);
+console.log(`  rolls with a follow action        ${pct(D.followSongs, D.songs)}   with a one-shot ${pct(D.oneshotSongs, D.songs)}`);
+console.log(`  rolls with a scene not tagged ✨  ${pct(D.strayTags, D.songs)}`);
+console.log(`B against A (${D.pairs} rolls with a B)`);
+console.log(`  same four chords, same order      ${pct(D.bSameLine, D.pairs)}`);
+console.log(`  same chords, any order            ${pct(D.bSameSet, D.pairs)}`);
+console.log(`  opens on A's first chord          ${pct(D.bSameOpen, D.pairs)}`);
+console.log(`  B's chords also in A              mean ${(100 * mean(D.bShared)).toFixed(0)}%`);
+console.log(`bass and kick (A)`);
+console.log(`  bass onsets on a kick             ${pct(D.bassOnKick, D.bassOnsets)}   kicks with a bass note ${pct(D.kicksWithBass, D.kicks)}`);
+console.log(`  by groove (onsets on a kick)      ${Object.entries(D.lockByGroove).map(([k, x]) => `${k} ${pct(x.on, x.n)}`).join("  ")}`);
+console.log(`melody phrase (A, four-bar lanes)`);
+console.log(`  last note a tone of its chord     ${pct(D.endChordTone, D.endings)}   the tonic ${pct(D.endHome, D.endings)}   home triad ${pct(D.endStable, D.endings)}`);
+console.log(`  notes per bar                     ${Object.entries(D.melPerBar).map(([k, xs]) => `${k} ${mean(xs).toFixed(1)}`).join("  ")}`);
+console.log(`  notes per second                  median ${quant(D.melPerSec, 0.5).toFixed(1)}  p90 ${quant(D.melPerSec, 0.9).toFixed(1)}`);
+console.log(`possibility space`);
+console.log(`  distinct A progressions           ${top.length} (top 10 carry ${pct(top10, D.songs)})`);
+console.log(`  most dealt                        ${top.slice(0, 5).map(([l, c]) => `${l} ${pct(c, D.songs)}`).join(" · ")}`);
+console.log(`  distinct groove/mode/comp/singer/progression  ${D.combos.size} in ${D.songs}`);
+console.log(`  entropy (bits)                    ${Object.entries(D.axes).map(([k, o]) => `${k} ${entropy(o).toFixed(2)}`).join("  ")}`);
+console.log(`  comp + harmony hire               ${Object.entries(D.compHire).sort((a, b) => b[1] - a[1]).map(([k, c]) => `${k} ${pct(c, D.songs)}`).join("  ")}`);
+console.log(`  singer + melody hire              ${Object.entries(D.melHire).sort((a, b) => b[1] - a[1]).map(([k, c]) => `${k} ${pct(c, D.songs)}`).join("  ")}`);

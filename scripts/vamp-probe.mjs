@@ -41,30 +41,22 @@ const ghosty = vamps.filter((s) =>
 check(`vamp rolls carry ghost snares (${ghosty}/${vamps.length}, expect most)`,
   ghosty / vamps.length > 0.6);
 
-// The arc (DESIGN-VILLAIN V-C): every vamp roll is a four-scene form —
-// A, drumless interlude, variation, one-shot pedal outro — chained by
-// the same follow actions a long-press could set.
+// The deal (D34): every roll of every archetype is A and B, both loops.
+// The vamp's four-scene arc (DESIGN-VILLAIN V-C) is gone from the dice —
+// one roll in eight used to fill the grid with NEXT badges and walk off on
+// its own — and no roll deals a follow action or a one-shot.
 const TRACKS4 = ["harmony", "drums", "bass", "melody"];
-check(`vamp deals the arc (${vamps.filter((s) => s.scenes.length === 4).length}/${vamps.length} rolls carry 4 scenes)`,
-  vamps.every((s) => s.scenes.length === 4));
-check("arc interlude and outro drop the drums",
-  vamps.every((s) => [1, 3].every((i) =>
-    Object.values(s.scenes[i].drums).every((lane) => lane.every((v) => !v)))));
-check("arc outro holds one pedal chord and plays once",
-  vamps.every((s) => {
-    const h = s.scenes[3].harmony;
-    const first = JSON.stringify(h[0]);
-    return h.every((e) => JSON.stringify(e) === first) &&
-      TRACKS4.every((t) => s.scenes[3].launch[t].mode === "oneshot" && s.scenes[3].launch[t].follow === "none");
-  }));
-check("arc scenes chain by follow actions (next, 8 bars each)",
-  vamps.every((s) => s.scenes.slice(0, 3).every((sc) =>
-    TRACKS4.every((t) => sc.launch[t].follow === "next" && sc.launch[t].followBars === 8))));
+check(`every roll deals A and B (${rolls.filter((s) => s.scenes.length === 2).length}/${N})`,
+  rolls.every((s) => s.scenes.length === 2));
+check("no roll deals a follow action or a one-shot",
+  rolls.every((s) => s.scenes.every((sc) =>
+    TRACKS4.every((t) => sc.launch[t].follow === "none" && sc.launch[t].mode === "loop"))));
+check("dealt scenes wear the dice's own tags (✨, ✨b)",
+  rolls.every((s) => s.scenes[0].tag === "✨" && s.scenes[1].tag === "✨b"));
 check("vamp rolls carry the drag kick (15-40 ms)",
   vamps.every((s) => s.laneNudge?.kick >= 15 && s.laneNudge?.kick <= 40));
-check("everyone else keeps flat time and 1-2 scenes",
-  rolls.filter((s) => s.vibe.groove !== "vamp").every((s) =>
-    !Object.keys(s.laneNudge || {}).length && s.scenes.length <= 2));
+check("everyone else keeps flat time",
+  rolls.filter((s) => s.vibe.groove !== "vamp").every((s) => !Object.keys(s.laneNudge || {}).length));
 
 // D27 receipts: the deal carries changes. Roots compare as key-relative
 // pcs so degree entries and dressed pcs entries count as the same chord.
@@ -74,15 +66,14 @@ const rootsOf = (s, sc) => sc.harmony.map((e) => (typeof e === "number"
 const distinct = rolls.map((s) => new Set(rootsOf(s, s.scenes[0])).size);
 const three = distinct.filter((n) => n >= 3).length;
 check(`dice rolls mostly deal 3+ chords (${three}/${N} A scenes)`, three / N >= 0.7);
-const twoScene = rolls.filter((s) => s.scenes.length === 2);
-const moved = twoScene.filter((s) =>
+const moved = rolls.filter((s) =>
   rootsOf(s, s.scenes[1]).join() !== rootsOf(s, s.scenes[0]).join()).length;
-check(`B scenes move harmonically (${moved}/${twoScene.length})`,
-  twoScene.length === 0 || moved / twoScene.length >= 0.9);
+check(`B scenes move harmonically (${moved}/${N})`, moved / N >= 0.9);
 const vMoved = vamps.filter((s) =>
-  rootsOf(s, s.scenes[2]).join() !== rootsOf(s, s.scenes[0]).join()).length;
-check(`vamp returns come back changed (${vMoved}/${vamps.length})`,
-  vMoved / vamps.length >= 0.85);
+  rootsOf(s, s.scenes[1]).join() !== rootsOf(s, s.scenes[0]).join()).length;
+check(`vamp B sides move too (${vMoved}/${vamps.length})`, vMoved / vamps.length >= 0.85);
+const departs = rolls.filter((s) => rootsOf(s, s.scenes[1])[0] !== rootsOf(s, s.scenes[0])[0]).length;
+check(`B sides open away from A's first chord (${departs}/${N})`, departs / N >= 0.8);
 
 // no-regression: every roll of every archetype is normalizeScene-clean
 // and sits inside its own tempo band.

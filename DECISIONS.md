@@ -833,3 +833,114 @@ notes, and the answer was specific:
 
 What the dice still does on purpose: borrowed visitors (1.6% of slots),
 stacked voicings on 28% of slots, every groove's rhythms and characters.
+
+### D33 — The morph pad is one continuous sound, and every write lands when the hand moves
+
+The builder, same session: "something wonky about the tracks' X/Y sound
+pads." Several separate faults, each measured on the live app or an
+offline render:
+
+- **Dropouts.** A note sounded only on the two heaviest corners, and a
+  corner that left that pair was muted at once, voices and all: dragging
+  across the pad mid-chord cut a held pad from -29 to -38 dB (the halo
+  and root hint alone) until the next attack, and where the second and
+  third corners swapped rank the next note jumped timbre. The mix is now
+  the bilinear weights with a floor of 0.18 taken off and renormalized,
+  so a corner's gain reaches zero smoothly (the pad still averages 2.05
+  sounding corners over its area; all four only in its central 4%).
+  While a track's Sound sheet is open, or a recorded x/y ride is
+  playing, every note strikes all four corners, because a voice exists
+  only on the layers it was struck on and a corner nobody struck has
+  nothing to fade up. A held chord dragged from pad to ambient now morphs
+  at a steady level instead of fading from -30 to -41 dB. It costs that
+  track's voices at up to 2x for as long as the sheet is open: +17% render
+  time on desktop Chrome (113 -> 132 ms/s, alternating windows on one
+  song).
+- **Rides went silent.** Note triggers picked their corners from the
+  base patch while a ride carried the mix somewhere else, so a ride away
+  from the base corner struck only corners it had just muted: -41 dB,
+  against -27 to -36 for the same corner held still. Triggers now read
+  the ridden point, and the drum sample crossfade follows it too.
+- **A quarter second late.** Tone's `.value =` writes land at `now()`,
+  which is the context time PLUS the 0.25 s lookAhead, so every knob,
+  fader, pan, pad, chorus, color and mute write sounded a quarter second
+  after the hand moved. They ramp from the immediate clock now. Mute was
+  Tone.Channel's hard step to -Infinity written the same way, so it
+  landed late and could click, and a fader write on a muted strip
+  overwrote the -Infinity and un-muted it with the button still lit. One
+  writer (fader, or -120 dB while muted or soloed out), ramped over 12 ms.
+- **Level holes.** A 5x5 offline map of each pad against calibrate's
+  reference scene: the bass interior ran up to 3.5 dB over its corners,
+  because one shared drive ran at the blended amount and deep's amount-0
+  stage is x/3 while pluck's is +15 dB of small-signal gain. The
+  midpoint drove deep's sine through +10 dB (and every pointermove rebuilt
+  the 1024-point curve). Each bass corner now drives its own voices
+  through a fixed curve with the morph weight after it. The harmony
+  interior ran 2 dB hot between ambient (trim -6) and stab (+3): a
+  straight average hands the mix a trim for a sound it isn't made of, so
+  each trim is weighted by the amplitude its corner brings. Spreads: bass
+  4.4 -> 1.9 dB (its corners span 1.4), harmony 2.5 -> 1.5, melody
+  2.2 -> 1.8. Calibrate's corner tables are unchanged, as they must be:
+  at a corner every change reduces to what was there.
+- **The octave-1 boost** (up to 2.5x on A1-B1 bass notes) was keyed on
+  the dominant corner, so it jumped by 8 dB where the diagonal crossed
+  into sub. Each corner applies its own now.
+
+### D34 — The dice deals A and B, both loops, with parts that can play what they're handed
+
+The builder's verdict (2026-09-28): "sometimes... a bunch of the clips
+have the next option selected... it's like a specific thing that's
+happening", and deeply audit the whole roll for the widest space of
+music that still hangs together. `npm run probe:music` gained a "deal"
+section that reads the roll as a user meets it (4000 rolls, seed 7,
+before -> after):
+
+- **The arc is off the dice.** The vamp (one roll in eight) dealt a
+  four-scene record, chained by follow actions (DESIGN-VILLAIN V-C, which
+  the builder had shipped always-on to judge by ear): A, a drumless
+  interlude, a variation and a one-shot pedal outro. That meant NEXT
+  badges on twelve clips, 1X on four, scene tags from a global counter
+  (C, E, A2...), and a song that walked off on its own and stopped after
+  32 bars, which breaks use case 2, where the loop is a backing track.
+  Every roll now deals A and B, both loops, no follow actions (11.3% ->
+  0% of rolls). Form stays one long-press away on every clip. The B side
+  used to arrive on 60% of rolls; it is every roll now, so the grid always
+  has the same shape. A hand-set follow badge now sits in its own strip
+  under the chord names instead of covering the fourth one.
+- **B goes somewhere.** A line that opens on A's opening root (i9 and i
+  are the same arrival) is rotated to open on its first other chord: the
+  same loop from another bar, so its old opener now closes it and leads
+  home into A. B opened where A did on 47.2% of rolls; now 1.7%. Identical
+  B lines 17.4% -> 0% (all of those were the arc's interlude).
+- **The energy moves together.** B coin-flipped thin or busy drums while
+  its bass re-hired a player at random, so a breakdown could carry a busier
+  bass than A. The bass player is now hired once per song, like the
+  singer, and B moves it with the drums: toward the drone on a breakdown,
+  toward the bounce on a lift.
+- **The bass hears the kick.** The dice wrote the bass without looking
+  at the drums. A new locked player (backbeat, halftime, twostep,
+  breaks, minimal, vamp) plays on every kick of the bar with the chord's
+  root on the downbeat. Bass notes on a kick went from 38.9% to 47.8%
+  across all rolls (halftime 45.9 -> 63.3%, backbeat 51.8 -> 61.9%).
+  Fourfloor's offbeat bass keeps out of the kick's way on purpose.
+- **Parts get sounds that can play them.** A held comp on the stab
+  corner was one 0.2 s blip per bar (3.7% of rolls hired it, and 16.9%
+  left the corner to a coin); a sparse singer on pluck was three or four
+  0.1 s ticks over four bars (4.7% + 10.5%). The sustain comp now always
+  hires pad, keys or ambient, and the sparse singer lead, bell or synth,
+  from the groove's own taste where it has one (0% of either now).
+- **Polymeter is the wildcard's alone** (15% -> 6% of rolls). A 12-step
+  melody never lines up with the bar, and a 12-step bass pedals under
+  every chord: fine as the odd corner, strange as a cold open.
+
+Unchanged on purpose: 1708 distinct A progressions in 4000 rolls (1718
+before), 3586 distinct groove/mode/comp/singer/progression combinations
+(3580). The possibility space kept its size; what left it were the duds.
+Named, not built: a two-chord turnaround in bar 4 (the engine plays
+`harmonyRate: 2`, but the bass and melody generators assume one chord a
+bar and would need to learn it first).
+
+The probe's "seeded" runs never were: model.js takes `const rnd =
+Math.random` when it loads, and a static import runs before the probe
+seeds, so every run differed by about a percent. It imports after seeding
+now, and two runs match exactly.

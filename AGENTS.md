@@ -159,12 +159,17 @@ the halo and root hint), writing Tone.Envelope's exact automation; there are no 
 filter is a `Tone.BiquadFilter`; chorus/phaser/tremolo/auto-filter/echo/drive are
 `NativeFx` classes with Tone's parameter math. Harmony = saw pad (a 0.05 Hz breath on its
 cutoff: the param holds the center, an oscillator swings it, `setPadSweep`) + mono halo + a
-highpassed root hint; bass and lead are voice layers behind drive/filters; the kit is
+highpassed root hint; bass and lead are voice layers behind shared filters (each bass
+corner drives its own voices before its morph weight, D33); the kit is
 MembraneSynth kick + filtered-noise snare/hat/clap, out of the graph while the sample bank
 plays. Each track's device is a
 **morph**: four synth layers (one per preset corner, oscillator + envelope fixed) crossfaded
-by a patch `{x, y}` with equal-power bilinear weights, shared tone controls blended; drums
-morph by blending kit scalars directly. Plus one **color** insert per track
+by a patch `{x, y}`: bilinear weights with a 0.18 floor taken off and renormalized
+(`morphGains`, D33), so every point is one continuous sound; shared tone controls blended,
+the post-comp trim blended by the loudness each corner brings (`blendTrim`). Notes strike
+only the corners carrying weight, except while that track's Sound sheet is open
+(`audio.setMorphLive`) or a recorded x/y ride plays, when they strike all four so a drag
+fades a held note in rather than out. Drums morph by blending kit scalars directly. Plus one **color** insert per track
 (crush/phase/trem/wob; drums allow crush only, and crush runs at half depth on the melodic
 tracks) with amount + motion, motion rates tempo-synced. Preset *names*
 are the corners, and the old preset API snaps to them and reads back the dominant one. The
@@ -269,7 +274,10 @@ velocity lane; vertical mixer strips (fader, pan, reverb + echo sends, live mete
 hold, preset pickers); loudness-matched device presets per track; randomized-but-balanced
 cold open (key, scale, tempo, presets, magic scene — since D24 the vibe also rolls a comp
 gesture for the pad, groove-weighted sound hires per melodic track, a melody character,
-baked send rides, and a touch of humanize) plus a 🎲 button that rerolls it all;
+baked send rides, and a touch of humanize; since D34 every roll is two looping scenes, A and
+a B that departs from A's opening chord and moves its drums and bass player together, with
+hires that can play the part and a bass that can lock to the kick) plus a 🎲 button that
+rerolls it all;
 the chop deck (melody's second source: load any sample, sliced at hits or grid,
 piano-roll rows become slices, upper rows replay at double speed); stored chord
 extensions (arm ● and release the bloom on a pad — diatonic 7ths keep their function
@@ -357,7 +365,9 @@ Plus tier-2 performance work listed in `ROADMAP.md` (diff-based cell repaints, p
   wall second and the slowest quantum for a seeded cold open and dice rolls (`--rolls`,
   `--listen`, `--seed`). **`npm run probe:music`** rolls thousands of songs through model.js
   (no browser) and measures the notes: diminished chords per mode, voicing span and top-line
-  motion, bass register, melody register, and minor-second rubs against the sounding pad.
+  motion, bass register, melody register, and minor-second rubs against the sounding pad; its
+  "deal" section reads the whole roll (scene structure and follow actions, B against A, bass
+  against kick, phrase endings, sound/part pairings, and the size of the possibility space).
   Both print evidence and assert nothing — read them before and after, like calibrate.
 - **All three harnesses boot through `scripts/preview.mjs`** — don't re-copy `startPreview`,
   which is how the same teardown bug came to live in three files at once. `npm run preview`

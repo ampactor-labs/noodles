@@ -12,9 +12,22 @@ headless gates (`npm run smoke`, `npm run calibrate`).
 
 The agreed list is clear: everything on it shipped. Named follow-ups, not
 yet agreed: all-scenes sheet music, mixer ∿ badges for send-ride lanes
-(more useful now that the dice bakes rides), MIDI export, rolled form
-(dice sets follow-actions so A→B→A plays itself — deferred because it
-changes session-launch defaults, the builder's call to make).
+(more useful now that the dice bakes rides), MIDI export, a bar-4
+turnaround in the dice (two chords in the last bar; the bass and melody
+generators must learn `harmonyRate: 2` first), and rolled form as an
+opt-in gesture rather than a default (D34 took the vamp's always-on arc
+off the dice after the builder lived with it: NEXT badges on twelve clips
+read as a glitch, and a backing track must not walk off on its own).
+
+The pad and the dice were audited 2026-09-28 (D33, D34). The morph pad is
+one continuous sound: no dropouts mid-drag (a held chord used to fall from
+-29 to -38 dB), no silent rides, no quarter-second lag on any knob, fader,
+pad or mute, and its interior sits inside its corners' levels (bass 4.4 ->
+1.9 dB spread). Every roll deals A and B as loops (the vamp's arc dealt
+follow actions on 11% of rolls), B departs from A's opening chord (47% ->
+1.7% of rolls opened on it), the energy moves drums and bass together, a
+locked bass plays with the kick, and no part is handed a sound that can't
+play it.
 
 The dice learned to deal music 2026-09-24 (D32), measured by `npm run
 probe:music` over 4000 rolls: per-mode progression decks (26% of songs
@@ -63,7 +76,7 @@ The roll learned gesture 2026-07-31 (D24): a comp pattern per vibe
 (sustain/tresillo/skank/pulse/arp, groove-weighted, played per-16th by
 compHitAt with the bar voiced once at step 0), sound hires for the
 melodic tracks (60% pull the morph point into a groove-weighted corner;
-rhythmic comps always hire a fast-attack pad), melody characters
+rhythmic comps always hire a fast-attack pad, and since D34 the held comp a sustaining one), melody characters
 (hook/runner/sparse/arc, carried by the vibe so ✨b re-sings the same
 voice), baked send rides on 30% of rolls (throw/bloom/drumlift in the
 motion lanes), rolled humanize from the groove's drift band, and two new
@@ -211,8 +224,9 @@ Done: convolution reverb → Freeverb; pad 24-voice fatsaw → 4-voice single sa
 hat → filtered noise burst; `latencyHint: "playback"` with `lookAhead 0.25` (scheduling
 survives main-thread jank); pinch zoom scales a CSS transform and commits ONE rebuild on
 release (no per-frame rebuild at all); meters transform-only and
-only while the mixer is open; morph voices capped at the top-2 corners (2x a single synth,
-never 4x); colors pay-per-roll; sample drums cost buffer playback instead of synthesis;
+only while the mixer is open; morph voices only on the corners carrying weight (2.05 on
+average over the pad), all four only while that track's Sound sheet is open or a ride plays
+(D33); colors pay-per-roll; sample drums cost buffer playback instead of synthesis;
 grid class sweeps dirty-checked per 16th; **idle park**: the context suspends ~6 s after
 stop (past the longest tails) and wakes on any trigger, so a stopped app costs zero audio
 CPU; **dry park**: with every send off the reverb and
