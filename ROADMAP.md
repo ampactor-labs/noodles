@@ -162,7 +162,7 @@ Load a sample, sliced at hits or on the grid, rows as slices, the upper run
 replaying at double speed, normalized once at load, session-scoped like the
 user drum WAVs, identical offline. Alongside it: stored extensions (the bloom's
 7/9/sus4/sus2 land in clips when armed, diatonic ones keeping their function
-color), and the HUMAN slider, up to ±8 ms of per-hit drift through the same
+color), and the FEEL slider, up to ±8 ms of per-hit drift through the same
 swing path live and export.
 
 Shipped since the last revision: the playable circle of fifths as the key selector

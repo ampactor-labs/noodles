@@ -273,7 +273,7 @@ baked send rides, and a touch of humanize) plus a 🎲 button that rerolls it al
 the chop deck (melody's second source: load any sample, sliced at hits or grid,
 piano-roll rows become slices, upper rows replay at double speed); stored chord
 extensions (arm ● and release the bloom on a pad — diatonic 7ths keep their function
-color, only visitors go violet); a HUMAN slider (per-hit timing drift, live = export);
+color, only visitors go violet); a FEEL slider (per-hit timing drift, live = export);
 roll staffs over the note editors (treble for melody, drawn F clef for bass,
 noteheads on the step grid, rows spelled per key and tinted by degree hue); the
 motion-lane picker on every velocity lane (draw captured rides per step, bar chips,
