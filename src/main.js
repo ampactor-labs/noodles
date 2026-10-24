@@ -569,7 +569,7 @@ function renderFooter() {
       humanVal.textContent = Math.round(song.humanize * 100) + "%";
     });
     const human = el("div", { class: "swingctl" }, [
-      el("span", { class: "swlabel", text: "HUMAN" }),
+      el("span", { class: "swlabel", text: "FEEL" }),
       humanSlider,
       humanVal,
     ]);
@@ -655,7 +655,7 @@ function openAboutSheet() {
     label("sound"),
     k("track name", "opens its sound: a morph pad with four sounds in the corners and everything between them yours to find."),
     k("color", "one per track (crush, phase, trem, wob) with its own amount and motion."),
-    k("pocket", "swings one track against the global GROOVE. HUMAN drifts every hit a few milliseconds, like hands would."),
+    k("pocket", "swings one track against the global GROOVE. FEEL drifts every hit a few milliseconds, like hands would."),
     k("drums", "two banks: sampled kits and a synth kit. Any drum can pin a one-shot, load a WAV, or \ud83c\udf99 record your own mouth."),
     k("melody", "two sources: the synth, or chops. Load any sample and it lands sliced across the rows, the upper rows at double speed."),
 

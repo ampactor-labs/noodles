@@ -1105,7 +1105,7 @@ function rollVibe() {
     polymeter: wildcard || rnd() < 0.1 ? (rnd() < 0.5 ? "bass" : "melody") : null,
     bScene: rnd() < 0.6,
     // The hand: half of rolls take a little of the groove's timing drift
-    // (the HUMAN slider's own scale — dusty grooves drift more, machine
+    // (the FEEL slider's own scale — dusty grooves drift more, machine
     // grooves stay near the grid), the rest sit tight.
     humanize: rnd() < 0.5 ? Math.round((g.human[0] + rnd() * (g.human[1] - g.human[0])) * 100) / 100 : 0,
     // The performance: some rolls bake a send ride into the scene's motion
@@ -1900,7 +1900,7 @@ export function makeSong() {
     mutes: {},
     loop: { on: false, start: 0, len: 4 },
     swing: vibe.swing, // global groove, rolled inside the archetype's pocket
-    humanize: vibe.humanize || 0, // per-hit timing drift, 0..1 — the HUMAN slider starts where the roll put it
+    humanize: vibe.humanize || 0, // per-hit timing drift, 0..1 — the FEEL slider starts where the roll put it
   };
 }
 
